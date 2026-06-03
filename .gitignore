@@ -1,0 +1,24 @@
+# Secrets
+.env
+*.env
+!.env.example
+
+# .NET
+bin/
+obj/
+*.user
+
+# Node / Vite
+node_modules/
+client/dist/
+dist/
+
+# SQLite local data + uploaded files
+*.db
+*.db-shm
+*.db-wal
+data/
+
+# IDE
+.vs/
+.idea/
