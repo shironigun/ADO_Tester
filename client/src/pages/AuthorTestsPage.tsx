@@ -636,15 +636,15 @@ function PushResults({ session, context, adoOrg, adoProject }: {
     const suiteId = context?.suite.id ?? ''
     const suiteName = context?.suite.name ?? ''
     const header = ['SessionId','StoryId','StoryTitle','TestCaseId','TestCaseTitle','PlanId','PlanName','SuiteId','SuiteName','AdoUrl']
-    const escape = (v: string | number | undefined) => {
+    const escape = (v: unknown) => {
       const s = String(v ?? '')
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
     }
-    const rows = pushed.map(d => [
+    const rows = pushed.map(d => ([
       session.id, session.workItemId, session.workItemTitle,
       d.adoTestCaseId, d.title, planId, planName, suiteId, suiteName,
       wiUrl(d.adoTestCaseId!),
-    ].map(escape).join(','))
+    ] as unknown[]).map(escape).join(','))
     const csv = [header.join(','), ...rows].join('\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
