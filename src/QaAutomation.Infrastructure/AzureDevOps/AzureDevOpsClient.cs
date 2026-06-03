@@ -95,6 +95,81 @@ public sealed class AzureDevOpsClient : IAzureDevOpsClient
             .ToList();
     }
 
+    private static readonly string[] ReportFields =
+    [
+        "System.Id", "System.Title", "System.WorkItemType", "System.AssignedTo",
+        "System.State", "System.Description", "System.History", "System.ClosedDate",
+        "Microsoft.VSTS.TCM.ReproSteps", "Microsoft.VSTS.Common.ResolvedReason",
+    ];
+
+    public async Task<IReadOnlyList<ReportTicket>> GetTicketsInRangeAsync(
+        DateTime fromUtc, DateTime toUtc, IReadOnlyList<string> boards, CancellationToken ct = default)
+    {
+        var from = fromUtc.ToString("yyyy-MM-ddTHH:mm:ss") + "Z";
+        var to   = toUtc.ToString("yyyy-MM-ddTHH:mm:ss") + "Z";
+
+        var areaClause = "";
+        if (boards.Count > 0)
+        {
+            var parts = boards.Select(b => $"[System.AreaPath] UNDER '{b.Replace("'", "''")}'");
+            areaClause = " AND (" + string.Join(" OR ", parts) + ")";
+        }
+
+        var wiql = new
+        {
+            query = $"SELECT [System.Id] FROM WorkItems " +
+                    $"WHERE [System.TeamProject] = '{_opts.Project}' " +
+                    $"AND [System.ChangedDate] >= '{from}' " +
+                    $"AND [System.ChangedDate] <= '{to}' " +
+                    $"AND [System.WorkItemType] IN ('User Story','Bug','Task','Issue','Feature') " +
+                    areaClause +
+                    $" ORDER BY [System.ChangedDate] DESC"
+        };
+
+        var url = $"{_opts.BaseUrl}/_apis/wit/wiql?api-version={_opts.ApiVersion}";
+        using var r = await _http.PostAsJsonAsync(url, wiql, ct);
+        await ThrowIfFailed(r, "Report WIQL", ct);
+        using var doc = await r.Content.ReadFromJsonAsync<JsonDocument>(ct)!;
+        var ids = doc!.RootElement.GetProperty("workItems").EnumerateArray()
+            .Select(x => x.GetProperty("id").GetInt32()).ToList();
+        if (ids.Count == 0) return [];
+
+        // Batch in chunks of 200 (ADO limit).
+        var results = new List<ReportTicket>(ids.Count);
+        foreach (var chunk in ids.Chunk(200))
+        {
+            var fields = string.Join(",", ReportFields);
+            var idList = string.Join(",", chunk);
+            var batchUrl = $"{_opts.BaseUrl}/_apis/wit/workitems?ids={idList}&fields={fields}&api-version={_opts.ApiVersion}";
+            using var br = await _http.GetAsync(batchUrl, ct);
+            await ThrowIfFailed(br, "Report batch fetch", ct);
+            using var bdoc = await br.Content.ReadFromJsonAsync<JsonDocument>(ct)!;
+            foreach (var e in bdoc!.RootElement.GetProperty("value").EnumerateArray())
+            {
+                var f = e.GetProperty("fields");
+                var repro = GetStr(f, "Microsoft.VSTS.TCM.ReproSteps");
+                var desc = GetStr(f, "System.Description");
+                var resolved = GetStr(f, "Microsoft.VSTS.Common.ResolvedReason");
+                var history = GetStr(f, "System.History");
+                results.Add(new ReportTicket
+                {
+                    Id = e.GetProperty("id").GetInt32(),
+                    Title = GetStr(f, "System.Title") ?? string.Empty,
+                    WorkItemType = GetStr(f, "System.WorkItemType") ?? string.Empty,
+                    State = GetStr(f, "System.State"),
+                    AssignedTo = GetIdentity(f, "System.AssignedTo"),
+                    // Issue/description: prefer ReproSteps for Bug, else Description.
+                    IssueDescription = !string.IsNullOrWhiteSpace(repro) ? repro : desc,
+                    // Fix: prefer ResolvedReason field, else last History comment.
+                    Fix = !string.IsNullOrWhiteSpace(resolved) ? resolved : history,
+                    ClosedAt = f.TryGetProperty("System.ClosedDate", out var cd) && cd.ValueKind == JsonValueKind.String
+                        && DateTime.TryParse(cd.GetString(), out var dt) ? dt : null,
+                });
+            }
+        }
+        return results;
+    }
+
     public async Task<IReadOnlyList<AdoTestPlan>> GetTestPlansAsync(CancellationToken ct = default)
     {
         var url = $"{_opts.BaseUrl}/_apis/testplan/plans?api-version={_opts.ApiVersion}";

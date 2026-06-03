@@ -15,6 +15,14 @@ public interface IAzureDevOpsClient
     Task<IReadOnlyList<AdoTestSuite>> GetTestSuitesAsync(
         int planId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Tickets in the date range. Includes work items created OR changed-to-closed in the window.
+    /// If <paramref name="boards"/> is non-empty, restricts by AreaPath prefix.
+    /// </summary>
+    Task<IReadOnlyList<ReportTicket>> GetTicketsInRangeAsync(
+        DateTime fromUtc, DateTime toUtc, IReadOnlyList<string> boards,
+        CancellationToken cancellationToken = default);
+
     // ---- Write (Test Plan REST — the ADO MCP gap) ----
 
     /// <summary>Creates a Test Case work item with steps and returns its ID.</summary>
