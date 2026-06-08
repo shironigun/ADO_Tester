@@ -12,6 +12,7 @@ from app.db import Base
 class BugSessionStatus(str, Enum):
     Analyzing = "Analyzing"
     AwaitingActual = "AwaitingActual"
+    Verifying = "Verifying"          # static code-analysis against generated test cases
     Drafting = "Drafting"
     Drafted = "Drafted"
     Pushing = "Pushing"
@@ -47,6 +48,9 @@ class BugSession(Base):
     actual_behavior: Mapped[str | None] = mapped_column("ActualBehavior", String, nullable=True)
     code_context: Mapped[str | None] = mapped_column("CodeContext", String, nullable=True)
     error_message: Mapped[str | None] = mapped_column("ErrorMessage", String, nullable=True)
+    event_log_json: Mapped[str | None] = mapped_column("EventLogJson", String, nullable=True)
+    # Per-test-case static code-verification verdicts as a JSON array.
+    code_verification_json: Mapped[str | None] = mapped_column("CodeVerificationJson", String, nullable=True)
     created_at: Mapped[datetime] = mapped_column("CreatedAt", DateTime, nullable=False)
     updated_at: Mapped[datetime] = mapped_column("UpdatedAt", DateTime, nullable=False)
 

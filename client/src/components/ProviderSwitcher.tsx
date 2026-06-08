@@ -31,7 +31,8 @@ export default function ProviderSwitcher() {
         disabled={saving}
         sx={{
           color: 'inherit',
-          '.MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.5)' },
+          '.MuiOutlinedInput-notchedOutline': { borderColor: 'divider' },
+          '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'text.secondary' },
           '.MuiSvgIcon-root': { color: 'inherit' },
         }}
       >

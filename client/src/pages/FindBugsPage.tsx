@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Alert, Autocomplete, Box, Button, Card, CardContent, CardHeader, Chip, CircularProgress,
-  Collapse, Divider, FormControl, IconButton, InputLabel, List, ListItem, ListItemButton,
-  ListItemText, MenuItem, Select, Snackbar, Stack, Step, StepLabel, Stepper, TextField,
-  Tooltip, Typography,
+  Alert, Autocomplete, Box, Button, Card, CardContent, CardHeader, Checkbox, Chip, CircularProgress,
+  Collapse, FormControl, FormControlLabel, IconButton, InputLabel, List, ListItem, ListItemButton,
+  ListItemText, MenuItem, Select, Snackbar, Stack, TextField,
+  Tooltip, Typography, Divider,
 } from '@mui/material'
 import CheckIcon from '@mui/icons-material/Check'
 import CloseIcon from '@mui/icons-material/Close'
@@ -14,19 +14,39 @@ import SaveIcon from '@mui/icons-material/Save'
 import StopIcon from '@mui/icons-material/Stop'
 import PushPinIcon from '@mui/icons-material/PushPin'
 import BugReportIcon from '@mui/icons-material/BugReport'
+import HistoryIcon from '@mui/icons-material/HistoryOutlined'
 import SearchIcon from '@mui/icons-material/Search'
 import PsychologyIcon from '@mui/icons-material/Psychology'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
+import ChecklistIcon from '@mui/icons-material/ChecklistOutlined'
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlineOutlined'
 import axios from 'axios'
+import PageHeader from '../components/PageHeader'
+import Section from '../components/Section'
+import StatusChip from '../components/StatusChip'
+import StatTile from '../components/StatTile'
+import EmptyState from '../components/EmptyState'
+import AgentPipeline, { type PipelineStep } from '../components/AgentPipeline'
+import AgentConsole from '../components/AgentConsole'
+import { ThinkingShimmer } from '../components/LoadingSkeleton'
+import { Stagger, StaggerItem } from '../motion/primitives'
+import { type ConsoleEvent } from '../hooks/useEventStream'
+
+function parseEventLog(json: string | null | undefined): ConsoleEvent[] {
+  if (!json) return []
+  try { const v = JSON.parse(json); return Array.isArray(v) ? v : [] } catch { return [] }
+}
 
 const PROJECT_ID = 1
 const ADO_ORG = 'YourOrg'
 const ADO_PROJECT = 'Your Project'
 
 type Status =
-  | 'Analyzing' | 'AwaitingActual' | 'Drafting' | 'Drafted'
+  | 'Analyzing' | 'AwaitingActual' | 'Verifying' | 'Drafting' | 'Drafted'
   | 'Pushing' | 'Done' | 'Failed' | 'Cancelled'
+
+interface CodeVerdict { testCase: string; status: 'pass' | 'fail' | 'inconclusive'; evidence: string; reasoning: string }
 
 type DraftStatus = 'Draft' | 'Approved' | 'Rejected' | 'Pushed'
 type Severity = 'Critical' | 'High' | 'Medium' | 'Low'
@@ -55,54 +75,25 @@ interface BugSession {
   actualBehavior: string | null
   codeContext: string | null
   drafts: BugDraft[]
+  eventLogJson?: string | null
+  codeVerificationJson?: string | null
 }
 
-const statusColors: Record<Status, 'default' | 'warning' | 'success' | 'error' | 'info'> = {
-  Analyzing: 'warning', AwaitingActual: 'info', Drafting: 'warning', Drafted: 'info',
-  Pushing: 'warning', Done: 'success', Failed: 'error', Cancelled: 'default',
-}
-const draftColors: Record<DraftStatus, 'default' | 'warning' | 'success' | 'error'> = {
-  Draft: 'default', Approved: 'success', Pushed: 'success', Rejected: 'error',
-}
-const sevColors: Record<Severity, 'default' | 'warning' | 'success' | 'error' | 'info'> = {
-  Critical: 'error', High: 'warning', Medium: 'info', Low: 'default',
-}
-
-const PIPELINE_STEPS = [
+const PIPELINE_STEPS: PipelineStep[] = [
   { key: 'fetch',    label: 'Fetch ticket',  icon: <SearchIcon /> },
   { key: 'analyst',  label: 'Analyst',       icon: <PsychologyIcon /> },
-  { key: 'actual',   label: 'Actual behavior', icon: <VisibilityIcon /> },
+  { key: 'verify',   label: 'Code Verify',   icon: <VisibilityIcon /> },
   { key: 'bug',      label: 'Bug Writer',    icon: <BugReportIcon /> },
 ]
 
 function activeStepIndex(s: Status, activity: string | null): number {
   const a = (activity ?? '').toLowerCase()
   if (s === 'Done' || s === 'Drafted' || s === 'Pushing') return PIPELINE_STEPS.length
-  if (s === 'AwaitingActual') return 2
+  if (s === 'AwaitingActual' || s === 'Verifying') return 2
   if (s === 'Drafting' || a.includes('bug writer')) return 3
   if (a.includes('analyst')) return 1
   if (a.includes('fetch') || a.includes('ticket')) return 0
   return 0
-}
-
-function PipelineIcon({ active, completed, running, failed, icon }: {
-  active: boolean; completed: boolean; running: boolean; failed: boolean; icon: React.ReactNode
-}) {
-  const color = failed ? 'error.main' : completed ? 'success.main' : active ? 'primary.main' : 'text.disabled'
-  const bg    = failed ? 'error.lighter' : completed ? 'success.lighter' : active ? 'primary.lighter' : 'transparent'
-  return (
-    <Box sx={{
-      position: 'relative', width: 44, height: 44, borderRadius: '50%',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      bgcolor: bg, border: '2px solid', borderColor: color, color, transition: 'all 200ms',
-    }}>
-      {running && (
-        <CircularProgress size={48} thickness={3}
-          sx={{ position: 'absolute', top: -4, left: -4, color: 'primary.main' }} />
-      )}
-      {completed ? <CheckIcon /> : icon}
-    </Box>
-  )
 }
 
 function axiosMessage(e: unknown): string {
@@ -127,6 +118,11 @@ export default function FindBugsPage() {
   const [actualText, setActualText] = useState('')
   const [codeText, setCodeText] = useState('')
   const [pushing, setPushing] = useState(false)
+  // Code-analysis controls
+  const [verifyCode, setVerifyCode] = useState(true)
+  const [prIdsText, setPrIdsText] = useState('')
+  const [commitIdsText, setCommitIdsText] = useState('')
+  const [linkedRefs, setLinkedRefs] = useState<{ pullRequestIds: string[]; commitShas: string[] }>({ pullRequestIds: [], commitShas: [] })
 
   // ── work item search ────────────────────────────────────────────────────
   useEffect(() => {
@@ -159,12 +155,12 @@ export default function FindBugsPage() {
       setActive(data)
       setActualText(data.actualBehavior ?? '')
       setCodeText(data.codeContext ?? '')
-      if (['Analyzing', 'Drafting', 'Pushing'].includes(data.status)) {
+      if (['Analyzing', 'Verifying', 'Drafting', 'Pushing'].includes(data.status)) {
         pollRef.current = setInterval(async () => {
           try {
             const { data: d } = await axios.get<BugSession>(`/api/find-bugs/sessions/detail/${id}`)
             setActive(d)
-            if (!['Analyzing', 'Drafting', 'Pushing'].includes(d.status)) {
+            if (!['Analyzing', 'Verifying', 'Drafting', 'Pushing'].includes(d.status)) {
               stopPolling(); loadSessions()
             }
           } catch { /* swallow */ }
@@ -174,6 +170,17 @@ export default function FindBugsPage() {
   }, [loadSessions])
 
   useEffect(() => () => stopPolling(), [])
+
+  // Prefill linked PRs/commits for the active story (auto-fetched from ADO).
+  const activeId = active?.id
+  useEffect(() => {
+    if (!activeId) return
+    let cancelled = false
+    axios.get<{ pullRequestIds: string[]; commitShas: string[] }>(`/api/find-bugs/sessions/${activeId}/linked-refs`)
+      .then(r => { if (!cancelled) setLinkedRefs(r.data) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [activeId])
 
   async function start() {
     if (!selectedWi) return
@@ -188,10 +195,17 @@ export default function FindBugsPage() {
   }
 
   async function runBugWriter() {
-    if (!active || !actualText.trim()) return
+    if (!active) return
+    if (!verifyCode && !actualText.trim()) return
+    const splitIds = (t: string) => t.split(/[\s,]+/).map(x => x.trim()).filter(Boolean)
     try {
-      await axios.post(`/api/find-bugs/sessions/${active.id}/run`,
-        { actualBehavior: actualText, codeContext: codeText || null })
+      await axios.post(`/api/find-bugs/sessions/${active.id}/run`, {
+        actualBehavior: actualText,
+        codeContext: codeText || null,
+        verifyCode,
+        prIds: splitIds(prIdsText),
+        commitIds: splitIds(commitIdsText),
+      })
       openSession(active.id)
     } catch (e) { setActionError(axiosMessage(e)) }
   }
@@ -235,69 +249,88 @@ export default function FindBugsPage() {
 
   return (
     <Box>
-      <Typography variant="h5" gutterBottom>Find Bugs</Typography>
+      <PageHeader
+        title="Find Bugs"
+        subtitle="Analyst extracts expected behavior; paste the observed actual behavior and Bug Writer drafts bug work items for the gaps."
+      />
+
+      <Stagger>
+        <Box sx={{ display: 'grid', gap: 2, mb: 3, gridTemplateColumns: { xs: '1fr 1fr', sm: 'repeat(3, 220px)' } }}>
+          <StaggerItem>
+            <StatTile icon={<BugReportIcon />} label="Sessions" value={sessions.length} color="primary.main" />
+          </StaggerItem>
+          <StaggerItem>
+            <StatTile icon={<ChecklistIcon />} label="Drafted" color="success.main"
+              value={sessions.filter(s => s.status === 'Drafted' || s.status === 'Done').length} />
+          </StaggerItem>
+          <StaggerItem>
+            <StatTile icon={<ErrorOutlineIcon />} label="Failed" color="error.main"
+              value={sessions.filter(s => s.status === 'Failed').length} />
+          </StaggerItem>
+        </Box>
+      </Stagger>
 
       <Stack direction={{ xs: 'column', lg: 'row' }} spacing={3} sx={{ alignItems: 'flex-start' }}>
 
         {/* Left: new session + history */}
         <Box sx={{ minWidth: 320, maxWidth: 380, width: '100%' }}>
-          <Card variant="outlined" sx={{ mb: 2 }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>New bug session</Typography>
-              <Stack spacing={2}>
-                <Autocomplete
-                  options={wiOptions}
-                  filterOptions={x => x}
-                  getOptionLabel={o => `#${o.id} — ${o.title}`}
-                  isOptionEqualToValue={(a, b) => a.id === b.id}
-                  onInputChange={(_, v) => setWiQuery(v)}
-                  onChange={(_, v) => setSelectedWi(v)}
-                  renderInput={p => <TextField {...p} label="Search work item" size="small" />}
-                />
-                <Button variant="contained" onClick={start} disabled={!selectedWi || starting}>
-                  {starting ? <CircularProgress size={18} sx={{ color: 'white' }} /> : 'Run Analyst'}
-                </Button>
-                <Alert severity="info" sx={{ fontSize: '0.8rem' }}>
-                  Analyst extracts expected behavior. Then paste observed actual behavior to run
-                  Bug Writer. Playwright auto-capture lands in v2.
-                </Alert>
-              </Stack>
-            </CardContent>
-          </Card>
+          <Section title="New bug session" sx={{ mb: 2 }}>
+            <Stack spacing={2}>
+              <Autocomplete
+                options={wiOptions}
+                filterOptions={x => x}
+                getOptionLabel={o => `#${o.id} — ${o.title}`}
+                isOptionEqualToValue={(a, b) => a.id === b.id}
+                onInputChange={(_, v) => setWiQuery(v)}
+                onChange={(_, v) => setSelectedWi(v)}
+                renderInput={p => <TextField {...p} label="Search work item" size="small" />}
+              />
+              <Button variant="contained" onClick={start} disabled={!selectedWi || starting}>
+                {starting ? <CircularProgress size={18} sx={{ color: 'white' }} /> : 'Run Analyst'}
+              </Button>
+              <Alert severity="info" sx={{ fontSize: '0.8rem' }}>
+                Analyst extracts expected behavior. Then paste observed actual behavior to run
+                Bug Writer. Playwright auto-capture lands in v2.
+              </Alert>
+            </Stack>
+          </Section>
 
-          <Card variant="outlined">
-            <CardContent>
-              <Typography variant="subtitle1" gutterBottom>Recent sessions</Typography>
-              <List dense>
-                {sessions.length === 0 && (
-                  <Typography variant="body2" color="text.secondary">No sessions yet.</Typography>
-                )}
-                {sessions.map(s => (
-                  <ListItem key={s.id} disablePadding>
-                    <ListItemButton onClick={() => openSession(s.id)} selected={active?.id === s.id}>
-                      <Chip size="small" label={s.status}
-                        color={statusColors[s.status] ?? 'default'} sx={{ mr: 1 }} />
-                      <ListItemText
-                        primary={<Box component="span" sx={{ fontSize: '0.875rem', fontWeight: 600 }}>#{s.workItemId}</Box>}
-                        secondary={<Box component="span" sx={{ fontSize: '0.75rem', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.workItemTitle}</Box>}
-                      />
-                    </ListItemButton>
-                  </ListItem>
-                ))}
-              </List>
-            </CardContent>
-          </Card>
+          <Section title="Recent sessions" dense>
+            {sessions.length === 0 ? (
+              <EmptyState compact icon={<HistoryIcon />} title="No sessions yet"
+                hint="Start a bug session above to see it here." />
+            ) : (
+              <Stagger>
+                <List dense>
+                  {sessions.map(s => (
+                    <StaggerItem key={s.id}>
+                      <ListItem disablePadding>
+                        <ListItemButton onClick={() => openSession(s.id)} selected={active?.id === s.id}
+                          sx={{ borderRadius: 1.5 }}>
+                          <StatusChip value={s.status} sx={{ mr: 1 }} />
+                          <ListItemText
+                            primary={<Box component="span" sx={{ fontSize: '0.875rem', fontWeight: 600 }}>#{s.workItemId}</Box>}
+                            secondary={<Box component="span" sx={{ fontSize: '0.75rem', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.workItemTitle}</Box>}
+                          />
+                        </ListItemButton>
+                      </ListItem>
+                    </StaggerItem>
+                  ))}
+                </List>
+              </Stagger>
+            )}
+          </Section>
         </Box>
 
         {/* Right: active session */}
         {active && (
-          <Box sx={{ flex: 1, minWidth: 0 }}>
-            <Card variant="outlined">
+          <Box sx={{ flex: 1, minWidth: 0, width: '100%' }}>
+            <Card>
               <CardHeader
                 title={<Typography variant="h6">#{active.workItemId} — {active.workItemTitle}</Typography>}
                 subheader={
                   <Stack direction="row" spacing={1} sx={{ mt: 0.5, alignItems: 'center' }}>
-                    <Chip label={active.status} size="small" color={statusColors[active.status] ?? 'default'} />
+                    <StatusChip value={active.status} />
                   </Stack>
                 }
                 action={
@@ -309,47 +342,21 @@ export default function FindBugsPage() {
               <Divider />
               <CardContent>
                 {/* Stepper */}
-                {(() => {
-                  const idx = activeStepIndex(active.status, active.currentActivity)
-                  const inFlight = ['Analyzing', 'Drafting', 'Pushing'].includes(active.status)
-                  const failed = active.status === 'Failed' || active.status === 'Cancelled'
-                  return (
-                    <Box sx={{ mb: 2 }}>
-                      <Stepper activeStep={idx} alternativeLabel>
-                        {PIPELINE_STEPS.map((s, i) => {
-                          const completed = i < idx
-                          const isActive = i === idx && !failed
-                          const running = isActive && inFlight
-                          return (
-                            <Step key={s.key} completed={completed}>
-                              <StepLabel slots={{
-                                stepIcon: () => (
-                                  <PipelineIcon active={isActive} completed={completed}
-                                    running={running} failed={failed && i === idx} icon={s.icon} />
-                                ),
-                              }}>
-                                <Typography variant="body2" sx={{
-                                  fontWeight: isActive ? 700 : 500,
-                                  color: isActive ? 'primary.main' : completed ? 'success.main' : 'text.secondary',
-                                }}>{s.label}</Typography>
-                              </StepLabel>
-                            </Step>
-                          )
-                        })}
-                      </Stepper>
-                      {active.currentActivity && (
-                        <Stack direction="row" spacing={1} sx={{ mt: 1.5, alignItems: 'center', justifyContent: 'center' }}>
-                          {inFlight && <CircularProgress size={14} />}
-                          <Typography variant="body2"
-                            color={inFlight ? 'primary.main' : 'text.secondary'}
-                            sx={{ fontWeight: inFlight ? 600 : 400 }}>
-                            {active.currentActivity}
-                          </Typography>
-                        </Stack>
-                      )}
-                    </Box>
-                  )
-                })()}
+                <AgentPipeline
+                  steps={PIPELINE_STEPS}
+                  activeIndex={activeStepIndex(active.status, active.currentActivity)}
+                  inFlight={['Analyzing', 'Drafting', 'Pushing'].includes(active.status)}
+                  failed={active.status === 'Failed' || active.status === 'Cancelled'}
+                  currentActivity={active.currentActivity}
+                />
+
+                <AgentConsole
+                  key={active.id}
+                  title="Pipeline console"
+                  streamUrl={['Analyzing', 'Drafting', 'Pushing'].includes(active.status)
+                    ? `/api/find-bugs/sessions/${active.id}/stream` : null}
+                  seedEvents={parseEventLog(active.eventLogJson)}
+                />
 
                 {active.status === 'Failed' && active.errorMessage && (
                   <Alert severity="error" sx={{ mb: 2 }}>{active.errorMessage}</Alert>
@@ -358,10 +365,18 @@ export default function FindBugsPage() {
                   <Alert severity="warning" sx={{ mb: 2 }}>Session cancelled by user.</Alert>
                 )}
 
+                {['Analyzing', 'Drafting'].includes(active.status) && active.drafts.length === 0 && (
+                  <ThinkingShimmer
+                    label={active.status === 'Drafting'
+                      ? 'Bug Writer is drafting bug reports…'
+                      : 'Analyst is extracting expected behavior…'}
+                  />
+                )}
+
                 {/* Actual behavior input */}
                 {(active.status === 'AwaitingActual' || active.status === 'Drafted'
                   || active.status === 'Failed' || active.status === 'Cancelled') && (
-                  <Card variant="outlined" sx={{ mb: 2 }}>
+                  <Card sx={{ mb: 2 }}>
                     <CardContent>
                       <Typography variant="subtitle1" gutterBottom>Observed actual behavior</Typography>
                       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
@@ -375,15 +390,47 @@ export default function FindBugsPage() {
                       <TextField multiline minRows={3} fullWidth value={codeText}
                         onChange={e => setCodeText(e.target.value)}
                         placeholder="// PipelineForm.tsx — line 42&#10;<Button disabled={!name}>Save</Button>" />
-                      <Stack direction="row" sx={{ mt: 1, justifyContent: 'flex-end' }}>
+
+                      {/* Code verification (static analysis against generated test cases) */}
+                      <Box sx={{ mt: 2, p: 1.5, borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
+                        <FormControlLabel
+                          control={<Checkbox checked={verifyCode} onChange={(_, v) => setVerifyCode(v)} />}
+                          label={<Typography variant="body2" sx={{ fontWeight: 600 }}>Verify against code</Typography>}
+                        />
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: verifyCode ? 1.5 : 0 }}>
+                          Read the repo (linked PRs/commits + code search) and check each generated test case against the implementation.
+                        </Typography>
+                        {verifyCode && (
+                          <Stack spacing={1.5}>
+                            {(linkedRefs.pullRequestIds.length > 0 || linkedRefs.commitShas.length > 0) && (
+                              <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', gap: 0.5 }}>
+                                <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>Linked:</Typography>
+                                {linkedRefs.pullRequestIds.map(pr => <Chip key={`pr${pr}`} size="small" label={`PR #${pr}`} />)}
+                                {linkedRefs.commitShas.map(sha => <Chip key={sha} size="small" label={sha.slice(0, 8)} />)}
+                              </Stack>
+                            )}
+                            <TextField size="small" fullWidth label="PR ids (optional, comma-separated)"
+                              value={prIdsText} onChange={e => setPrIdsText(e.target.value)} />
+                            <TextField size="small" fullWidth label="Commit SHAs (optional, comma-separated)"
+                              value={commitIdsText} onChange={e => setCommitIdsText(e.target.value)} />
+                          </Stack>
+                        )}
+                      </Box>
+
+                      <Stack direction="row" sx={{ mt: 1.5, justifyContent: 'flex-end' }}>
                         <Button variant="contained" startIcon={<BugReportIcon />}
-                          onClick={runBugWriter} disabled={!actualText.trim()}>
-                          {active.drafts.length > 0 ? 'Re-run Bug Writer' : 'Run Bug Writer'}
+                          onClick={runBugWriter} disabled={!verifyCode && !actualText.trim()}>
+                          {verifyCode
+                            ? 'Verify against code + draft bugs'
+                            : active.drafts.length > 0 ? 'Re-run Bug Writer' : 'Run Bug Writer'}
                         </Button>
                       </Stack>
                     </CardContent>
                   </Card>
                 )}
+
+                {/* Code-verification verdicts */}
+                <VerdictTable json={active.codeVerificationJson} />
 
                 {/* Drafts */}
                 {active.drafts.length > 0 && (
@@ -396,15 +443,19 @@ export default function FindBugsPage() {
                         <Button size="small" variant="outlined" onClick={approveAll}>Approve all</Button>
                       )}
                     </Stack>
-                    <Stack spacing={1}>
-                      {[...active.drafts].sort((a, b) => a.id - b.id).map(d => (
-                        <BugDraftCard key={d.id} draft={d}
-                          onApprove={() => approveDraft(d.id)}
-                          onReject={() => rejectDraft(d.id)}
-                          onSave={p => saveDraft(d.id, p)}
-                        />
-                      ))}
-                    </Stack>
+                    <Stagger>
+                      <Stack spacing={1}>
+                        {[...active.drafts].sort((a, b) => a.id - b.id).map(d => (
+                          <StaggerItem key={d.id}>
+                            <BugDraftCard draft={d}
+                              onApprove={() => approveDraft(d.id)}
+                              onReject={() => rejectDraft(d.id)}
+                              onSave={p => saveDraft(d.id, p)}
+                            />
+                          </StaggerItem>
+                        ))}
+                      </Stack>
+                    </Stagger>
 
                     {/* Push */}
                     {active.status === 'Drafted' && (
@@ -430,6 +481,46 @@ export default function FindBugsPage() {
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}>
         <Alert severity="error" onClose={() => setActionError('')} variant="filled">{actionError}</Alert>
       </Snackbar>
+    </Box>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+function VerdictTable({ json }: { json?: string | null }) {
+  let verdicts: CodeVerdict[] = []
+  if (json) {
+    try { const v = JSON.parse(json); if (Array.isArray(v)) verdicts = v } catch { /* ignore */ }
+  }
+  if (verdicts.length === 0) return null
+  const n = (st: string) => verdicts.filter(v => v.status === st).length
+  const chipColor = (s: string) => (s === 'pass' ? 'success' : s === 'fail' ? 'error' : 'warning') as 'success' | 'error' | 'warning'
+  return (
+    <Box sx={{ mb: 2 }}>
+      <Typography variant="subtitle1" sx={{ mb: 1 }}>
+        Code verification — {n('pass')} pass · {n('fail')} fail · {n('inconclusive')} inconclusive
+      </Typography>
+      <Stack spacing={1}>
+        {verdicts.map((v, i) => (
+          <Box key={i} sx={{ p: 1.25, borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
+              <Chip size="small" color={chipColor(v.status)} label={v.status} sx={{ fontWeight: 600 }} />
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>{v.testCase}</Typography>
+                {v.evidence && (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', whiteSpace: 'pre-wrap' }}>
+                    {v.evidence}
+                  </Typography>
+                )}
+                {v.reasoning && (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                    {v.reasoning}
+                  </Typography>
+                )}
+              </Box>
+            </Stack>
+          </Box>
+        ))}
+      </Stack>
     </Box>
   )
 }
@@ -485,11 +576,11 @@ function BugDraftCard({ draft, onApprove, onReject, onSave }: {
   }
 
   return (
-    <Card variant="outlined" sx={editing ? { borderColor: 'primary.main' } : undefined}>
+    <Card sx={editing ? { borderColor: 'primary.main' } : undefined}>
       <CardContent sx={{ pb: '12px !important' }}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
-          <Chip label={draft.status} size="small" color={draftColors[draft.status] ?? 'default'} />
-          <Chip label={draft.severity} size="small" color={sevColors[draft.severity] ?? 'default'} />
+          <StatusChip value={draft.status} kind="draft" />
+          <StatusChip value={draft.severity} kind="severity" />
           {editing ? (
             <TextField fullWidth size="small" value={title} onChange={e => setTitle(e.target.value)} />
           ) : (
@@ -607,7 +698,7 @@ function BugPushResults({ session }: { session: BugSession }) {
     `https://dev.azure.com/${ADO_ORG}/${encodeURIComponent(ADO_PROJECT)}/_workitems/edit/${id}`
 
   return (
-    <Card variant="outlined" sx={{ mt: 3, borderColor: 'success.main' }}>
+    <Card sx={{ mt: 3, borderColor: 'success.main' }}>
       <CardContent>
         <Typography variant="h6" sx={{ mb: 1 }}>
           Pushed {pushed.length} bug(s) — linked to story #{session.workItemId}
@@ -615,7 +706,7 @@ function BugPushResults({ session }: { session: BugSession }) {
         <Stack spacing={0.5}>
           {pushed.map(d => (
             <Stack key={d.id} direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-              <Chip size="small" label={d.severity} color={sevColors[d.severity]} />
+              <StatusChip value={d.severity} kind="severity" />
               <Typography variant="body2" sx={{ flex: 1 }}>
                 <strong>#{d.adoBugId}</strong> — {d.title}
               </Typography>

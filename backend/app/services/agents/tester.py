@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from app.services.agents.analyst import AnalystOutput
 from app.services.agents.json_utils import strip_fences
 from app.services.ado_client import AdoWorkItem, TestCaseStep
-from app.services.llm.base import LlmClient
+from app.services.llm.base import LlmClient, StreamProgress
 
 
 SYSTEM_PROMPT = """You are the Tester agent — a senior SQA analyst who writes test cases exactly in
@@ -73,9 +73,11 @@ class TesterAgent:
 
     async def generate(
         self, analysis: AnalystOutput, work_item: AdoWorkItem,
+        progress: "StreamProgress | None" = None,
+        emit=None,
     ) -> list[GeneratedTestCase]:
         prompt = self._build_user_prompt(analysis, work_item)
-        raw = await self._llm.complete(SYSTEM_PROMPT, prompt)
+        raw = await self._llm.complete(SYSTEM_PROMPT, prompt, progress=progress, emit=emit)
         cleaned = strip_fences(raw, opener="[")
         try:
             data = json.loads(cleaned)

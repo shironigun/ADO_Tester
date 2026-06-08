@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 from app.services.agents.json_utils import coerce_string, coerce_string_list, strip_fences
 from app.services.knowledgebase import KnowledgebaseHit
-from app.services.llm.base import LlmClient
+from app.services.llm.base import LlmClient, StreamProgress
 from app.services.ado_client import AdoWorkItem
 
 
@@ -103,9 +103,11 @@ class AnalystAgent:
         self,
         work_item: AdoWorkItem,
         context: list[KnowledgebaseHit],
+        progress: "StreamProgress | None" = None,
+        emit=None,
     ) -> AnalystOutput:
         prompt = self._build_user_prompt(work_item, context)
-        raw = await self._llm.complete(SYSTEM_PROMPT, prompt)
+        raw = await self._llm.complete(SYSTEM_PROMPT, prompt, progress=progress, emit=emit)
         cleaned = strip_fences(raw, opener="{")
         try:
             data = json.loads(cleaned)

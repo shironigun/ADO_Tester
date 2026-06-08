@@ -23,27 +23,16 @@ log = logging.getLogger("qa.diagnostics")
 @router.get("", response_model=DiagnosticsStatus)
 async def status() -> DiagnosticsStatus:
     import asyncio
-    import shutil
+
+    from app.services.llm.claude_cli_client import probe_claude_cli
 
     provider = await get_provider_state().current()
 
-    # Probe `claude` CLI — present on PATH AND `--version` exits 0.
-    cli_available = False
-    cli_version: str | None = None
-    cli_path = settings.claude_cli_path or "claude"
-    resolved = shutil.which(cli_path) if not cli_path.lower().endswith(".exe") else cli_path
-    if resolved:
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                resolved, "--version",
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
-            if proc.returncode == 0:
-                cli_available = True
-                cli_version = (stdout or b"").decode(errors="replace").strip()
-        except Exception:  # noqa: BLE001
-            cli_available = False
+    # Probe `claude` CLI via the SAME resolver the provider uses, run on a worker
+    # thread (synchronous subprocess). asyncio's subprocess API is unsupported under
+    # the Selector event loop uvicorn installs on Windows and raises a bare
+    # NotImplementedError — which is why the CLI showed "missing" despite being installed.
+    cli_available, cli_version = await asyncio.to_thread(probe_claude_cli)
 
     return DiagnosticsStatus(
         active_provider=provider.value,

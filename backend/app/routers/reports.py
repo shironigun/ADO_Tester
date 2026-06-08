@@ -10,16 +10,28 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import HTMLResponse, Response
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 
 from app.schemas import GenerateReportRequest, GenerateReportResponse, ReportSchema
 from app.services.reports import get_report_service
+from app.services.sse import SSE_HEADERS, event_stream, parse_last_event_id
 
 MAX_RANGE_DAYS = 365
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 log = logging.getLogger("qa.reports-router")
+
+
+@router.get("/{report_id}/stream")
+async def stream_report(report_id: int, request: Request) -> StreamingResponse:
+    """Live SSE console for a report generation (fetch + summarize token deltas + render)."""
+    last = parse_last_event_id(
+        request.headers.get("last-event-id"), request.query_params.get("lastEventId"))
+    return StreamingResponse(
+        event_stream(f"report:{report_id}", last),
+        media_type="text/event-stream", headers=SSE_HEADERS,
+    )
 
 
 @router.post("/{project_id}/generate", response_model=GenerateReportResponse)

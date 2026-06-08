@@ -124,7 +124,7 @@ class ReportSummarizer:
         # renders the full ticket list, but the AI insights are based on this sampled view.
         self._cap = max_tickets_in_prompt
 
-    async def summarize(self, tickets: list[ReportTicket]) -> ReportSummary:
+    async def summarize(self, tickets: list[ReportTicket], emit=None) -> ReportSummary:
         if not tickets:
             return ReportSummary(headline="No tickets in range.")
 
@@ -136,7 +136,7 @@ class ReportSummarizer:
 
         prompt = self._build_user_prompt(tickets)
         try:
-            raw = await llm.complete(SYSTEM_PROMPT, prompt)
+            raw = await llm.complete(SYSTEM_PROMPT, prompt, emit=emit)
         except Exception as e:  # noqa: BLE001
             log.warning("Summarizer LLM call failed (%s) — falling back", e)
             return self._fallback(tickets)

@@ -11,9 +11,10 @@ from app.db import Base
 
 class SessionStatus(str, Enum):
     """JSON serializes as the exact string the React UI keys off."""
-    Analyzing = "Analyzing"
-    Drafting = "Drafting"
-    Drafted = "Drafted"
+    Analyzing = "Analyzing"          # Analyst working
+    AwaitingTester = "AwaitingTester"  # Analyst done, manual mode — user clicks Run Tester
+    Drafting = "Drafting"            # Tester running
+    Drafted = "Drafted"              # Test cases drafted, awaiting review
     Pushing = "Pushing"
     Done = "Done"
     Failed = "Failed"
@@ -38,6 +39,9 @@ class TestSession(Base):
     current_activity: Mapped[str | None] = mapped_column("CurrentActivity", String, nullable=True)
     analysis_json: Mapped[str | None] = mapped_column("AnalysisJson", String, nullable=True)
     error_message: Mapped[str | None] = mapped_column("ErrorMessage", String, nullable=True)
+    # Persisted narrative of the live console (non-token events) as a JSON array — replays a
+    # finished run's activity feed. Nullable; never holds raw model tokens.
+    event_log_json: Mapped[str | None] = mapped_column("EventLogJson", String, nullable=True)
     created_at: Mapped[datetime] = mapped_column("CreatedAt", DateTime, nullable=False)
     updated_at: Mapped[datetime] = mapped_column("UpdatedAt", DateTime, nullable=False)
 

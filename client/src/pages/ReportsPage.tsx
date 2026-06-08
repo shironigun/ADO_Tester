@@ -8,7 +8,26 @@ import DownloadIcon from '@mui/icons-material/Download'
 import OpenInFullIcon from '@mui/icons-material/OpenInFull'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import CloseIcon from '@mui/icons-material/Close'
+import AssessmentIcon from '@mui/icons-material/AssessmentOutlined'
 import axios from 'axios'
+import PageHeader from '../components/PageHeader'
+import Section from '../components/Section'
+import StatusChip from '../components/StatusChip'
+import EmptyState from '../components/EmptyState'
+import { alpha } from '@mui/material/styles'
+import { Stagger, StaggerItem, PulsingAgentBadge } from '../motion/primitives'
+import AgentConsole from '../components/AgentConsole'
+import { type ConsoleEvent } from '../hooks/useEventStream'
+
+function parseEventLog(json: string | null | undefined): ConsoleEvent[] {
+  if (!json) return []
+  try { const v = JSON.parse(json); return Array.isArray(v) ? v : [] } catch { return [] }
+}
+
+// Theme → accent palette key for the report card stripe.
+const THEME_ACCENT: Record<Theme, 'info' | 'secondary' | 'primary'> = {
+  Executive: 'info', Standup: 'secondary', Branded: 'primary',
+}
 
 const PROJECT_ID = 1
 
@@ -34,6 +53,7 @@ interface Report {
   title: string
   trigger: string
   theme: Theme
+  eventLogJson?: string | null
 }
 
 function isoLocalDate(d: Date): string {
@@ -135,13 +155,15 @@ export default function ReportsPage() {
 
   return (
     <Box>
-      <Typography variant="h5" gutterBottom>Reports</Typography>
+      <PageHeader
+        title="Reports"
+        subtitle="Generate a self-contained HTML report for a date range and boards — view full-screen or download."
+      />
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={3} sx={{ alignItems: 'flex-start' }}>
 
         {/* Generate panel */}
-        <Card variant="outlined" sx={{ minWidth: 320, maxWidth: 380 }}>
-          <CardContent>
-            <Typography variant="h6" gutterBottom>Generate report</Typography>
+        <Box sx={{ minWidth: 320, maxWidth: 380, width: '100%' }}>
+          <Section title="Generate report">
             <Stack spacing={2}>
               <TextField label="From" type="date" size="small" value={fromDate}
                 onChange={e => setFromDate(e.target.value)} slotProps={{ inputLabel: { shrink: true } }} />
@@ -186,75 +208,96 @@ export default function ReportsPage() {
                 Scheduled run: every Thursday 11:00 AM (when app is running).
               </Alert>
             </Stack>
-          </CardContent>
-        </Card>
+          </Section>
+        </Box>
 
         {/* History */}
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Card variant="outlined">
-            <CardContent>
-              <Stack direction="row" sx={{ alignItems: 'center', mb: 1 }}>
-                <Typography variant="h6" sx={{ flex: 1 }}>History ({reports.length})</Typography>
-                <Tooltip title="Refresh">
-                  <IconButton onClick={() => loadReports()}><RefreshIcon /></IconButton>
-                </Tooltip>
-              </Stack>
-              <Stack spacing={1}>
-                {reports.length === 0 && (
-                  <Typography variant="body2" color="text.secondary">No reports yet.</Typography>
-                )}
-                {reports.map(r => (
-                  <Card key={r.id} variant="outlined">
-                    <CardContent sx={{ pb: '12px !important' }}>
-                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 0.5 }}>
-                        <Chip size="small" label={r.status}
-                          color={r.status === 'Done' ? 'success' : r.status === 'Failed' ? 'error' : 'warning'} />
-                        <Chip size="small" label={r.trigger} variant="outlined" />
-                        {r.theme && <Chip size="small" label={r.theme} variant="outlined" color="primary" />}
-                        <Typography variant="body2" sx={{ fontWeight: 500, flex: 1 }}>{r.title}</Typography>
-                        {r.status === 'Generating' && <CircularProgress size={16} />}
-                        <Typography variant="caption" color="text.secondary">
-                          {new Date(r.createdAt).toLocaleString()}
-                        </Typography>
-                      </Stack>
+        <Box sx={{ flex: 1, minWidth: 0, width: '100%' }}>
+          <Section
+            title={`History (${reports.length})`}
+            action={
+              <Tooltip title="Refresh">
+                <IconButton onClick={() => loadReports()}><RefreshIcon /></IconButton>
+              </Tooltip>
+            }
+          >
+            {reports.length === 0 ? (
+              <EmptyState compact icon={<AssessmentIcon />} title="No reports yet"
+                hint="Generate one with the panel on the left." />
+            ) : (
+              <Stagger>
+                <Stack spacing={1}>
+                  {reports.map(r => {
+                    const accent = THEME_ACCENT[r.theme] ?? 'primary'
+                    return (
+                    <StaggerItem key={r.id}>
+                      <Card sx={{
+                        borderLeft: '4px solid',
+                        borderLeftColor: theme => theme.palette[accent].main,
+                      }}>
+                        <CardContent sx={{ pb: '12px !important' }}>
+                          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 0.5 }}>
+                            <StatusChip value={r.status} />
+                            <Chip size="small" label={r.trigger} variant="outlined" />
+                            {r.theme && (
+                              <Chip size="small" label={r.theme} color={accent}
+                                sx={{ bgcolor: theme => alpha(theme.palette[accent].main, 0.14), color: `${accent}.main` }} />
+                            )}
+                            <Typography variant="body2" sx={{ fontWeight: 500, flex: 1 }}>{r.title}</Typography>
+                            {r.status === 'Generating' && <PulsingAgentBadge size={9} color="warning.main" />}
+                            {r.status === 'Done' && (
+                              <Chip size="small" variant="outlined"
+                                label={`${r.ticketCount} ticket${r.ticketCount === 1 ? '' : 's'}`} />
+                            )}
+                            <Typography variant="caption" color="text.secondary">
+                              {new Date(r.createdAt).toLocaleString()}
+                            </Typography>
+                          </Stack>
 
-                      <Stack direction="row" spacing={1} sx={{ mt: 1, alignItems: 'center', flexWrap: 'wrap' }}>
-                        <Typography variant="caption" color="text.secondary">
-                          {new Date(r.fromUtc).toLocaleDateString()} → {new Date(r.toUtc).toLocaleDateString()}
-                        </Typography>
-                        {r.boards && <Typography variant="caption" color="text.secondary">· {r.boards}</Typography>}
-                        {r.status === 'Done' && (
-                          <Typography variant="caption" color="text.secondary">· {r.ticketCount} ticket(s)</Typography>
-                        )}
-                        <Box sx={{ flex: 1 }} />
-                        {r.status === 'Done' && (
-                          <>
-                            <Tooltip title="Open full-screen">
-                              <IconButton size="small" onClick={() => setViewing(r)}><OpenInFullIcon fontSize="small" /></IconButton>
-                            </Tooltip>
-                            <Tooltip title="Download .html">
-                              <IconButton size="small" component="a"
-                                href={`/api/reports/download/${r.id}`}
-                                download>
-                                <DownloadIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                          </>
-                        )}
-                      </Stack>
-                      {r.status === 'Failed' && r.errorMessage && (
-                        <Alert severity="error" sx={{ mt: 1 }}>{r.errorMessage}</Alert>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
-              </Stack>
-            </CardContent>
-          </Card>
+                          <Stack direction="row" spacing={1} sx={{ mt: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <Typography variant="caption" color="text.secondary">
+                              {new Date(r.fromUtc).toLocaleDateString()} → {new Date(r.toUtc).toLocaleDateString()}
+                            </Typography>
+                            {r.boards && <Typography variant="caption" color="text.secondary">· {r.boards}</Typography>}
+                            <Box sx={{ flex: 1 }} />
+                            {r.status === 'Done' && (
+                              <>
+                                <Tooltip title="Open full-screen">
+                                  <IconButton size="small" onClick={() => setViewing(r)}><OpenInFullIcon fontSize="small" /></IconButton>
+                                </Tooltip>
+                                <Tooltip title="Download .html">
+                                  <IconButton size="small" component="a"
+                                    href={`/api/reports/download/${r.id}`}
+                                    download>
+                                    <DownloadIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                              </>
+                            )}
+                          </Stack>
+                          {r.status === 'Failed' && r.errorMessage && (
+                            <Alert severity="error" sx={{ mt: 1 }}>{r.errorMessage}</Alert>
+                          )}
+                          {r.status === 'Generating' && (
+                            <AgentConsole
+                              title="Generation console"
+                              streamUrl={`/api/reports/${r.id}/stream`}
+                              seedEvents={parseEventLog(r.eventLogJson)}
+                            />
+                          )}
+                        </CardContent>
+                      </Card>
+                    </StaggerItem>
+                  )})}
+                </Stack>
+              </Stagger>
+            )}
+          </Section>
         </Box>
       </Stack>
 
-      {/* Full-screen viewer */}
+      {/* Full-screen viewer — kept OUTSIDE any motion/AnimatePresence so the iframe
+          never remounts (which would reload the report). */}
       <Dialog open={!!viewing} onClose={() => setViewing(null)} fullScreen>
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1 }}>
           <Typography variant="subtitle1" sx={{ flex: 1 }}>{viewing?.title}</Typography>

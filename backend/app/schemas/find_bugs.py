@@ -15,8 +15,19 @@ class BugStartResponse(CamelModel):
 
 
 class BugRunRequest(CamelModel):
-    actual_behavior: str
+    # Manual description path (retained): observed actual behavior + optional pasted code.
+    actual_behavior: str = ""
     code_context: str | None = None
+    # Code-analysis path: verify the story against generated test cases by reading the repo.
+    verify_code: bool = False
+    commit_ids: list[str] = []   # manually-entered commit SHAs to include
+    pr_ids: list[str] = []       # manually-entered PR ids to include
+
+
+class BugLinkedRefs(CamelModel):
+    """Commits/PRs linked to the story (auto-fetched), to prefill the verify UI."""
+    pull_request_ids: list[str] = []
+    commit_shas: list[str] = []
 
 
 class BugDraftSchema(CamelModel):
@@ -45,6 +56,8 @@ class BugSessionDetailSchema(CamelModel):
     actual_behavior: str | None
     code_context: str | None
     error_message: str | None
+    event_log_json: str | None = None
+    code_verification_json: str | None = None
     created_at: datetime
     updated_at: datetime
     drafts: list[BugDraftSchema] = []

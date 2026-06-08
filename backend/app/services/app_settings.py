@@ -29,6 +29,8 @@ log = logging.getLogger("qa.app-settings")
 K_ADO_ORG          = "ado.organization"
 K_ADO_PROJECT      = "ado.project"
 K_ADO_PAT          = "ado.pat"
+K_ADO_REPO         = "ado.repository"
+K_ADO_BRANCH       = "ado.default_branch"
 K_ANTHROPIC_KEY    = "anthropic.api_key"
 K_ANTHROPIC_MODEL  = "anthropic.model"
 K_AZURE_ENDPOINT   = "azure_openai.endpoint"
@@ -51,7 +53,7 @@ K_SCHED_ENABLED    = "reports.schedule_enabled"   # "true" | "false"
 K_DEFAULT_RANGE    = "reports.default_range_days" # int as string
 
 ALL_KEYS = [
-    K_ADO_ORG, K_ADO_PROJECT, K_ADO_PAT,
+    K_ADO_ORG, K_ADO_PROJECT, K_ADO_PAT, K_ADO_REPO, K_ADO_BRANCH,
     K_ANTHROPIC_KEY, K_ANTHROPIC_MODEL,
     K_AZURE_ENDPOINT, K_AZURE_KEY, K_AZURE_DEPLOY,
     K_OPENAI_BASE_URL, K_OPENAI_KEY, K_OPENAI_MODEL,
@@ -69,6 +71,8 @@ def _env_default(key: str) -> str:
         K_ADO_ORG:         env_settings.ado_organization,
         K_ADO_PROJECT:     env_settings.ado_project,
         K_ADO_PAT:         env_settings.adoaccess_pat,
+        K_ADO_REPO:        env_settings.ado_repository,
+        K_ADO_BRANCH:      env_settings.ado_default_branch,
         K_ANTHROPIC_KEY:   env_settings.anthropic_api_key,
         K_ANTHROPIC_MODEL: env_settings.anthropic_model,
         K_AZURE_ENDPOINT:  env_settings.azure_openai_endpoint,
@@ -151,6 +155,8 @@ class AppSettingsService:
         env_settings.ado_organization      = self._cache.get(K_ADO_ORG,         env_settings.ado_organization)
         env_settings.ado_project           = self._cache.get(K_ADO_PROJECT,     env_settings.ado_project)
         env_settings.adoaccess_pat         = self._cache.get(K_ADO_PAT,         env_settings.adoaccess_pat)
+        env_settings.ado_repository        = self._cache.get(K_ADO_REPO,        env_settings.ado_repository)
+        env_settings.ado_default_branch    = self._cache.get(K_ADO_BRANCH,      env_settings.ado_default_branch)
         env_settings.anthropic_api_key     = self._cache.get(K_ANTHROPIC_KEY,   env_settings.anthropic_api_key)
         env_settings.anthropic_model       = self._cache.get(K_ANTHROPIC_MODEL, env_settings.anthropic_model)
         env_settings.azure_openai_endpoint = self._cache.get(K_AZURE_ENDPOINT,  env_settings.azure_openai_endpoint)

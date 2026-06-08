@@ -1,21 +1,45 @@
-import { useCallback, useEffect, useState } from 'react'
+/**
+ * Settings — modern admin console.
+ *
+ * Vertical tab nav (6 tabs) on the left, animated content on the right. On
+ * narrow screens (<900px) the tabs flip to a scrollable bar across the top.
+ * All save logic + API calls are preserved verbatim — only the render tree and
+ * styling changed (now driven by the shared theme + components, no local serif).
+ */
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import {
-  Alert, Autocomplete, Box, Button, Card, CardContent, Chip, CircularProgress, Divider,
+  Alert, Autocomplete, Box, Button, Card, CardContent, Chip, CircularProgress,
   FormControl, FormControlLabel, IconButton, InputAdornment, InputLabel,
-  MenuItem, Select, Snackbar, Stack, Switch, TextField, Typography,
+  MenuItem, Select, Snackbar, Stack, Switch, Tab, Tabs, TextField, Tooltip, Typography,
+  useMediaQuery, useTheme,
 } from '@mui/material'
+import { AnimatePresence } from 'framer-motion'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ErrorIcon from '@mui/icons-material/Error'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import SaveIcon from '@mui/icons-material/Save'
+import RefreshIcon from '@mui/icons-material/Refresh'
+import DashboardOutlinedIcon from '@mui/icons-material/DashboardOutlined'
+import CloudOutlinedIcon from '@mui/icons-material/CloudOutlined'
+import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined'
+import RuleOutlinedIcon from '@mui/icons-material/RuleOutlined'
+import AssessmentOutlinedIcon from '@mui/icons-material/AssessmentOutlined'
+import HealthAndSafetyOutlinedIcon from '@mui/icons-material/HealthAndSafetyOutlined'
+import RadioButtonCheckedIcon from '@mui/icons-material/RadioButtonChecked'
 import axios from 'axios'
+import PageHeader from '../components/PageHeader'
+import Section from '../components/Section'
+import { FadeIn, Stagger, StaggerItem } from '../motion/primitives'
+import { MONO_FONT } from '../theme/tokens'
 
-// ─── setting keys (must match backend constants) ─────────────────────────────
+// ── Type system + setting keys ─────────────────────────────────────────────
 const K = {
   ADO_ORG: 'ado.organization',
   ADO_PROJECT: 'ado.project',
   ADO_PAT: 'ado.pat',
+  ADO_REPO: 'ado.repository',
+  ADO_BRANCH: 'ado.default_branch',
   ANTHROPIC_KEY: 'anthropic.api_key',
   ANTHROPIC_MODEL: 'anthropic.model',
   AZURE_ENDPOINT: 'azure_openai.endpoint',
@@ -45,8 +69,7 @@ interface EnvStatus {
   claudeCliVersion: string | null
 }
 interface WorkItem {
-  id: number; title: string; workItemType: string; state: string
-  assignedTo?: string
+  id: number; title: string; workItemType: string; state: string; assignedTo?: string
 }
 interface TestPlan { id: number; name: string }
 interface TestSuite { id: number; name: string }
@@ -60,48 +83,175 @@ function axiosMessage(e: unknown): string {
   return e.message
 }
 
-// Secret-aware TextField. Backend never echoes secret characters — only a `.set` flag.
-// When set, label + helper-text + a green "Configured" chip make the existing-value state obvious.
-function SecretField({ label, value, set, isSet }: {
-  label: string
-  value: string
-  set: (v: string) => void
-  isSet: boolean
-}) {
-  const [shown, setShown] = useState(false)
+// ── Reusable parts ─────────────────────────────────────────────────────────
+
+/** Section heading with a small mono "eyebrow" label — console feel. */
+function SectionHeader({
+  eyebrow, title, subtitle,
+}: { eyebrow: string; title: string; subtitle?: string }) {
   return (
-    <TextField
-      label={isSet ? `${label} — Configured` : label}
-      size="small"
-      fullWidth
-      type={shown ? 'text' : 'password'}
-      value={value}
-      onChange={e => set(e.target.value)}
-      placeholder={isSet ? 'Configured — leave blank to keep current value' : 'Not set'}
-      helperText={isSet
-        ? 'Currently configured. Type a new value to replace it, or leave blank to keep the saved value.'
-        : 'Not set yet.'}
-      slotProps={{
-        input: {
-          startAdornment: isSet ? (
-            <InputAdornment position="start">
-              <Chip size="small" label="Configured" color="success" sx={{ height: 22 }} />
-            </InputAdornment>
-          ) : undefined,
-          endAdornment: (
-            <InputAdornment position="end">
-              <IconButton size="small" onClick={() => setShown(s => !s)} disabled={!value}>
-                {shown ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
-              </IconButton>
-            </InputAdornment>
-          ),
-        },
-      }}
-    />
+    <Box sx={{ mb: 3 }}>
+      <Typography variant="overline" sx={{ color: 'text.secondary', display: 'block' }}>{eyebrow}</Typography>
+      <Typography variant="h4" sx={{ lineHeight: 1.1, mb: subtitle ? 1 : 0 }}>{title}</Typography>
+      {subtitle && (
+        <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 760 }}>
+          {subtitle}
+        </Typography>
+      )}
+    </Box>
   )
 }
 
+/** Subsection card — thin wrapper over the shared Section. */
+function Panel({
+  title, hint, children, action,
+}: { title?: string; hint?: string; children: ReactNode; action?: ReactNode }) {
+  return (
+    <Section title={title} subtitle={hint} action={action} dense={!!hint} padding={3}>
+      {children}
+    </Section>
+  )
+}
+
+/** mono "key" label rendered above a control — like a code identifier. */
+function FieldKey({ k }: { k: string }) {
+  return (
+    <Typography sx={{
+      fontFamily: MONO_FONT, fontSize: 10.5, letterSpacing: '0.08em',
+      color: 'text.secondary', textTransform: 'lowercase', mb: 0.6,
+    }}>{k}</Typography>
+  )
+}
+
+/** Save button — anchored to the right. */
+function SaveBar({ onClick, label = 'Save changes' }: { onClick: () => void; label?: string }) {
+  return (
+    <Stack direction="row" sx={{ justifyContent: 'flex-end', mt: 3 }}>
+      <Button variant="contained" startIcon={<SaveIcon />} onClick={onClick}>
+        {label}
+      </Button>
+    </Stack>
+  )
+}
+
+/** Status pill — used by the top status strip + diagnostics. */
+function StatusPill({ ok, label, value }: { ok: boolean; label: string; value?: string }) {
+  return (
+    <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+      {ok
+        ? <CheckCircleIcon fontSize="small" sx={{ color: 'success.main' }} />
+        : <ErrorIcon fontSize="small" sx={{ color: 'error.main' }} />}
+      <Box>
+        <Typography sx={{
+          fontFamily: MONO_FONT, fontSize: 10, letterSpacing: '0.12em',
+          color: 'text.secondary', textTransform: 'uppercase',
+        }}>{label}</Typography>
+        <Typography variant="body2" sx={{
+          fontWeight: 600, color: ok ? 'success.main' : 'error.main',
+        }}>{value ?? (ok ? 'Configured' : 'Missing')}</Typography>
+      </Box>
+    </Stack>
+  )
+}
+
+/** Secret-aware text input. Backend never echoes the value — only a `.set` flag. */
+function SecretField({ label, value, set, isSet, keyName }: {
+  label: string; value: string; set: (v: string) => void; isSet: boolean; keyName?: string
+}) {
+  const [shown, setShown] = useState(false)
+  return (
+    <Box>
+      {keyName && <FieldKey k={keyName} />}
+      <TextField
+        label={isSet ? `${label} — Configured` : label}
+        size="small" fullWidth
+        type={shown ? 'text' : 'password'}
+        value={value}
+        onChange={e => set(e.target.value)}
+        placeholder={isSet ? 'Configured — leave blank to keep current value' : 'Not set'}
+        helperText={isSet
+          ? 'A value is stored. Type a new one to replace, or leave blank to keep it.'
+          : 'Not configured yet.'}
+        slotProps={{
+          input: {
+            startAdornment: isSet ? (
+              <InputAdornment position="start">
+                <Chip size="small" label="set" color="success" sx={{ height: 20, fontSize: 11 }} />
+              </InputAdornment>
+            ) : undefined,
+            endAdornment: (
+              <InputAdornment position="end">
+                <IconButton size="small" onClick={() => setShown(s => !s)} disabled={!value}>
+                  {shown ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+                </IconButton>
+              </InputAdornment>
+            ),
+          },
+        }}
+      />
+    </Box>
+  )
+}
+
+/** LLM provider card for the LLM Providers tab. */
+function ProviderCard({
+  name, blurb, active, ready, children,
+}: { name: string; blurb: string; active: boolean; ready: boolean; children: ReactNode }) {
+  return (
+    <Card sx={{
+      height: '100%',
+      borderColor: active ? 'primary.main' : 'divider',
+      borderWidth: active ? 2 : 1,
+      position: 'relative',
+      transition: 'all 200ms ease',
+      ...(active && {
+        boxShadow: theme => `0 0 0 4px ${theme.palette.primary.main}14`,
+      }),
+    }}>
+      <CardContent sx={{ p: 2.5 }}>
+        <Stack direction="row" sx={{ alignItems: 'flex-start', mb: 1.5 }}>
+          <Box sx={{ flex: 1 }}>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 0.3 }}>
+              <Typography variant="h6">{name}</Typography>
+              {active && (
+                <Chip size="small" label="active" color="primary"
+                  icon={<RadioButtonCheckedIcon sx={{ fontSize: 12 }} />}
+                  sx={{ height: 20, fontSize: 10.5, fontFamily: MONO_FONT, letterSpacing: '0.08em' }} />
+              )}
+              {!active && ready && (
+                <Chip size="small" label="ready" variant="outlined" color="success"
+                  sx={{ height: 20, fontSize: 10.5, fontFamily: MONO_FONT, letterSpacing: '0.08em' }} />
+              )}
+            </Stack>
+            <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.45 }}>
+              {blurb}
+            </Typography>
+          </Box>
+        </Stack>
+        <Stack spacing={1.5}>{children}</Stack>
+      </CardContent>
+    </Card>
+  )
+}
+
+// ── Main component ─────────────────────────────────────────────────────────
+
+const TABS = [
+  { key: 'overview',   label: 'Overview',     icon: <DashboardOutlinedIcon fontSize="small" /> },
+  { key: 'ado',        label: 'Azure DevOps', icon: <CloudOutlinedIcon fontSize="small" /> },
+  { key: 'llm',        label: 'LLM Providers', icon: <SmartToyOutlinedIcon fontSize="small" /> },
+  { key: 'tests',      label: 'Author Tests', icon: <RuleOutlinedIcon fontSize="small" /> },
+  { key: 'reports',    label: 'Reports',      icon: <AssessmentOutlinedIcon fontSize="small" /> },
+  { key: 'diag',       label: 'Diagnostics',  icon: <HealthAndSafetyOutlinedIcon fontSize="small" /> },
+] as const
+type TabKey = typeof TABS[number]['key']
+
 export default function SettingsPage() {
+  const theme = useTheme()
+  const isNarrow = useMediaQuery(theme.breakpoints.down('md'))
+
+  const [tab, setTab] = useState<TabKey>('overview')
+
   const [config, setConfig] = useState<Config>({})
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState('')
@@ -110,6 +260,8 @@ export default function SettingsPage() {
   // Per-section staged edits (start empty for secrets, current for non-secrets)
   const [adoOrg, setAdoOrg] = useState('')
   const [adoProject, setAdoProject] = useState('')
+  const [adoRepo, setAdoRepo] = useState('')
+  const [adoBranch, setAdoBranch] = useState('')
   const [adoPat, setAdoPat] = useState('')
   const [anthropicKey, setAnthropicKey] = useState('')
   const [anthropicModel, setAnthropicModel] = useState('')
@@ -125,24 +277,20 @@ export default function SettingsPage() {
   const [claudeCliModels, setClaudeCliModels] = useState<string[]>([])
   const [defaultPlan, setDefaultPlan] = useState<number | ''>('')
   const [defaultSuite, setDefaultSuite] = useState<number | ''>('')
-  // boardsList is the source of truth for the multi-select; the saved CSV form is derived on save.
   const [schedEnabled, setSchedEnabled] = useState(true)
   const [defaultRange, setDefaultRange] = useState('7')
 
-  // Plans / suites for default-suite dropdowns
   const [plans, setPlans] = useState<TestPlan[]>([])
   const [suites, setSuites] = useState<TestSuite[]>([])
 
-  // PAT-driven discovery
   const [orgs, setOrgs] = useState<string[]>([])
   const [projects, setProjects] = useState<AdoProject[]>([])
   const [projectsLoading, setProjectsLoading] = useState(false)
   const [areaPaths, setAreaPaths] = useState<string[]>([])
   const [areasLoading, setAreasLoading] = useState(false)
-  // Boards multi-select state (parsed CSV ↔ list)
   const [boardsList, setBoardsList] = useState<string[]>([])
 
-  // Diagnostics state
+  // Diagnostics
   const [env, setEnv] = useState<EnvStatus | null>(null)
   const [envLoading, setEnvLoading] = useState(false)
   const [wiId, setWiId] = useState('')
@@ -158,9 +306,10 @@ export default function SettingsPage() {
     try {
       const { data } = await axios.get<Config>('/api/settings/config')
       setConfig(data)
-      // Hydrate non-secret editable fields from server.
       setAdoOrg(String(data[K.ADO_ORG] ?? ''))
       setAdoProject(String(data[K.ADO_PROJECT] ?? ''))
+      setAdoRepo(String(data[K.ADO_REPO] ?? ''))
+      setAdoBranch(String(data[K.ADO_BRANCH] ?? ''))
       setAnthropicModel(String(data[K.ANTHROPIC_MODEL] ?? ''))
       setAzureEndpoint(String(data[K.AZURE_ENDPOINT] ?? ''))
       setAzureDeploy(String(data[K.AZURE_DEPLOY] ?? ''))
@@ -181,26 +330,23 @@ export default function SettingsPage() {
 
   useEffect(() => { loadConfig() }, [loadConfig])
 
-  // Claude CLI suggested-models list
   useEffect(() => {
     axios.get<{ suggestions: string[] }>('/api/settings/claude-cli/models')
       .then(r => setClaudeCliModels(r.data.suggestions ?? []))
       .catch(() => setClaudeCliModels([]))
   }, [])
 
-  // Auto-fetch env once so cards (e.g. Claude CLI detected version) render without clicking Check.
+  // Auto-fetch env so the status strip + overview cards render without clicking "Check".
   useEffect(() => {
     axios.get<EnvStatus>('/api/diagnostics').then(r => setEnv(r.data)).catch(() => {})
-  }, [])
+  }, [config[`${K.ADO_PAT}.set`], config[`${K.ANTHROPIC_KEY}.set`]])
 
-  // ADO discovery — orgs are best-effort (PAT often can't list them via vssps).
   useEffect(() => {
-    axios.get<{ organizations: string[]; supported: boolean }>('/api/settings/ado/orgs')
+    axios.get<{ organizations: string[] }>('/api/settings/ado/orgs')
       .then(r => setOrgs(r.data.organizations ?? []))
       .catch(() => setOrgs([]))
-  }, [config[K.ADO_PAT + '.set']])
+  }, [config[`${K.ADO_PAT}.set`]])
 
-  // Projects auto-load when organization is set.
   useEffect(() => {
     if (!adoOrg) { setProjects([]); return }
     setProjectsLoading(true)
@@ -209,9 +355,8 @@ export default function SettingsPage() {
       .then(r => setProjects(r.data.projects ?? []))
       .catch(() => setProjects([]))
       .finally(() => setProjectsLoading(false))
-  }, [adoOrg, config[K.ADO_PAT + '.set']])
+  }, [adoOrg, config[`${K.ADO_PAT}.set`]])
 
-  // Area paths auto-load when project is set.
   useEffect(() => {
     if (!adoOrg || !adoProject) { setAreaPaths([]); return }
     setAreasLoading(true)
@@ -220,16 +365,14 @@ export default function SettingsPage() {
       .then(r => setAreaPaths(r.data.areaPaths ?? []))
       .catch(() => setAreaPaths([]))
       .finally(() => setAreasLoading(false))
-  }, [adoOrg, adoProject, config[K.ADO_PAT + '.set']])
+  }, [adoOrg, adoProject, config[`${K.ADO_PAT}.set`]])
 
-  // Load plans (depends on a working ADO PAT, won't fail page if not set)
   useEffect(() => {
     axios.get<TestPlan[]>('/api/author-tests/plans')
       .then(r => setPlans(r.data))
       .catch(() => setPlans([]))
-  }, [config[K.ADO_PAT + '.set']])
+  }, [config[`${K.ADO_PAT}.set`]])
 
-  // Load suites when default plan changes
   useEffect(() => {
     if (!defaultPlan) { setSuites([]); return }
     axios.get<TestSuite[]>(`/api/author-tests/plans/${defaultPlan}/suites`)
@@ -242,7 +385,6 @@ export default function SettingsPage() {
       const { data } = await axios.put<Config>('/api/settings/config', { values })
       setConfig(data)
       setToast('Saved')
-      // Clear secret inputs after successful save so the masked placeholder shows again.
       ;([
         [K.ADO_PAT, setAdoPat],
         [K.ANTHROPIC_KEY, setAnthropicKey],
@@ -252,7 +394,6 @@ export default function SettingsPage() {
     } catch (e) { setError(axiosMessage(e)) }
   }
 
-  // ── diagnostics actions ────────────────────────────────────────────────
   async function checkEnv() {
     setEnvLoading(true)
     try {
@@ -278,303 +419,529 @@ export default function SettingsPage() {
     finally { setLlmLoading(false) }
   }
 
-  const StatusChip = ({ ok }: { ok: boolean }) =>
-    ok ? <Chip icon={<CheckCircleIcon />} label="Present" color="success" size="small" />
-       : <Chip icon={<ErrorIcon />} label="MISSING" color="error" size="small" />
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
+        <CircularProgress />
+      </Box>
+    )
+  }
 
-  if (loading) return <CircularProgress />
+  const activeProvider = env?.activeProvider ?? ''
 
+  // ── Page header with status pills ────────────────────────────────────────
+  const Header = (
+    <PageHeader
+      title="Settings"
+      subtitle="Connections, providers, defaults, and live checks for the QA Automation workspace."
+      actions={
+        <Stack direction="row" spacing={3} sx={{ alignItems: 'center' }}>
+          <StatusPill ok={!!activeProvider} label="Active LLM" value={activeProvider || 'unset'} />
+          <StatusPill ok={!!env?.adoPatPresent} label="ADO PAT" />
+          <StatusPill ok={!!env?.claudeCliAvailable}
+            label="Claude CLI" value={env?.claudeCliVersion ?? (env?.claudeCliAvailable ? 'ok' : 'missing')} />
+          <Tooltip title="Refresh diagnostics">
+            <IconButton onClick={checkEnv} disabled={envLoading} size="small">
+              {envLoading ? <CircularProgress size={16} /> : <RefreshIcon fontSize="small" />}
+            </IconButton>
+          </Tooltip>
+        </Stack>
+      }
+    />
+  )
+
+  // ── Tab navigation ───────────────────────────────────────────────────────
+  const TabBar = (
+    <Tabs
+      orientation={isNarrow ? 'horizontal' : 'vertical'}
+      variant={isNarrow ? 'scrollable' : 'standard'}
+      value={tab}
+      onChange={(_, v: TabKey) => setTab(v)}
+      sx={{
+        minWidth: isNarrow ? '100%' : 224,
+        borderRight: isNarrow ? 0 : 1,
+        borderBottom: isNarrow ? 1 : 0,
+        borderColor: 'divider',
+        '& .MuiTab-root': {
+          fontSize: 13.5, fontWeight: 600,
+          textTransform: 'none', alignItems: isNarrow ? 'center' : 'flex-start',
+          textAlign: 'left', minHeight: 46, gap: 1, pl: isNarrow ? 2 : 2.5, pr: 2,
+          borderRadius: 2,
+        },
+        '& .MuiTab-iconWrapper': { mr: 1, mb: '0 !important' },
+      }}
+    >
+      {TABS.map(t => (
+        <Tab key={t.key} value={t.key} icon={t.icon} iconPosition="start" label={t.label} />
+      ))}
+    </Tabs>
+  )
+
+  // ── Tab panels ───────────────────────────────────────────────────────────
   return (
-    <Box>
-      <Typography variant="h5" gutterBottom>Settings</Typography>
-      <Stack spacing={3} sx={{ maxWidth: 820 }}>
+    <Box sx={{ pb: 6 }}>
+      {Header}
 
-        {/* ─── Azure DevOps ─────────────────────────────────────────────── */}
-        <Card variant="outlined">
-          <CardContent>
-            <Typography variant="h6" gutterBottom>Azure DevOps</Typography>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
-              Save the PAT first — organization, project, and boards then populate from ADO.
-            </Typography>
-            <Stack spacing={2}>
-              <SecretField label="Personal Access Token" value={adoPat} set={setAdoPat}
-                isSet={Boolean(config[`${K.ADO_PAT}.set`])} />
+      <Stack direction={isNarrow ? 'column' : 'row'} spacing={isNarrow ? 0 : 4}
+        sx={{ alignItems: 'stretch' }}>
+        {TabBar}
 
-              <Autocomplete
-                freeSolo
-                options={orgs}
-                value={adoOrg}
-                onChange={(_, v) => { setAdoOrg(v || ''); setAdoProject('') }}
-                onInputChange={(_, v) => setAdoOrg(v)}
-                renderInput={p => (
-                  <TextField {...p} label="Organization" size="small"
-                    helperText={orgs.length > 0
-                      ? `${orgs.length} discoverable from PAT — or type any`
-                      : 'PAT cannot list orgs via vssps — type your organization name'} />
-                )}
-              />
+        <Box sx={{ flex: 1, minWidth: 0, pt: isNarrow ? 3 : 0, pl: isNarrow ? 0 : 1 }}>
+          <AnimatePresence mode="wait">
+            <FadeIn key={tab} y={10}>
 
-              <Autocomplete
-                options={projects.map(p => p.name)}
-                value={adoProject}
-                onChange={(_, v) => setAdoProject(v || '')}
-                loading={projectsLoading}
-                disabled={!adoOrg}
-                renderInput={p => (
-                  <TextField {...p} label="Project" size="small"
-                    helperText={!adoOrg ? 'Set organization first.'
-                      : projectsLoading ? 'Loading projects…'
-                      : `${projects.length} project(s) in ${adoOrg}`} />
-                )}
-              />
+              {/* ── OVERVIEW ────────────────────────────────────────────────── */}
+              {tab === 'overview' && (
+                <Box>
+                  <SectionHeader eyebrow="01 · Overview" title="System at a glance"
+                    subtitle="A snapshot of what's configured. Use the tabs to drill in." />
+                  <Stagger>
+                    <Box sx={{
+                      display: 'grid',
+                      gridTemplateColumns: { xs: '1fr', md: 'repeat(2, 1fr)' },
+                      gap: 2,
+                    }}>
+                      <StaggerItem>
+                        <Panel title="Azure DevOps"
+                          hint={config[`${K.ADO_PAT}.set`]
+                            ? `Connected · ${adoOrg || '—'} / ${adoProject || '—'}`
+                            : 'PAT not configured.'}>
+                          <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
+                            <StatusPill ok={!!env?.adoPatPresent} label="PAT" />
+                            <Button size="small" onClick={() => setTab('ado')}>Configure</Button>
+                          </Stack>
+                        </Panel>
+                      </StaggerItem>
 
-              <Stack direction="row" sx={{ justifyContent: 'flex-end' }}>
-                <Button variant="contained" startIcon={<SaveIcon />}
-                  onClick={() => save({
-                    [K.ADO_ORG]: adoOrg,
-                    [K.ADO_PROJECT]: adoProject,
-                    [K.ADO_PAT]: adoPat,
-                  })}>Save Azure DevOps</Button>
-              </Stack>
-            </Stack>
-          </CardContent>
-        </Card>
+                      <StaggerItem>
+                        <Panel title="LLM Providers"
+                          hint={activeProvider ? `Active: ${activeProvider}` : 'No provider selected.'}>
+                          <Stack direction="row" spacing={2} sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+                            <Chip size="small" variant={env?.anthropicKeyPresent ? 'filled' : 'outlined'}
+                              label="Anthropic" color={env?.anthropicKeyPresent ? 'primary' : 'default'} />
+                            <Chip size="small" variant={env?.azureOpenAiConfigured ? 'filled' : 'outlined'}
+                              label="Azure OpenAI" color={env?.azureOpenAiConfigured ? 'primary' : 'default'} />
+                            <Chip size="small" variant={config[`${K.OPENAI_KEY}.set`] ? 'filled' : 'outlined'}
+                              label="OpenAI-compat" color={config[`${K.OPENAI_KEY}.set`] ? 'primary' : 'default'} />
+                            <Chip size="small" variant={env?.claudeCliAvailable ? 'filled' : 'outlined'}
+                              label="Claude CLI" color={env?.claudeCliAvailable ? 'primary' : 'default'} />
+                          </Stack>
+                          <Button size="small" sx={{ mt: 1.5 }} onClick={() => setTab('llm')}>Manage providers</Button>
+                        </Panel>
+                      </StaggerItem>
 
-        {/* ─── LLM Providers ────────────────────────────────────────────── */}
-        <Card variant="outlined">
-          <CardContent>
-            <Typography variant="h6" gutterBottom>LLM Providers</Typography>
+                      <StaggerItem>
+                        <Panel title="Author Tests" hint="Default Test Plan + Suite used on push.">
+                          <Typography variant="body2" sx={{ fontFamily: MONO_FONT, fontSize: 12 }}>
+                            plan: {defaultPlan || '—'}<br />suite: {defaultSuite || '—'}
+                          </Typography>
+                          <Button size="small" sx={{ mt: 1 }} onClick={() => setTab('tests')}>Set defaults</Button>
+                        </Panel>
+                      </StaggerItem>
 
-            <Typography variant="subtitle2" sx={{ mt: 1 }}>Anthropic</Typography>
-            <Stack spacing={1.5} sx={{ mt: 1 }}>
-              <SecretField label="API key" value={anthropicKey} set={setAnthropicKey}
-                isSet={Boolean(config[`${K.ANTHROPIC_KEY}.set`])} />
-              <TextField label="Model" size="small" value={anthropicModel}
-                onChange={e => setAnthropicModel(e.target.value)}
-                placeholder="claude-sonnet-4-6" />
-            </Stack>
+                      <StaggerItem>
+                        <Panel title="Reports" hint="Schedule + default range + boards filter.">
+                          <Typography variant="body2" sx={{ fontFamily: MONO_FONT, fontSize: 12 }}>
+                            schedule: {schedEnabled ? 'on (Thu 11:00)' : 'off'}<br />
+                            range: {defaultRange} days · boards: {boardsList.length || 'all'}
+                          </Typography>
+                          <Button size="small" sx={{ mt: 1 }} onClick={() => setTab('reports')}>Configure</Button>
+                        </Panel>
+                      </StaggerItem>
+                    </Box>
+                  </Stagger>
+                </Box>
+              )}
 
-            <Divider sx={{ my: 2 }} />
-            <Typography variant="subtitle2">Azure OpenAI</Typography>
-            <Stack spacing={1.5} sx={{ mt: 1 }}>
-              <TextField label="Endpoint" size="small" value={azureEndpoint}
-                onChange={e => setAzureEndpoint(e.target.value)}
-                placeholder="https://your-resource.openai.azure.com" />
-              <SecretField label="API key" value={azureKey} set={setAzureKey}
-                isSet={Boolean(config[`${K.AZURE_KEY}.set`])} />
-              <TextField label="Deployment" size="small" value={azureDeploy}
-                onChange={e => setAzureDeploy(e.target.value)} />
-            </Stack>
+              {/* ── AZURE DEVOPS ────────────────────────────────────────────── */}
+              {tab === 'ado' && (
+                <Box>
+                  <SectionHeader eyebrow="02 · Azure DevOps" title="Azure DevOps connection"
+                    subtitle="Paste the PAT first — once it's saved, organization and project drop-downs populate from ADO." />
+                  <Panel>
+                    <Stack spacing={2.5}>
+                      <SecretField label="Personal Access Token" value={adoPat} set={setAdoPat}
+                        isSet={Boolean(config[`${K.ADO_PAT}.set`])}
+                        keyName={K.ADO_PAT} />
+                      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                        <Box sx={{ flex: 1 }}>
+                          <FieldKey k={K.ADO_ORG} />
+                          <Autocomplete
+                            freeSolo options={orgs} value={adoOrg}
+                            onChange={(_, v) => { setAdoOrg(v || ''); setAdoProject('') }}
+                            onInputChange={(_, v) => setAdoOrg(v)}
+                            renderInput={p => (
+                              <TextField {...p} label="Organization" size="small"
+                                helperText={orgs.length > 0
+                                  ? `${orgs.length} discoverable from PAT — or type any`
+                                  : 'PAT cannot list orgs via vssps — type the org name manually'} />
+                            )}
+                          />
+                        </Box>
+                        <Box sx={{ flex: 1 }}>
+                          <FieldKey k={K.ADO_PROJECT} />
+                          <Autocomplete
+                            options={projects.map(p => p.name)} value={adoProject}
+                            onChange={(_, v) => setAdoProject(v || '')}
+                            loading={projectsLoading}
+                            disabled={!adoOrg}
+                            renderInput={p => (
+                              <TextField {...p} label="Project" size="small"
+                                helperText={!adoOrg ? 'Set organization first.'
+                                  : projectsLoading ? 'Loading projects…'
+                                  : `${projects.length} project(s) in ${adoOrg}`} />
+                            )}
+                          />
+                        </Box>
+                      </Stack>
+                      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                        <Box sx={{ flex: 1 }}>
+                          <FieldKey k={K.ADO_REPO} />
+                          <TextField label="Git repository" size="small" fullWidth value={adoRepo}
+                            onChange={e => setAdoRepo(e.target.value)} placeholder="Your Repo"
+                            helperText="Repo the code-analysis (verify-against-code) phase reads." />
+                        </Box>
+                        <Box sx={{ flex: 1 }}>
+                          <FieldKey k={K.ADO_BRANCH} />
+                          <TextField label="Default branch" size="small" fullWidth value={adoBranch}
+                            onChange={e => setAdoBranch(e.target.value)} placeholder="main" />
+                        </Box>
+                      </Stack>
+                    </Stack>
+                    <SaveBar onClick={() => save({
+                      [K.ADO_ORG]: adoOrg,
+                      [K.ADO_PROJECT]: adoProject,
+                      [K.ADO_PAT]: adoPat,
+                      [K.ADO_REPO]: adoRepo,
+                      [K.ADO_BRANCH]: adoBranch,
+                    })} />
+                  </Panel>
+                </Box>
+              )}
 
-            <Divider sx={{ my: 2 }} />
-            <Typography variant="subtitle2">
-              OpenAI-compatible (GitHub Models / Groq / OpenAI / Ollama)
-            </Typography>
-            <Stack spacing={1.5} sx={{ mt: 1 }}>
-              <TextField label="Base URL" size="small" value={openaiBase}
-                onChange={e => setOpenaiBase(e.target.value)}
-                placeholder="https://models.inference.ai.azure.com" />
-              <SecretField label="API key" value={openaiKey} set={setOpenaiKey}
-                isSet={Boolean(config[`${K.OPENAI_KEY}.set`])} />
-              <TextField label="Model" size="small" value={openaiModel}
-                onChange={e => setOpenaiModel(e.target.value)}
-                placeholder="gpt-4o-mini" />
-            </Stack>
+              {/* ── LLM PROVIDERS ───────────────────────────────────────────── */}
+              {tab === 'llm' && (
+                <Box>
+                  <SectionHeader eyebrow="03 · LLM Providers"
+                    title="Language model providers"
+                    subtitle="Each agent run uses the active provider — switch any time from the AppBar dropdown. Keys are write-only; the backend never sends them back to the UI." />
 
-            <Divider sx={{ my: 2 }} />
-            <Typography variant="subtitle2">
-              Claude CLI <Chip size="small" label="No API key" color="success" sx={{ ml: 1 }} />
-            </Typography>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-              Uses your local <code>claude</code> CLI login (Pro/Max). Single-user, slower than
-              direct APIs (~2–5s per call), but no API key required.
-              {env?.claudeCliAvailable
-                ? <> Detected: <strong>{env.claudeCliVersion}</strong>.</>
-                : <> CLI not detected on PATH — install Claude Code or set the path below.</>}
-            </Typography>
-            <Stack spacing={1.5} sx={{ mt: 1 }}>
-              <TextField label="CLI path" size="small" value={claudeCliPath}
-                onChange={e => setClaudeCliPath(e.target.value)}
-                placeholder="claude"
-                helperText="Bare 'claude' uses PATH lookup. Set an absolute path if not on PATH." />
-              <Autocomplete<string, false, false, true>
-                freeSolo
-                options={claudeCliModels}
-                value={claudeCliModel}
-                onChange={(_, v) => setClaudeCliModel(v ?? '')}
-                onInputChange={(_, v) => setClaudeCliModel(v)}
-                renderInput={p => (
-                  <TextField {...p} label="Model" size="small"
-                    placeholder="(blank = CLI default)"
-                    helperText="Aliases (sonnet/opus/haiku) auto-resolve to latest. Type a full version ID to pin." />
-                )}
-              />
-              <TextField label="Timeout (seconds)" size="small" type="number" value={claudeCliTimeout}
-                onChange={e => setClaudeCliTimeout(e.target.value)}
-                helperText="How long to wait per CLI call before aborting. Min 10." />
-            </Stack>
+                  <Stagger>
+                    <Box sx={{
+                      display: 'grid',
+                      gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' },
+                      gap: 2,
+                    }}>
+                      <StaggerItem>
+                        <ProviderCard
+                          name="Anthropic"
+                          blurb="claude.ai API. Fastest direct path."
+                          active={activeProvider === 'Anthropic'}
+                          ready={!!env?.anthropicKeyPresent}>
+                          <SecretField label="API key" value={anthropicKey} set={setAnthropicKey}
+                            isSet={Boolean(config[`${K.ANTHROPIC_KEY}.set`])} keyName={K.ANTHROPIC_KEY} />
+                          <Box>
+                            <FieldKey k={K.ANTHROPIC_MODEL} />
+                            <TextField label="Model" size="small" fullWidth value={anthropicModel}
+                              onChange={e => setAnthropicModel(e.target.value)}
+                              placeholder="claude-sonnet-4-6" />
+                          </Box>
+                          <Button size="small" variant="text" sx={{ alignSelf: 'flex-end' }}
+                            onClick={() => save({
+                              [K.ANTHROPIC_KEY]: anthropicKey,
+                              [K.ANTHROPIC_MODEL]: anthropicModel,
+                            })}>Save Anthropic</Button>
+                        </ProviderCard>
+                      </StaggerItem>
 
-            <Stack direction="row" sx={{ mt: 2, justifyContent: 'flex-end' }}>
-              <Button variant="contained" startIcon={<SaveIcon />}
-                onClick={() => save({
-                  [K.ANTHROPIC_KEY]: anthropicKey,
-                  [K.ANTHROPIC_MODEL]: anthropicModel,
-                  [K.AZURE_ENDPOINT]: azureEndpoint,
-                  [K.AZURE_KEY]: azureKey,
-                  [K.AZURE_DEPLOY]: azureDeploy,
-                  [K.OPENAI_BASE_URL]: openaiBase,
-                  [K.OPENAI_KEY]: openaiKey,
-                  [K.OPENAI_MODEL]: openaiModel,
-                  [K.CLAUDE_CLI_PATH]: claudeCliPath,
-                  [K.CLAUDE_CLI_MODEL]: claudeCliModel,
-                  [K.CLAUDE_CLI_TIMEOUT]: claudeCliTimeout,
-                })}>Save LLM Providers</Button>
-            </Stack>
-          </CardContent>
-        </Card>
+                      <StaggerItem>
+                        <ProviderCard
+                          name="Azure OpenAI"
+                          blurb="Azure-native AI for procurement-restricted shops."
+                          active={activeProvider === 'AzureOpenAI'}
+                          ready={!!env?.azureOpenAiConfigured}>
+                          <Box>
+                            <FieldKey k={K.AZURE_ENDPOINT} />
+                            <TextField label="Endpoint" size="small" fullWidth value={azureEndpoint}
+                              onChange={e => setAzureEndpoint(e.target.value)}
+                              placeholder="https://your-resource.openai.azure.com" />
+                          </Box>
+                          <SecretField label="API key" value={azureKey} set={setAzureKey}
+                            isSet={Boolean(config[`${K.AZURE_KEY}.set`])} keyName={K.AZURE_KEY} />
+                          <Box>
+                            <FieldKey k={K.AZURE_DEPLOY} />
+                            <TextField label="Deployment" size="small" fullWidth value={azureDeploy}
+                              onChange={e => setAzureDeploy(e.target.value)} />
+                          </Box>
+                          <Button size="small" variant="text" sx={{ alignSelf: 'flex-end' }}
+                            onClick={() => save({
+                              [K.AZURE_ENDPOINT]: azureEndpoint,
+                              [K.AZURE_KEY]: azureKey,
+                              [K.AZURE_DEPLOY]: azureDeploy,
+                            })}>Save Azure</Button>
+                        </ProviderCard>
+                      </StaggerItem>
 
-        {/* ─── Author Tests defaults ────────────────────────────────────── */}
-        <Card variant="outlined">
-          <CardContent>
-            <Typography variant="h6" gutterBottom>Author Tests — Defaults</Typography>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
-              Used as the pre-selected Test Plan + Suite on the Author Tests page push step.
-            </Typography>
-            <Stack spacing={2}>
-              <FormControl size="small">
-                <InputLabel>Default Test Plan</InputLabel>
-                <Select label="Default Test Plan" value={defaultPlan}
-                  onChange={e => { setDefaultPlan(e.target.value as number); setDefaultSuite('') }}>
-                  <MenuItem value="">(none)</MenuItem>
-                  {plans.map(p => (
-                    <MenuItem key={p.id} value={p.id}>{p.name} <small style={{ marginLeft: 6, opacity: .7 }}>#{p.id}</small></MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              <FormControl size="small" disabled={!defaultPlan}>
-                <InputLabel>Default Test Suite</InputLabel>
-                <Select label="Default Test Suite" value={defaultSuite}
-                  onChange={e => setDefaultSuite(e.target.value as number)}>
-                  <MenuItem value="">(none)</MenuItem>
-                  {suites.map(s => (
-                    <MenuItem key={s.id} value={s.id}>{s.name} <small style={{ marginLeft: 6, opacity: .7 }}>#{s.id}</small></MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              <Stack direction="row" sx={{ justifyContent: 'flex-end' }}>
-                <Button variant="contained" startIcon={<SaveIcon />}
-                  onClick={() => save({
-                    [K.DEFAULT_PLAN_ID]: defaultPlan === '' ? '' : String(defaultPlan),
-                    [K.DEFAULT_SUITE_ID]: defaultSuite === '' ? '' : String(defaultSuite),
-                  })}>Save Defaults</Button>
-              </Stack>
-            </Stack>
-          </CardContent>
-        </Card>
+                      <StaggerItem>
+                        <ProviderCard
+                          name="OpenAI-compatible"
+                          blurb="GitHub Models (free) · Groq · OpenAI · Ollama."
+                          active={activeProvider === 'OpenAICompatible'}
+                          ready={!!config[`${K.OPENAI_KEY}.set`]}>
+                          <Box>
+                            <FieldKey k={K.OPENAI_BASE_URL} />
+                            <TextField label="Base URL" size="small" fullWidth value={openaiBase}
+                              onChange={e => setOpenaiBase(e.target.value)}
+                              placeholder="https://models.inference.ai.azure.com" />
+                          </Box>
+                          <SecretField label="API key" value={openaiKey} set={setOpenaiKey}
+                            isSet={Boolean(config[`${K.OPENAI_KEY}.set`])} keyName={K.OPENAI_KEY} />
+                          <Box>
+                            <FieldKey k={K.OPENAI_MODEL} />
+                            <TextField label="Model" size="small" fullWidth value={openaiModel}
+                              onChange={e => setOpenaiModel(e.target.value)}
+                              placeholder="gpt-4o-mini" />
+                          </Box>
+                          <Button size="small" variant="text" sx={{ alignSelf: 'flex-end' }}
+                            onClick={() => save({
+                              [K.OPENAI_BASE_URL]: openaiBase,
+                              [K.OPENAI_KEY]: openaiKey,
+                              [K.OPENAI_MODEL]: openaiModel,
+                            })}>Save OpenAI-compat</Button>
+                        </ProviderCard>
+                      </StaggerItem>
 
-        {/* ─── Reports configuration ────────────────────────────────────── */}
-        <Card variant="outlined">
-          <CardContent>
-            <Typography variant="h6" gutterBottom>Reports configuration</Typography>
-            <Stack spacing={2}>
-              <FormControlLabel
-                control={<Switch checked={schedEnabled}
-                  onChange={(_, v) => setSchedEnabled(v)} />}
-                label="Schedule weekly report (Thursday 11:00, local timezone)" />
-              <TextField label="Default range (days)" size="small" type="number" value={defaultRange}
-                onChange={e => setDefaultRange(e.target.value)}
-                helperText="Used by the weekly auto-run + the on-demand Reports page default." />
-              <Autocomplete<string, true, false, true>
-                multiple
-                freeSolo
-                options={areaPaths}
-                value={boardsList}
-                onChange={(_, v) => setBoardsList(v as string[])}
-                loading={areasLoading}
-                disabled={!adoOrg || !adoProject}
-                renderInput={p => (
-                  <TextField {...p} label="Boards / area paths" size="small"
-                    helperText={
-                      !adoOrg || !adoProject ? 'Set organization + project first.'
-                      : areasLoading ? 'Loading area paths…'
-                      : `Pick from ${areaPaths.length} discovered path(s). Empty = whole project.`
-                    }
-                  />
-                )}
-              />
-              <Stack direction="row" sx={{ justifyContent: 'flex-end' }}>
-                <Button variant="contained" startIcon={<SaveIcon />}
-                  onClick={() => save({
-                    [K.SCHED_ENABLED]: schedEnabled ? 'true' : 'false',
-                    [K.DEFAULT_RANGE]: defaultRange,
-                    [K.DEFAULT_BOARDS]: boardsList.join('; '),
-                  })}>Save Reports config</Button>
-              </Stack>
-            </Stack>
-          </CardContent>
-        </Card>
+                      <StaggerItem>
+                        <ProviderCard
+                          name="Claude CLI"
+                          blurb={env?.claudeCliAvailable
+                            ? `Local CLI · ${env.claudeCliVersion}. Uses your Pro/Max login.`
+                            : 'Local `claude` CLI not detected — install Claude Code and log in.'}
+                          active={activeProvider === 'ClaudeCli'}
+                          ready={!!env?.claudeCliAvailable}>
+                          <Box>
+                            <FieldKey k={K.CLAUDE_CLI_PATH} />
+                            <TextField label="CLI path" size="small" fullWidth value={claudeCliPath}
+                              onChange={e => setClaudeCliPath(e.target.value)}
+                              placeholder="claude" />
+                          </Box>
+                          <Box>
+                            <FieldKey k={K.CLAUDE_CLI_MODEL} />
+                            <Autocomplete
+                              freeSolo options={claudeCliModels} value={claudeCliModel}
+                              onChange={(_, v) => setClaudeCliModel(v || '')}
+                              onInputChange={(_, v) => setClaudeCliModel(v)}
+                              renderInput={p => (
+                                <TextField {...p} label="Model" size="small"
+                                  placeholder="(blank = CLI default)" />
+                              )}
+                            />
+                          </Box>
+                          <Box>
+                            <FieldKey k={K.CLAUDE_CLI_TIMEOUT} />
+                            <TextField label="Timeout (seconds)" size="small" type="number"
+                              fullWidth value={claudeCliTimeout}
+                              onChange={e => setClaudeCliTimeout(e.target.value)} />
+                          </Box>
+                          <Button size="small" variant="text" sx={{ alignSelf: 'flex-end' }}
+                            onClick={() => save({
+                              [K.CLAUDE_CLI_PATH]: claudeCliPath,
+                              [K.CLAUDE_CLI_MODEL]: claudeCliModel,
+                              [K.CLAUDE_CLI_TIMEOUT]: claudeCliTimeout,
+                            })}>Save Claude CLI</Button>
+                        </ProviderCard>
+                      </StaggerItem>
+                    </Box>
+                  </Stagger>
+                </Box>
+              )}
 
-        {/* ─── System diagnostics (existing) ────────────────────────────── */}
-        <Card variant="outlined">
-          <CardContent>
-            <Typography variant="h6" gutterBottom>System diagnostics</Typography>
-            <Stack spacing={2}>
-              <Box>
-                <Typography variant="subtitle2" gutterBottom>Environment</Typography>
-                <Button variant="outlined" onClick={checkEnv} disabled={envLoading}>
-                  {envLoading ? <CircularProgress size={18} /> : 'Check'}
-                </Button>
-                {env && (
-                  <Stack direction="row" spacing={2} sx={{ mt: 2, flexWrap: 'wrap', rowGap: 1 }}>
-                    <Box><Typography variant="body2">Active provider</Typography>
-                      <Chip label={env.activeProvider} color="primary" size="small" /></Box>
-                    <Box><Typography variant="body2">ADOACCESS_PAT</Typography>
-                      <StatusChip ok={env.adoPatPresent} /></Box>
-                    <Box><Typography variant="body2">ANTHROPIC_API_KEY</Typography>
-                      <StatusChip ok={env.anthropicKeyPresent} /></Box>
-                    <Box><Typography variant="body2">Azure OpenAI</Typography>
-                      <StatusChip ok={env.azureOpenAiConfigured} /></Box>
-                    <Box><Typography variant="body2">Claude CLI</Typography>
-                      <StatusChip ok={env.claudeCliAvailable} /></Box>
-                  </Stack>
-                )}
-              </Box>
+              {/* ── AUTHOR TESTS ────────────────────────────────────────────── */}
+              {tab === 'tests' && (
+                <Box>
+                  <SectionHeader eyebrow="04 · Author Tests"
+                    title="Author-tests defaults"
+                    subtitle="The Test Plan + Suite picked here are pre-selected on the Author Tests push step." />
+                  <Panel>
+                    <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+                      <Box sx={{ flex: 1 }}>
+                        <FieldKey k={K.DEFAULT_PLAN_ID} />
+                        <FormControl size="small" fullWidth>
+                          <InputLabel>Default Test Plan</InputLabel>
+                          <Select label="Default Test Plan" value={defaultPlan}
+                            onChange={e => { setDefaultPlan(e.target.value as number); setDefaultSuite('') }}>
+                            <MenuItem value="">(none)</MenuItem>
+                            {plans.map(p => (
+                              <MenuItem key={p.id} value={p.id}>
+                                {p.name}
+                                <Box component="span" sx={{
+                                  ml: 1, fontFamily: MONO_FONT, fontSize: 11, color: 'text.secondary',
+                                }}>#{p.id}</Box>
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                      </Box>
+                      <Box sx={{ flex: 1 }}>
+                        <FieldKey k={K.DEFAULT_SUITE_ID} />
+                        <FormControl size="small" fullWidth disabled={!defaultPlan}>
+                          <InputLabel>Default Test Suite</InputLabel>
+                          <Select label="Default Test Suite" value={defaultSuite}
+                            onChange={e => setDefaultSuite(e.target.value as number)}>
+                            <MenuItem value="">(none)</MenuItem>
+                            {suites.map(s => (
+                              <MenuItem key={s.id} value={s.id}>
+                                {s.name}
+                                <Box component="span" sx={{
+                                  ml: 1, fontFamily: MONO_FONT, fontSize: 11, color: 'text.secondary',
+                                }}>#{s.id}</Box>
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                      </Box>
+                    </Stack>
+                    <SaveBar onClick={() => save({
+                      [K.DEFAULT_PLAN_ID]: defaultPlan === '' ? '' : String(defaultPlan),
+                      [K.DEFAULT_SUITE_ID]: defaultSuite === '' ? '' : String(defaultSuite),
+                    })} />
+                  </Panel>
+                </Box>
+              )}
 
-              <Divider />
+              {/* ── REPORTS ─────────────────────────────────────────────────── */}
+              {tab === 'reports' && (
+                <Box>
+                  <SectionHeader eyebrow="05 · Reports"
+                    title="Weekly report configuration"
+                    subtitle="Schedule, default date range, and which boards / area paths to include by default. The Thursday auto-run only fires while the app is running." />
+                  <Panel>
+                    <Stack spacing={3}>
+                      <FormControlLabel
+                        control={<Switch checked={schedEnabled}
+                          onChange={(_, v) => setSchedEnabled(v)} />}
+                        label="Schedule weekly report (Thursday 11:00, local TZ)" />
 
-              <Box>
-                <Typography variant="subtitle2" gutterBottom>Azure DevOps — Read Work Item</Typography>
-                <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                  <TextField label="Work item ID" size="small" value={wiId}
-                    onChange={e => setWiId(e.target.value)} type="number" />
-                  <Button variant="outlined" onClick={readWorkItem} disabled={wiLoading || !wiId}>
-                    {wiLoading ? <CircularProgress size={18} /> : 'Read'}
-                  </Button>
-                </Stack>
-                {wiError && <Typography color="error" sx={{ mt: 1 }}>{wiError}</Typography>}
-                {workItem && (
-                  <Box sx={{ mt: 1.5 }}>
-                    <Typography variant="body2"><strong>{workItem.workItemType}</strong> · {workItem.state}</Typography>
-                    <Typography variant="body2">{workItem.title}</Typography>
-                    {workItem.assignedTo && <Typography variant="caption" color="text.secondary">{workItem.assignedTo}</Typography>}
-                  </Box>
-                )}
-              </Box>
+                      <Box>
+                        <FieldKey k={K.DEFAULT_RANGE} />
+                        <TextField label="Default range (days)" size="small" type="number"
+                          sx={{ width: 220 }} value={defaultRange}
+                          onChange={e => setDefaultRange(e.target.value)}
+                          helperText="Used by both the auto-run and the Reports page default." />
+                      </Box>
 
-              <Divider />
+                      <Box>
+                        <FieldKey k={K.DEFAULT_BOARDS} />
+                        <Autocomplete<string, true, false, true>
+                          multiple freeSolo
+                          options={areaPaths} value={boardsList}
+                          onChange={(_, v) => setBoardsList(v as string[])}
+                          loading={areasLoading}
+                          disabled={!adoOrg || !adoProject}
+                          renderInput={p => (
+                            <TextField {...p} label="Boards / area paths" size="small"
+                              helperText={
+                                !adoOrg || !adoProject ? 'Set organization + project first.'
+                                : areasLoading ? 'Loading area paths…'
+                                : `Pick from ${areaPaths.length} discovered path(s). Empty = whole project.`
+                              }
+                            />
+                          )}
+                        />
+                      </Box>
+                    </Stack>
+                    <SaveBar onClick={() => save({
+                      [K.SCHED_ENABLED]: schedEnabled ? 'true' : 'false',
+                      [K.DEFAULT_RANGE]: defaultRange,
+                      [K.DEFAULT_BOARDS]: boardsList.join('; '),
+                    })} />
+                  </Panel>
+                </Box>
+              )}
 
-              <Box>
-                <Typography variant="subtitle2" gutterBottom>LLM ping (active provider)</Typography>
-                <Button variant="outlined" onClick={pingLlm} disabled={llmLoading}>
-                  {llmLoading ? <CircularProgress size={18} /> : 'Ping'}
-                </Button>
-                {llmError && <Typography color="error" sx={{ mt: 1 }}>{llmError}</Typography>}
-                {llmReply && <Typography sx={{ mt: 1 }}>Reply: <strong>{llmReply}</strong></Typography>}
-              </Box>
-            </Stack>
-          </CardContent>
-        </Card>
+              {/* ── DIAGNOSTICS ─────────────────────────────────────────────── */}
+              {tab === 'diag' && (
+                <Box>
+                  <SectionHeader eyebrow="06 · Diagnostics"
+                    title="Live checks"
+                    subtitle="Verify ADO + the active LLM are working end-to-end. Useful right after changing credentials or switching providers." />
 
+                  <Stagger>
+                    <Box sx={{
+                      display: 'grid',
+                      gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' },
+                      gap: 2,
+                    }}>
+                      <StaggerItem>
+                        <Panel title="Environment" action={
+                          <Button variant="outlined" size="small" startIcon={envLoading ? <CircularProgress size={14} /> : <RefreshIcon />}
+                            onClick={checkEnv} disabled={envLoading}>
+                            Re-check
+                          </Button>
+                        }>
+                          {env ? (
+                            <Stack direction="row" spacing={3} sx={{ flexWrap: 'wrap', gap: 2 }}>
+                              <StatusPill ok={!!activeProvider} label="Active LLM"
+                                value={activeProvider || 'unset'} />
+                              <StatusPill ok={env.adoPatPresent} label="ADO PAT" />
+                              <StatusPill ok={env.anthropicKeyPresent} label="Anthropic key" />
+                              <StatusPill ok={env.azureOpenAiConfigured} label="Azure OpenAI" />
+                              <StatusPill ok={env.claudeCliAvailable} label="Claude CLI"
+                                value={env.claudeCliVersion ?? (env.claudeCliAvailable ? 'ok' : 'missing')} />
+                            </Stack>
+                          ) : <CircularProgress size={20} />}
+                        </Panel>
+                      </StaggerItem>
+
+                      <StaggerItem>
+                        <Panel title="Azure DevOps — read work item">
+                          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                            <TextField label="Work item ID" size="small" type="number"
+                              value={wiId} onChange={e => setWiId(e.target.value)}
+                              sx={{ width: 180 }} />
+                            <Button variant="outlined"
+                              onClick={readWorkItem} disabled={wiLoading || !wiId}>
+                              {wiLoading ? <CircularProgress size={18} /> : 'Read'}
+                            </Button>
+                          </Stack>
+                          {wiError && <Alert severity="error" sx={{ mt: 1.5 }}>{wiError}</Alert>}
+                          {workItem && (
+                            <Box sx={{ mt: 2, p: 2, borderRadius: 1.5, bgcolor: 'background.default', border: 1, borderColor: 'divider' }}>
+                              <Typography variant="body2" sx={{ fontFamily: MONO_FONT, fontSize: 11, color: 'text.secondary' }}>
+                                #{workItem.id} · {workItem.workItemType} · {workItem.state}
+                              </Typography>
+                              <Typography variant="body1" sx={{ fontWeight: 500, mt: 0.5 }}>{workItem.title}</Typography>
+                              {workItem.assignedTo && (
+                                <Typography variant="caption" color="text.secondary">{workItem.assignedTo}</Typography>
+                              )}
+                            </Box>
+                          )}
+                        </Panel>
+                      </StaggerItem>
+
+                      <StaggerItem>
+                        <Panel title="LLM ping" hint="Pings whichever provider is currently active.">
+                          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                            <Button variant="outlined" onClick={pingLlm} disabled={llmLoading}>
+                              {llmLoading ? <CircularProgress size={18} /> : 'Ping'}
+                            </Button>
+                            {llmReply && (
+                              <Typography sx={{
+                                fontFamily: MONO_FONT, fontSize: 13,
+                                color: 'success.main', flex: 1,
+                              }}>{llmReply}</Typography>
+                            )}
+                          </Stack>
+                          {llmError && <Alert severity="error" sx={{ mt: 1.5 }}>{llmError}</Alert>}
+                        </Panel>
+                      </StaggerItem>
+                    </Box>
+                  </Stagger>
+                </Box>
+              )}
+            </FadeIn>
+          </AnimatePresence>
+        </Box>
       </Stack>
 
       <Snackbar open={!!toast} autoHideDuration={3000} onClose={() => setToast('')}

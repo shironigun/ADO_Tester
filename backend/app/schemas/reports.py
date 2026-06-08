@@ -31,3 +31,4 @@ class ReportSchema(CamelModel):
     title: str
     trigger: str
     theme: ReportTheme
+    event_log_json: str | None = None

@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     ado_project: str = "Your Project"
     ado_api_version: str = "7.1"
     adoaccess_pat: str = ""  # env: ADOACCESS_PAT
+    # Git repository used by the code-analysis (verify-against-code) phase.
+    ado_repository: str = "Your Repo"
+    ado_default_branch: str = "main"
 
     # ── Anthropic ───────────────────────────────────────────────────────────
     anthropic_api_key: str = ""

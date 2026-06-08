@@ -18,6 +18,8 @@ class AnthropicLlmClient:
         system_prompt: str,
         user_prompt: str,
         model: str | None = None,
+        progress: object | None = None,  # streaming progress — ignored (non-streaming provider)
+        emit: object | None = None,       # streaming emit callback — ignored (non-streaming provider)
     ) -> str:
         try:
             resp = await self._client.messages.create(

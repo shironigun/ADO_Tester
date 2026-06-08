@@ -42,3 +42,5 @@ class Report(Base):
     )
     # Structured AI insights (TL;DR bullets, theme clusters, speaker script) as JSON text.
     summary_json: Mapped[str | None] = mapped_column("SummaryJson", String, nullable=True)
+    # Persisted narrative of the live generation console (non-token events) as a JSON array.
+    event_log_json: Mapped[str | None] = mapped_column("EventLogJson", String, nullable=True)
