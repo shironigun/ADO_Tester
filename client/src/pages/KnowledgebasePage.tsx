@@ -1,13 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Box, Button, Card, CardContent, Chip, CircularProgress, Divider, IconButton,
-  List, ListItem, ListItemText, Stack, TextField, Typography,
+  Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Divider, IconButton,
+  List, ListItem, ListItemText, Snackbar, Stack, TextField, Typography,
 } from '@mui/material'
 import DeleteIcon from '@mui/icons-material/Delete'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
+import DriveFolderUploadIcon from '@mui/icons-material/DriveFolderUpload'
 import axios from 'axios'
 
 const PROJECT_ID = 1
+
+function axiosMessage(e: unknown): string {
+  if (!axios.isAxiosError(e)) return String(e)
+  const d = e.response?.data as unknown
+  if (typeof d === 'string') return d
+  if (d && typeof d === 'object' && 'title' in d) return String((d as { title: string }).title)
+  return e.message
+}
 
 interface Doc {
   id: number; fileName: string; chunkCount: number; sizeBytes: number; uploadedAt: string
@@ -19,10 +28,12 @@ export default function KnowledgebasePage() {
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
+  const folderRef = useRef<HTMLInputElement>(null)
 
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<Hit[] | null>(null)
   const [searching, setSearching] = useState(false)
+  const [toast, setToast] = useState('')
 
   const loadDocs = useCallback(async () => {
     const { data } = await axios.get<Doc[]>(`/api/knowledgebase/${PROJECT_ID}`)
@@ -32,34 +43,54 @@ export default function KnowledgebasePage() {
   useEffect(() => { loadDocs().catch(() => {}) }, [loadDocs])
 
   async function onUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = e.target.files
-    if (!files || files.length === 0) return
+    const picked = e.target.files
+    if (!picked || picked.length === 0) return
+    // Folder picker hands us every file in the tree — filter to .md (case-insensitive).
+    const mdFiles = Array.from(picked).filter(f => f.name.toLowerCase().endsWith('.md'))
+    if (mdFiles.length === 0) {
+      setError('No .md files found in the selection.')
+      if (fileRef.current) fileRef.current.value = ''
+      if (folderRef.current) folderRef.current.value = ''
+      return
+    }
     setError(''); setUploading(true)
     try {
       const form = new FormData()
-      Array.from(files).forEach(f => form.append('files', f))
+      mdFiles.forEach(f => form.append('files', f))
       await axios.post(`/api/knowledgebase/${PROJECT_ID}`, form)
       await loadDocs()
+      const skipped = picked.length - mdFiles.length
+      setToast(skipped > 0
+        ? `Uploaded ${mdFiles.length} .md file(s) · skipped ${skipped} non-md`
+        : `Uploaded ${mdFiles.length} file(s)`)
     } catch (err: unknown) {
-      setError(axios.isAxiosError(err) ? String(err.response?.data ?? err.message) : String(err))
+      setError(axiosMessage(err))
     } finally {
       setUploading(false)
       if (fileRef.current) fileRef.current.value = ''
+      if (folderRef.current) folderRef.current.value = ''
     }
   }
 
   async function remove(id: number) {
-    await axios.delete(`/api/knowledgebase/doc/${id}`)
-    await loadDocs()
+    try {
+      await axios.delete(`/api/knowledgebase/doc/${id}`)
+      await loadDocs()
+      setToast('Document deleted')
+    } catch (e) { setError(axiosMessage(e)) }
   }
 
   async function search() {
-    if (!query.trim()) return
+    if (!query.trim() || query.trim().length < 2) {
+      setError('Search query must be at least 2 characters.'); return
+    }
+    setError('')
     setSearching(true); setHits(null)
     try {
       const { data } = await axios.get<Hit[]>(`/api/knowledgebase/${PROJECT_ID}/search`, { params: { q: query, k: 8 } })
       setHits(data)
-    } finally { setSearching(false) }
+    } catch (e) { setError(axiosMessage(e)) }
+    finally { setSearching(false) }
   }
 
   return (
@@ -69,12 +100,28 @@ export default function KnowledgebasePage() {
 
         <Card variant="outlined">
           <CardContent>
-            <Typography variant="h6" gutterBottom>Upload .md files</Typography>
-            <Button component="label" variant="contained" startIcon={<UploadFileIcon />} disabled={uploading}>
-              {uploading ? <CircularProgress size={18} sx={{ color: 'white' }} /> : 'Choose .md files'}
-              <input ref={fileRef} type="file" hidden multiple accept=".md" onChange={onUpload} />
-            </Button>
-            {error && <Typography color="error" sx={{ mt: 1 }}>{error}</Typography>}
+            <Typography variant="h6" gutterBottom>Upload .md files or a folder</Typography>
+            <Stack direction="row" spacing={1}>
+              <Button component="label" variant="contained" startIcon={<UploadFileIcon />} disabled={uploading}>
+                {uploading ? <CircularProgress size={18} sx={{ color: 'white' }} /> : 'Choose files'}
+                <input ref={fileRef} type="file" hidden multiple accept=".md" onChange={onUpload} />
+              </Button>
+              <Button component="label" variant="outlined" startIcon={<DriveFolderUploadIcon />} disabled={uploading}>
+                {uploading ? <CircularProgress size={18} /> : 'Choose folder'}
+                {/* webkitdirectory + directory aren't in React's HTMLAttributes — cast around it. */}
+                <input
+                  ref={folderRef}
+                  type="file"
+                  hidden
+                  onChange={onUpload}
+                  {...({ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
+                />
+              </Button>
+            </Stack>
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+              Folder picker walks the whole tree — non-<code>.md</code> files are skipped automatically.
+            </Typography>
+            {error && <Alert severity="error" sx={{ mt: 1 }} onClose={() => setError('')}>{error}</Alert>}
 
             <Divider sx={{ my: 2 }} />
             <Typography variant="subtitle2" gutterBottom>Uploaded documents ({docs.length})</Typography>
@@ -132,6 +179,15 @@ export default function KnowledgebasePage() {
         </Card>
 
       </Stack>
+
+      <Snackbar
+        open={!!toast}
+        autoHideDuration={3000}
+        onClose={() => setToast('')}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert severity="success" onClose={() => setToast('')} variant="filled">{toast}</Alert>
+      </Snackbar>
     </Box>
   )
 }

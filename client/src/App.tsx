@@ -3,9 +3,12 @@ import {
   AppBar, Box, CssBaseline, Drawer, List, ListItem, ListItemButton,
   ListItemText, Toolbar, Typography, ThemeProvider, createTheme,
 } from '@mui/material'
-import DiagnosticsPage from './pages/DiagnosticsPage'
+import SettingsPage from './pages/SettingsPage'
 import KnowledgebasePage from './pages/KnowledgebasePage'
 import AuthorTestsPage from './pages/AuthorTestsPage'
+import ReportsPage from './pages/ReportsPage'
+import ProjectsPage from './pages/ProjectsPage'
+import FindBugsPage from './pages/FindBugsPage'
 import ProviderSwitcher from './components/ProviderSwitcher'
 
 const DRAWER_WIDTH = 220
@@ -16,11 +19,12 @@ const theme = createTheme({
 })
 
 const navItems = [
-  { label: 'Diagnostics', path: '/diagnostics' },
   { label: 'Projects',    path: '/projects' },
   { label: 'Knowledgebase', path: '/knowledgebase' },
   { label: 'Author Tests', path: '/author-tests' },
+  { label: 'Find Bugs',   path: '/find-bugs' },
   { label: 'Reports',     path: '/reports' },
+  { label: 'Settings',    path: '/settings' },
 ]
 
 export default function App() {
@@ -55,11 +59,15 @@ export default function App() {
 
           <Box component="main" sx={{ flexGrow: 1, p: 3, mt: 8 }}>
             <Routes>
-              <Route path="/" element={<DiagnosticsPage />} />
-              <Route path="/diagnostics" element={<DiagnosticsPage />} />
+              <Route path="/" element={<SettingsPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              {/* Back-compat: old /diagnostics URL still resolves */}
+              <Route path="/diagnostics" element={<SettingsPage />} />
+              <Route path="/projects" element={<ProjectsPage />} />
               <Route path="/knowledgebase" element={<KnowledgebasePage />} />
               <Route path="/author-tests" element={<AuthorTestsPage />} />
-              {/* S3 pages added per sprint */}
+              <Route path="/find-bugs" element={<FindBugsPage />} />
+              <Route path="/reports" element={<ReportsPage />} />
               <Route path="*" element={<Typography>Coming soon.</Typography>} />
             </Routes>
           </Box>

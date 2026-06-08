@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Alert, Autocomplete, Box, Button, Card, CardContent, CardHeader,
   Chip, CircularProgress, Collapse, Divider, FormControl, IconButton,
-  InputLabel, MenuItem, Select, Stack, Stepper, Step, StepLabel,
+  InputLabel, MenuItem, Select, Snackbar, Stack, Stepper, Step, StepLabel,
   Table, TableBody, TableCell, TableHead, TableRow, TextField, Tooltip, Typography,
 } from '@mui/material'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
@@ -122,21 +122,27 @@ export default function AuthorTestsPage() {
   const [pushError, setPushError] = useState('')
   // Track last-pushed plan/suite per session so the results card shows context.
   const [pushedContext, setPushedContext] = useState<Record<number, { plan: TestPlan; suite: TestSuite }>>({})
+  // Generic action-error toast — surfaced from approve/reject/save/cancel.
+  const [actionError, setActionError] = useState('')
 
   // Search work items with debounce
   useEffect(() => {
     if (wiQuery.length < 2) { setWiOptions([]); return }
-    const t = setTimeout(async () => {
-      const { data } = await axios.get<WorkItemOption[]>('/api/author-tests/search', { params: { q: wiQuery } })
-      setWiOptions(data)
+    const t = setTimeout(() => {
+      axios.get<WorkItemOption[]>('/api/author-tests/search', { params: { q: wiQuery } })
+        .then(r => setWiOptions(r.data))
+        .catch(() => setWiOptions([]))
     }, 400)
     return () => clearTimeout(t)
   }, [wiQuery])
 
-  // Load session list
+  // Load session list (paged)
   const loadSessions = useCallback(async () => {
-    const { data } = await axios.get<SessionSummary[]>(`/api/author-tests/sessions/${PROJECT_ID}`)
-    setSessions(data)
+    try {
+      const { data } = await axios.get<{ total: number; items: SessionSummary[] }>(
+        `/api/author-tests/sessions/${PROJECT_ID}`, { params: { take: 30 } })
+      setSessions(data.items ?? [])
+    } catch { /* surfaced elsewhere */ }
   }, [])
   useEffect(() => { loadSessions() }, [loadSessions])
 
@@ -188,32 +194,47 @@ export default function AuthorTestsPage() {
   }
   useEffect(() => () => stopPolling(), [])
 
+  function reportError(e: unknown, fallback: string) {
+    const msg = axios.isAxiosError(e)
+      ? (typeof e.response?.data === 'string' ? e.response.data : e.response?.data?.title ?? e.message)
+      : String(e)
+    setActionError(`${fallback}: ${msg}`)
+  }
+
   async function approveDraft(id: number) {
-    await axios.patch(`/api/author-tests/drafts/${id}`, { status: 'Approved' })
-    if (activeSession) openSession(activeSession.id)
+    try {
+      await axios.patch(`/api/author-tests/drafts/${id}`, { status: 'Approved' })
+      if (activeSession) openSession(activeSession.id)
+    } catch (e) { reportError(e, 'Approve failed') }
   }
   async function rejectDraft(id: number) {
-    await axios.patch(`/api/author-tests/drafts/${id}`, { status: 'Rejected' })
-    if (activeSession) openSession(activeSession.id)
+    try {
+      await axios.patch(`/api/author-tests/drafts/${id}`, { status: 'Rejected' })
+      if (activeSession) openSession(activeSession.id)
+    } catch (e) { reportError(e, 'Reject failed') }
   }
   async function approveAll() {
     if (!activeSession) return
-    await axios.post(`/api/author-tests/sessions/${activeSession.id}/approve-all`)
-    openSession(activeSession.id)
+    try {
+      await axios.post(`/api/author-tests/sessions/${activeSession.id}/approve-all`)
+      openSession(activeSession.id)
+    } catch (e) { reportError(e, 'Approve all failed') }
   }
   async function saveDraft(id: number, patch: { title?: string; preconditions?: string; steps?: Step[] }) {
     const body: { title?: string; preconditions?: string; stepsJson?: string } = {}
     if (patch.title !== undefined) body.title = patch.title
     if (patch.preconditions !== undefined) body.preconditions = patch.preconditions
     if (patch.steps !== undefined) body.stepsJson = JSON.stringify(patch.steps)
-    await axios.patch(`/api/author-tests/drafts/${id}`, body)
-    if (activeSession) openSession(activeSession.id)
+    try {
+      await axios.patch(`/api/author-tests/drafts/${id}`, body)
+      if (activeSession) openSession(activeSession.id)
+    } catch (e) { reportError(e, 'Save failed') }
   }
 
   async function cancel() {
     if (!activeSession) return
-    await axios.post(`/api/author-tests/sessions/${activeSession.id}/cancel`)
-    // poll loop will pick up the Cancelled status
+    try { await axios.post(`/api/author-tests/sessions/${activeSession.id}/cancel`) }
+    catch (e) { reportError(e, 'Cancel failed') }
   }
 
   async function push() {
@@ -448,6 +469,15 @@ export default function AuthorTestsPage() {
           </Box>
         )}
       </Stack>
+
+      <Snackbar
+        open={!!actionError}
+        autoHideDuration={6000}
+        onClose={() => setActionError('')}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert severity="error" onClose={() => setActionError('')} variant="filled">{actionError}</Alert>
+      </Snackbar>
     </Box>
   )
 }
