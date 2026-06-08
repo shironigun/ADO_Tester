@@ -30,8 +30,23 @@ from app.services.agents.analyst import AnalystAgent, AnalystOutput
 from app.services.agents.tester import TesterAgent
 from app.services.knowledgebase import get_knowledgebase_service
 from app.services.llm import get_llm_client
+from app.services.llm.base import StreamProgress
+from app.services.event_bus import get_event_bus
+from app.services.events import ConsoleEvent
 
 log = logging.getLogger("qa.orchestrator")
+
+
+def _emit_closure(loop, key: str, phase: str):
+    """Build the thread-safe `emit` callback handed to the streaming LLM client. The CLI
+    reader thread calls it with {'kind','text'}; it bridges to the event loop's bus."""
+    bus = get_event_bus()
+
+    def _emit(d: dict) -> None:
+        bus.publish_threadsafe(loop, key, ConsoleEvent(
+            kind=d.get("kind", "token"), text=d.get("text", ""), phase=phase,
+        ))
+    return _emit
 
 
 class AgentOrchestrator:
@@ -96,8 +111,9 @@ class AgentOrchestrator:
     ) -> None:
         ado = get_ado_client()
         kb = get_knowledgebase_service()
-        llm = await get_llm_client()
-        log.info("Session %d using LLM provider: %s", session_id, llm.provider_name)
+
+        key = f"session:{session_id}"
+        loop = asyncio.get_running_loop()
 
         async with session_scope() as s:
             session = await s.get(TestSession, session_id)
@@ -105,35 +121,68 @@ class AgentOrchestrator:
                 return
 
             try:
+                # Resolve the LLM client inside the try so any config error
+                # (e.g. provider not configured) is recorded on the session.
+                llm = await get_llm_client()
+                log.info("Session %d using LLM provider: %s", session_id, llm.provider_name)
+                self._pub(key, "system", text=f"Pipeline started · provider {llm.provider_name}")
+
                 await self._update_activity(s, session, "Re-fetching work item from Azure DevOps")
                 wi = await ado.get_work_item(work_item_id)
+                self._pub(key, "phase", "fetch", f"Fetched work item #{wi.id} — {wi.title}",
+                          level="success", data={"workItemId": wi.id, "type": wi.work_item_type})
 
                 await self._update_activity(s, session, "Retrieving relevant chunks from the domain knowledgebase")
                 query = f"{wi.title} {wi.acceptance_criteria or ''}".strip()
                 context = await kb.search(s, project_id, query, top_k=8)
+                self._pub(key, "result", "retrieve", f"Retrieved {len(context)} knowledgebase chunk(s)",
+                          level="success", data={"chunks": len(context),
+                                                  "files": [h.file_name for h in context]})
 
                 await self._update_activity(
                     s, session, f"Analyst — analyzing story (using {len(context)} KB chunks)"
                 )
-                analysis = await AnalystAgent(llm).analyze(wi, context)
+                self._pub(key, "phase", "analyst", f"Analyst started ({len(context)} chunks)")
+                analysis = await self._run_streaming(
+                    s, session, "Analyst — analyzing story",
+                    lambda p: AnalystAgent(llm).analyze(wi, context, progress=p,
+                                                        emit=_emit_closure(loop, key, "analyst")),
+                    key=key, phase="analyst",
+                )
+                self._pub(key, "result", "analyst",
+                          f"Analyst produced: {analysis.module} / {analysis.feature} · "
+                          f"{len(analysis.acceptance_criteria)} ACs · {len(analysis.edge_cases)} edge · "
+                          f"{len(analysis.negative_cases)} negative",
+                          level="success", data={
+                              "acceptanceCriteria": len(analysis.acceptance_criteria),
+                              "edgeCases": len(analysis.edge_cases),
+                              "negativeCases": len(analysis.negative_cases),
+                              "businessRules": len(analysis.business_rules),
+                          })
 
                 session.analysis_json = analysis.to_json()
                 if auto_handoff:
                     session.status = SessionStatus.Drafting
                     session.current_activity = "Analyst done — handing off to Tester"
-                else:
-                    session.status = SessionStatus.Drafted
-                    session.current_activity = "Analyst done — awaiting manual Tester trigger"
-                session.updated_at = datetime.utcnow()
-                await s.commit()
-
-                if auto_handoff:
+                    session.updated_at = datetime.utcnow()
+                    await s.commit()
+                    self._pub(key, "system", text="Analyst done — handing off to Tester")
                     await self._update_activity(s, session, "Tester — generating test cases in QA style")
-                    await self._run_tester_inner(s, session, analysis, wi)
+                    await self._run_tester_inner(s, session, analysis, wi, key=key, loop=loop)
+                else:
+                    session.status = SessionStatus.AwaitingTester
+                    session.current_activity = "Analyst done — click Run Tester to continue"
+                    self._pub(key, "system", "analyst",
+                              "Analyst done — awaiting manual Run Tester", data={"terminal": True})
+                    self._persist_log(session, key)
+                    session.updated_at = datetime.utcnow()
+                    await s.commit()
             except asyncio.CancelledError:
                 log.info("Pipeline cancelled for session %d", session_id)
                 session.status = SessionStatus.Cancelled
                 session.current_activity = "Cancelled by user"
+                self._pub(key, "system", text="Cancelled by user", level="warn", data={"terminal": True})
+                self._persist_log(session, key)
                 session.updated_at = datetime.utcnow()
                 await _safe_commit(s)
                 raise
@@ -142,18 +191,24 @@ class AgentOrchestrator:
                 session.status = SessionStatus.Failed
                 session.error_message = str(e)
                 session.current_activity = f"Failed: {e}"
+                self._pub(key, "error", text=f"Failed: {e}", level="error", data={"terminal": True})
+                self._persist_log(session, key)
                 session.updated_at = datetime.utcnow()
                 await _safe_commit(s)
 
     async def _rerun_tester(self, session_id: int) -> None:
         ado = get_ado_client()
-        llm = await get_llm_client()
+        key = f"session:{session_id}"
+        loop = asyncio.get_running_loop()
 
         async with session_scope() as s:
             session = await s.get(TestSession, session_id)
             if session is None:
                 return
             try:
+                # Resolve LLM inside the try so a missing provider lands on this session.
+                await get_llm_client()
+
                 if not session.analysis_json:
                     raise RuntimeError("Analyst analysis missing — run Analyst first.")
                 analysis = AnalystOutput.from_dict(json.loads(session.analysis_json))
@@ -164,10 +219,12 @@ class AgentOrchestrator:
                 await s.commit()
 
                 wi = await ado.get_work_item(session.work_item_id)
-                await self._run_tester_inner(s, session, analysis, wi)
+                await self._run_tester_inner(s, session, analysis, wi, key=key, loop=loop)
             except asyncio.CancelledError:
                 session.status = SessionStatus.Cancelled
                 session.current_activity = "Cancelled by user"
+                self._pub(key, "system", text="Cancelled by user", level="warn", data={"terminal": True})
+                self._persist_log(session, key)
                 session.updated_at = datetime.utcnow()
                 await _safe_commit(s)
                 raise
@@ -176,12 +233,22 @@ class AgentOrchestrator:
                 session.status = SessionStatus.Failed
                 session.error_message = str(e)
                 session.current_activity = f"Failed: {e}"
+                self._pub(key, "error", text=f"Failed: {e}", level="error", data={"terminal": True})
+                self._persist_log(session, key)
                 session.updated_at = datetime.utcnow()
                 await _safe_commit(s)
 
-    async def _run_tester_inner(self, s, session: TestSession, analysis: AnalystOutput, wi) -> None:
+    async def _run_tester_inner(self, s, session: TestSession, analysis: AnalystOutput, wi,
+                                key: str | None = None, loop=None) -> None:
         llm = await get_llm_client()
-        generated = await TesterAgent(llm).generate(analysis, wi)
+        if key:
+            self._pub(key, "phase", "tester", "Tester started — generating test cases in QA style")
+        emit = _emit_closure(loop, key, "tester") if (key and loop) else None
+        generated = await self._run_streaming(
+            s, session, "Tester — generating test cases",
+            lambda p: TesterAgent(llm).generate(analysis, wi, progress=p, emit=emit),
+            key=key, phase="tester",
+        )
 
         # Clear any prior drafts (re-run case) then insert new ones.
         await s.execute(delete(TestCaseDraft).where(TestCaseDraft.session_id == session.id))
@@ -193,14 +260,21 @@ class AgentOrchestrator:
                 steps_json=json.dumps([{"action": st.action, "expected": st.expected} for st in g.steps]),
                 sort_order=i,
             ))
+            if key:
+                self._pub(key, "result", "tester", f"Test case {i + 1}/{len(generated)}: {g.title}")
 
         session.status = SessionStatus.Drafted
         session.current_activity = f"Drafted {len(generated)} test case(s) — awaiting review"
+        if key:
+            self._pub(key, "system", "tester", f"Drafted {len(generated)} test case(s) — awaiting review",
+                      level="success", data={"terminal": True, "count": len(generated)})
+            self._persist_log(session, key)
         session.updated_at = datetime.utcnow()
         await s.commit()
 
     async def _push(self, session_id: int, test_plan_id: int, test_suite_id: int) -> None:
         ado = get_ado_client()
+        key = f"session:{session_id}"
 
         async with session_scope() as s:
             stmt = (
@@ -216,6 +290,7 @@ class AgentOrchestrator:
             session.current_activity = "Push starting…"
             session.updated_at = datetime.utcnow()
             await s.commit()
+            self._pub(key, "phase", "push", "Push to ADO started")
 
             drafts = (await s.execute(
                 select(TestCaseDraft)
@@ -228,6 +303,9 @@ class AgentOrchestrator:
                 session.status = SessionStatus.Failed
                 session.error_message = "No approved drafts to push."
                 session.current_activity = "Push failed: no approved drafts"
+                self._pub(key, "error", "push", "Push failed: no approved drafts",
+                          level="error", data={"terminal": True})
+                self._persist_log(session, key)
                 session.updated_at = datetime.utcnow()
                 await s.commit()
                 return
@@ -238,6 +316,7 @@ class AgentOrchestrator:
                     session.current_activity = f"Pushing {i}/{len(drafts)}: creating Test Case"
                     session.updated_at = datetime.utcnow()
                     await s.commit()
+                    self._pub(key, "push", "push", f"{i}/{len(drafts)}: creating Test Case — {draft.title}")
 
                     raw_steps = json.loads(draft.steps_json) if draft.steps_json else []
                     steps = [
@@ -261,9 +340,14 @@ class AgentOrchestrator:
                     draft.status = DraftStatus.Pushed
                     pushed += 1
                     await s.commit()
+                    self._pub(key, "result", "push", f"TC #{tc_id} pushed → suite + linked to story",
+                              level="success", data={"testCaseId": tc_id})
 
                 session.status = SessionStatus.Done
                 session.current_activity = f"Pushed {pushed} test case(s) to ADO"
+                self._pub(key, "system", "push", f"Pushed {pushed} test case(s) to ADO",
+                          level="success", data={"terminal": True, "count": pushed})
+                self._persist_log(session, key)
                 session.updated_at = datetime.utcnow()
                 await s.commit()
             except asyncio.CancelledError:
@@ -272,6 +356,9 @@ class AgentOrchestrator:
                     f"Push cancelled — {sum(1 for d in drafts if d.status == DraftStatus.Pushed)} "
                     f"of {len(drafts)} pushed"
                 )
+                self._pub(key, "system", "push", session.current_activity,
+                          level="warn", data={"terminal": True})
+                self._persist_log(session, key)
                 session.updated_at = datetime.utcnow()
                 await _safe_commit(s)
                 raise
@@ -280,10 +367,62 @@ class AgentOrchestrator:
                 session.status = SessionStatus.Failed
                 session.error_message = str(e)
                 session.current_activity = f"Push failed: {e}"
+                self._pub(key, "error", "push", f"Push failed: {e}",
+                          level="error", data={"terminal": True})
+                self._persist_log(session, key)
                 session.updated_at = datetime.utcnow()
                 await _safe_commit(s)
 
     # ── helpers ─────────────────────────────────────────────────────────────
+
+    async def _run_streaming(self, s, session: TestSession, label: str, factory,
+                             key: str | None = None, phase: str | None = None):
+        """Run a streaming agent call while pumping live progress into the session's
+        current_activity (~every 1.5s) so the UI shows what the agent is doing and that
+        it's alive. If `key` is given, also publishes `stat` events to the console bus.
+        `factory(progress)` returns the agent coroutine."""
+        bus = get_event_bus() if key else None
+        progress = StreamProgress()
+        task = asyncio.create_task(factory(progress))
+        try:
+            while True:
+                done, _ = await asyncio.wait({task}, timeout=1.5)
+                snap = progress.snapshot()
+                elapsed = int(snap["elapsed"])
+                chars = snap["chars"]
+                session.current_activity = (
+                    f"{label} — {chars:,} chars · {elapsed}s" if chars
+                    else f"{label} — working · {elapsed}s"
+                )
+                session.updated_at = datetime.utcnow()
+                await _safe_commit(s)
+                if bus is not None:
+                    bus.publish(key, ConsoleEvent(
+                        kind="stat", phase=phase, data={"chars": chars, "elapsed": elapsed},
+                    ))
+                if task in done:
+                    break
+            return task.result()
+        except asyncio.CancelledError:
+            task.cancel()
+            raise
+
+    # ── console-event helpers ────────────────────────────────────────────────
+
+    @staticmethod
+    def _pub(key: str, kind: str, phase: str | None = None, text: str = "",
+             level: str = "info", data: dict | None = None) -> None:
+        get_event_bus().publish(key, ConsoleEvent(
+            kind=kind, phase=phase, text=text, level=level, data=data,
+        ))
+
+    @staticmethod
+    def _persist_log(session: TestSession, key: str) -> None:
+        """Snapshot the durable narrative into EventLogJson (piggybacks the next commit)."""
+        try:
+            session.event_log_json = json.dumps(get_event_bus().narrative(key))
+        except Exception:  # noqa: BLE001
+            pass
 
     @staticmethod
     async def _update_activity(s, session: TestSession, msg: str) -> None:

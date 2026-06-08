@@ -13,16 +13,19 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
+from app.services.sse import SSE_HEADERS, event_stream, parse_last_event_id
 from app.models import BugDraft, BugDraftStatus, BugSession
 from app.schemas import (
     AcceptedResponse,
     ApproveAllResponse,
     BugDraftSchema,
+    BugLinkedRefs,
     BugRunRequest,
     BugSessionDetailSchema,
     BugSessionList,
@@ -37,6 +40,17 @@ from app.services.orchestrators import get_bug_orchestrator
 
 router = APIRouter(prefix="/api/find-bugs", tags=["find-bugs"])
 log = logging.getLogger("qa.find-bugs")
+
+
+@router.get("/sessions/{session_id}/stream")
+async def stream_session(session_id: int, request: Request) -> StreamingResponse:
+    """Live SSE console for a bug session's pipeline (phase + token/thinking deltas)."""
+    last = parse_last_event_id(
+        request.headers.get("last-event-id"), request.query_params.get("lastEventId"))
+    return StreamingResponse(
+        event_stream(f"bug:{session_id}", last),
+        media_type="text/event-stream", headers=SSE_HEADERS,
+    )
 
 
 @router.post("/{project_id}/start", response_model=BugStartResponse)
@@ -60,10 +74,34 @@ async def start(project_id: int, req: BugStartRequest) -> BugStartResponse:
 
 @router.post("/sessions/{session_id}/run", response_model=AcceptedResponse, status_code=202)
 async def run_bug_writer(session_id: int, req: BugRunRequest) -> AcceptedResponse:
-    if not req.actual_behavior or not req.actual_behavior.strip():
-        raise HTTPException(status_code=400, detail="Actual behavior is required.")
-    await get_bug_orchestrator().run_bug_writer(session_id, req.actual_behavior, req.code_context)
+    # Need at least one signal: a manual description OR the verify-against-code path.
+    has_manual = bool(req.actual_behavior and req.actual_behavior.strip())
+    if not has_manual and not req.verify_code:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide observed actual behavior, or enable 'Verify against code'.",
+        )
+    await get_bug_orchestrator().run_bug_writer(
+        session_id, req.actual_behavior or "", req.code_context,
+        verify_code=req.verify_code, commit_ids=req.commit_ids, pr_ids=req.pr_ids,
+    )
     return AcceptedResponse(started=True)
+
+
+@router.get("/sessions/{session_id}/linked-refs", response_model=BugLinkedRefs)
+async def linked_refs(session_id: int, session: AsyncSession = Depends(get_session)) -> BugLinkedRefs:
+    """Commits/PRs linked to the session's story — to prefill the code-verify UI."""
+    bug = await session.get(BugSession, session_id)
+    if bug is None:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    try:
+        refs = await get_ado_client().get_work_item_git_refs(bug.work_item_id)
+        return BugLinkedRefs(
+            pull_request_ids=refs.get("pull_request_ids", []),
+            commit_shas=refs.get("commit_shas", []),
+        )
+    except AdoApiError:
+        return BugLinkedRefs()
 
 
 @router.post("/sessions/{session_id}/cancel", response_model=CancelResponse)

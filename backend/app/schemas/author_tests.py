@@ -58,6 +58,7 @@ class TestSessionDetailSchema(CamelModel):
     current_activity: str | None
     analysis_json: str | None
     error_message: str | None
+    event_log_json: str | None = None
     created_at: datetime
     updated_at: datetime
     drafts: list[TestCaseDraftSchema] = []

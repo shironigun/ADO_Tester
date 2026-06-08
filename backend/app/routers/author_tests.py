@@ -16,11 +16,13 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
+from app.services.sse import SSE_HEADERS, event_stream, parse_last_event_id
 from app.models import DraftStatus, SessionStatus, TestCaseDraft, TestSession
 from app.schemas import (
     AcceptedResponse,
@@ -43,6 +45,17 @@ from app.services.orchestrators import get_agent_orchestrator
 
 router = APIRouter(prefix="/api/author-tests", tags=["author-tests"])
 log = logging.getLogger("qa.author-tests")
+
+
+@router.get("/sessions/{session_id}/stream")
+async def stream_session(session_id: int, request: Request) -> StreamingResponse:
+    """Live SSE console for a session's pipeline (phase + token/thinking deltas)."""
+    last = parse_last_event_id(
+        request.headers.get("last-event-id"), request.query_params.get("lastEventId"))
+    return StreamingResponse(
+        event_stream(f"session:{session_id}", last),
+        media_type="text/event-stream", headers=SSE_HEADERS,
+    )
 
 
 # ── Work item search + plans / suites ─────────────────────────────────────

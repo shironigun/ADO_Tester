@@ -112,6 +112,21 @@ def _get_str(d: dict, key: str) -> str | None:
     return v if isinstance(v, str) else None
 
 
+def _change_paths(changes: list) -> list[str]:
+    """Pull file paths from PR/commit change entries — skip folders and deletes."""
+    out: list[str] = []
+    for c in changes or []:
+        item = c.get("item") or {}
+        if item.get("isFolder") or item.get("gitObjectType") == "tree":
+            continue
+        if str(c.get("changeType", "")).lower() == "delete":
+            continue
+        p = item.get("path")
+        if isinstance(p, str) and p:
+            out.append(p)
+    return out
+
+
 def _get_identity(d: dict, key: str) -> str | None:
     v = d.get(key)
     if isinstance(v, dict):
@@ -478,6 +493,118 @@ class AzureDevOpsClient:
                     closed_at=_get_str(f, "System.ClosedDate"),
                 ))
         return results
+
+    # ── Git repo reads + Code Search (code-analysis phase) ─────────────────────
+
+    _repo_id_cache: dict[str, str] = {}
+
+    async def list_repositories(self) -> list[dict[str, str]]:
+        url = f"{settings.ado_base_url}/_apis/git/repositories?api-version={settings.ado_api_version}"
+        r = await self._http.get(url)
+        await self._raise_if_failed(r, "List repositories")
+        return [{"id": str(e["id"]), "name": str(e.get("name") or "")} for e in r.json().get("value", [])]
+
+    async def resolve_repository_id(self, name: str | None = None) -> str:
+        """Resolve a repo name → id (cached). Defaults to settings.ado_repository."""
+        repo_name = (name or settings.ado_repository or "").strip()
+        if not repo_name:
+            raise AdoApiError("Resolve repo", 400, "No repository configured (ado.repository).")
+        cached = self._repo_id_cache.get(repo_name.lower())
+        if cached:
+            return cached
+        for repo in await self.list_repositories():
+            self._repo_id_cache[repo["name"].lower()] = repo["id"]
+        rid = self._repo_id_cache.get(repo_name.lower())
+        if not rid:
+            raise AdoApiError("Resolve repo", 404, f"Repository '{repo_name}' not found.")
+        return rid
+
+    async def get_work_item_git_refs(self, work_item_id: int) -> dict[str, list[str]]:
+        """Parse a work item's ArtifactLink relations → linked PR ids + commit SHAs."""
+        url = (
+            f"{settings.ado_base_url}/_apis/wit/workitems/{work_item_id}"
+            f"?$expand=relations&api-version={settings.ado_api_version}"
+        )
+        r = await self._http.get(url)
+        await self._raise_if_failed(r, f"Get work item relations {work_item_id}")
+        pr_ids: list[str] = []
+        commit_shas: list[str] = []
+        from urllib.parse import unquote
+        for rel in r.json().get("relations", []) or []:
+            if rel.get("rel") != "ArtifactLink":
+                continue
+            raw = unquote(str(rel.get("url") or ""))
+            # vstfs:///Git/PullRequestId/{proj}/{repo}/{prId}  |  vstfs:///Git/Commit/{proj}/{repo}/{sha}
+            if "/Git/PullRequestId/" in raw:
+                pr_ids.append(raw.rsplit("/", 1)[-1])
+            elif "/Git/Commit/" in raw:
+                commit_shas.append(raw.rsplit("/", 1)[-1])
+        return {"pull_request_ids": pr_ids, "commit_shas": commit_shas}
+
+    async def get_pull_request_changed_files(self, pr_id: int | str, repo_id: str | None = None) -> list[str]:
+        rid = repo_id or await self.resolve_repository_id()
+        base = f"{settings.ado_base_url}/_apis/git/repositories/{rid}/pullRequests/{pr_id}"
+        it = await self._http.get(f"{base}/iterations?api-version={settings.ado_api_version}")
+        await self._raise_if_failed(it, f"PR {pr_id} iterations")
+        iters = it.json().get("value", [])
+        if not iters:
+            return []
+        last = max(int(i["id"]) for i in iters)
+        ch = await self._http.get(f"{base}/iterations/{last}/changes?api-version={settings.ado_api_version}")
+        await self._raise_if_failed(ch, f"PR {pr_id} changes")
+        return _change_paths(ch.json().get("changeEntries", []))
+
+    async def get_commit_changed_files(self, sha: str, repo_id: str | None = None) -> list[str]:
+        rid = repo_id or await self.resolve_repository_id()
+        url = (
+            f"{settings.ado_base_url}/_apis/git/repositories/{rid}/commits/{sha}/changes"
+            f"?api-version={settings.ado_api_version}"
+        )
+        r = await self._http.get(url)
+        await self._raise_if_failed(r, f"Commit {sha} changes")
+        return _change_paths(r.json().get("changes", []))
+
+    async def get_file_content(
+        self, path: str, ref: str | None = None, repo_id: str | None = None, version_type: str = "branch",
+    ) -> str:
+        """Fetch a file's text. ref = branch name (default settings.ado_default_branch) or commit sha."""
+        rid = repo_id or await self.resolve_repository_id()
+        version = ref or settings.ado_default_branch
+        url = (
+            f"{settings.ado_base_url}/_apis/git/repositories/{rid}/items"
+            f"?path={quote(path)}&includeContent=true"
+            f"&versionDescriptor.version={quote(version)}"
+            f"&versionDescriptor.versionType={version_type}"
+            f"&api-version={settings.ado_api_version}"
+        )
+        r = await self._http.get(url, headers={"Accept": "application/json"})
+        await self._raise_if_failed(r, f"Get file {path}")
+        try:
+            return str(r.json().get("content", "") or "")
+        except ValueError:
+            return r.text  # some responses return raw text
+
+    async def search_code(self, text: str, top: int = 20, repo_id: str | None = None) -> list[str]:
+        """Code Search (almsearch host). Returns matching file paths in the configured repo.
+        Raises AdoApiError if the Code Search extension is unavailable (caller may fall back)."""
+        org = settings.ado_organization.strip("/")
+        url = (
+            f"https://almsearch.dev.azure.com/{org}/{quote(settings.ado_project)}"
+            f"/_apis/search/codesearchresults?api-version={settings.ado_api_version}"
+        )
+        body = {
+            "searchText": text,
+            "$top": top,
+            "filters": {"Project": [settings.ado_project], "Repository": [settings.ado_repository]},
+        }
+        r = await self._http.post(url, json=body)
+        await self._raise_if_failed(r, "Code Search")
+        paths: list[str] = []
+        for res in r.json().get("results", []) or []:
+            p = res.get("path")
+            if isinstance(p, str):
+                paths.append(p)
+        return paths
 
     # ── error helper ────────────────────────────────────────────────────────
 

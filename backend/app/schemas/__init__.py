@@ -19,6 +19,7 @@ from app.schemas.base import CamelModel
 from app.schemas.diagnostics import DiagnosticsStatus, LlmPingResponse, ProviderInfo, SetProviderRequest
 from app.schemas.find_bugs import (
     BugDraftSchema,
+    BugLinkedRefs,
     BugRunRequest,
     BugSessionDetailSchema,
     BugSessionList,
@@ -35,6 +36,7 @@ __all__ = [
     "AdoWorkItemSchema",
     "ApproveAllResponse",
     "BugDraftSchema",
+    "BugLinkedRefs",
     "BugRunRequest",
     "BugSessionDetailSchema",
     "BugSessionList",

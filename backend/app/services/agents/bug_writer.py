@@ -97,9 +97,11 @@ class BugWriterAgent:
         work_item: AdoWorkItem,
         actual_behavior: str,
         code_context: str | None,
+        progress=None,
+        emit=None,
     ) -> list[GeneratedBug]:
         prompt = self._build_user_prompt(analysis, work_item, actual_behavior, code_context)
-        raw = await self._llm.complete(SYSTEM_PROMPT, prompt)
+        raw = await self._llm.complete(SYSTEM_PROMPT, prompt, progress=progress, emit=emit)
         cleaned = strip_fences(raw, opener="[")
         try:
             data = json.loads(cleaned)

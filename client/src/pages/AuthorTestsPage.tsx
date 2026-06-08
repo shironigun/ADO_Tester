@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Alert, Autocomplete, Box, Button, Card, CardContent, CardHeader,
   Chip, CircularProgress, Collapse, Divider, FormControl, IconButton,
-  InputLabel, MenuItem, Select, Snackbar, Stack, Stepper, Step, StepLabel,
-  Table, TableBody, TableCell, TableHead, TableRow, TextField, Tooltip, Typography,
+  InputLabel, MenuItem, Select, Snackbar, Stack, TextField,
+  Table, TableBody, TableCell, TableHead, TableRow,
+  ToggleButton, ToggleButtonGroup, Tooltip, Typography,
 } from '@mui/material'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
@@ -17,11 +18,29 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import AddIcon from '@mui/icons-material/Add'
 import DownloadIcon from '@mui/icons-material/Download'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
+import HistoryIcon from '@mui/icons-material/HistoryOutlined'
 import SearchIcon from '@mui/icons-material/Search'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
 import PsychologyIcon from '@mui/icons-material/Psychology'
 import RuleIcon from '@mui/icons-material/Rule'
+import LibraryAddCheckIcon from '@mui/icons-material/LibraryAddCheckOutlined'
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlineOutlined'
 import axios from 'axios'
+import PageHeader from '../components/PageHeader'
+import Section from '../components/Section'
+import StatusChip from '../components/StatusChip'
+import StatTile from '../components/StatTile'
+import EmptyState from '../components/EmptyState'
+import AgentPipeline, { type PipelineStep } from '../components/AgentPipeline'
+import AgentConsole from '../components/AgentConsole'
+import { ThinkingShimmer } from '../components/LoadingSkeleton'
+import { Stagger, StaggerItem } from '../motion/primitives'
+import { type ConsoleEvent } from '../hooks/useEventStream'
+
+function parseEventLog(json: string | null | undefined): ConsoleEvent[] {
+  if (!json) return []
+  try { const v = JSON.parse(json); return Array.isArray(v) ? v : [] } catch { return [] }
+}
 
 const PROJECT_ID = 1
 
@@ -34,22 +53,20 @@ interface Draft {
   status: 'Draft' | 'Approved' | 'Pushed' | 'Rejected'; sortOrder: number
   adoTestCaseId: number | null
 }
-type Status = 'Analyzing' | 'Drafting' | 'Drafted' | 'Pushing' | 'Done' | 'Failed' | 'Cancelled'
+type Status =
+  | 'Analyzing' | 'AwaitingTester' | 'Drafting' | 'Drafted'
+  | 'Pushing' | 'Done' | 'Failed' | 'Cancelled'
 interface Session {
   id: number; workItemId: number; workItemTitle: string
   status: Status
   currentActivity: string | null
   analysisJson: string | null; errorMessage: string | null; drafts: Draft[]
+  eventLogJson?: string | null
 }
 interface SessionSummary { id: number; workItemId: number; workItemTitle: string; status: string; createdAt: string; errorMessage: string | null }
 
-const statusColors: Record<string, 'default' | 'warning' | 'success' | 'error' | 'info'> = {
-  Analyzing: 'warning', Drafting: 'warning', Drafted: 'info',
-  Pushing: 'warning', Done: 'success', Failed: 'error', Cancelled: 'default',
-}
-
 /** Pipeline stages, in display order. Each maps to which session statuses count as "past" it. */
-const PIPELINE_STEPS = [
+const PIPELINE_STEPS: PipelineStep[] = [
   { key: 'fetch',    label: 'Fetch ticket',    icon: <SearchIcon /> },
   { key: 'retrieve', label: 'Retrieve KB',     icon: <MenuBookIcon /> },
   { key: 'analyst',  label: 'Analyst',         icon: <PsychologyIcon /> },
@@ -57,9 +74,12 @@ const PIPELINE_STEPS = [
 ]
 
 function activeStepIndex(status: Status, activity: string | null): number {
-  // Map current activity text → which step is in progress
+  // Map current status / activity text → which step is currently in progress.
   const a = (activity ?? '').toLowerCase()
   if (status === 'Done' || status === 'Drafted') return PIPELINE_STEPS.length
+  // Manual mode parks after Analyst — show the Tester step as "next up" so the bar
+  // visibly stops at the gate.
+  if (status === 'AwaitingTester') return 3
   if (status === 'Failed' || status === 'Cancelled') {
     if (a.includes('analyst')) return 2
     if (a.includes('retriev')) return 1
@@ -72,34 +92,6 @@ function activeStepIndex(status: Status, activity: string | null): number {
   if (a.includes('retriev'))   return 1
   if (a.includes('fetch') || a.includes('work item')) return 0
   return 0
-}
-
-/** Custom step icon: ✓ for done, spinner+colour for active, dim icon for pending. */
-function PipelineStepIcon(props: {
-  active: boolean; completed: boolean; running: boolean
-  icon: React.ReactNode; failed?: boolean
-}) {
-  const { active, completed, running, icon, failed } = props
-  const color = failed ? 'error.main' : completed ? 'success.main' : active ? 'primary.main' : 'text.disabled'
-  const bg    = failed ? 'error.lighter' : completed ? 'success.lighter' : active ? 'primary.lighter' : 'transparent'
-  return (
-    <Box sx={{
-      position: 'relative', width: 44, height: 44, borderRadius: '50%',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      bgcolor: bg,
-      border: '2px solid', borderColor: color, color,
-      transition: 'all 200ms',
-    }}>
-      {running && (
-        <CircularProgress size={48} thickness={3}
-          sx={{ position: 'absolute', top: -4, left: -4, color: 'primary.main' }} />
-      )}
-      {completed ? <CheckIcon /> : icon}
-    </Box>
-  )
-}
-const draftColors: Record<string, 'default' | 'warning' | 'success' | 'error'> = {
-  Draft: 'default', Approved: 'success', Pushed: 'success', Rejected: 'error',
 }
 
 export default function AuthorTestsPage() {
@@ -166,7 +158,17 @@ export default function AuthorTestsPage() {
       await loadSessions()
       await openSession(data.sessionId)
     } catch (e: unknown) {
-      setStartError(axios.isAxiosError(e) ? String(e.response?.data ?? e.message) : String(e))
+      // FastAPI returns { detail: "..." } — make sure the actual message surfaces
+      // instead of "[object Object]".
+      let msg = 'Unknown error'
+      if (axios.isAxiosError(e)) {
+        const d = e.response?.data as unknown
+        if (typeof d === 'string') msg = d
+        else if (d && typeof d === 'object' && 'detail' in d) msg = String((d as { detail: string }).detail)
+        else msg = e.message
+      } else if (e instanceof Error) msg = e.message
+      else msg = String(e)
+      setStartError(msg)
     } finally { setStarting(false) }
   }
 
@@ -231,6 +233,17 @@ export default function AuthorTestsPage() {
     } catch (e) { reportError(e, 'Save failed') }
   }
 
+  async function runTester() {
+    if (!activeSession) return
+    setActionError('')
+    try {
+      await axios.post(`/api/author-tests/sessions/${activeSession.id}/run-tester`)
+      // Optimistic flip — polling will then keep status fresh.
+      setActiveSession(s => s ? { ...s, status: 'Drafting', currentActivity: 'Tester — generating test cases…' } : s)
+      startPolling(activeSession.id)
+    } catch (e) { reportError(e, 'Run Tester failed') }
+  }
+
   async function cancel() {
     if (!activeSession) return
     try { await axios.post(`/api/author-tests/sessions/${activeSession.id}/cancel`) }
@@ -261,71 +274,116 @@ export default function AuthorTestsPage() {
 
   return (
     <Box>
-      <Typography variant="h5" gutterBottom>Author Tests</Typography>
+      <PageHeader
+        title="Author Tests"
+        subtitle="Run the Analyst → Tester pipeline on a work item, review the drafted test cases, then push them into an ADO Test Suite."
+      />
+
+      <Stagger>
+        <Box sx={{ display: 'grid', gap: 2, mb: 3, gridTemplateColumns: { xs: '1fr 1fr', sm: 'repeat(3, 220px)' } }}>
+          <StaggerItem>
+            <StatTile icon={<RuleIcon />} label="Sessions" value={sessions.length} color="primary.main" />
+          </StaggerItem>
+          <StaggerItem>
+            <StatTile icon={<LibraryAddCheckIcon />} label="Drafted" color="success.main"
+              value={sessions.filter(s => s.status === 'Drafted' || s.status === 'Done').length} />
+          </StaggerItem>
+          <StaggerItem>
+            <StatTile icon={<ErrorOutlineIcon />} label="Failed" color="error.main"
+              value={sessions.filter(s => s.status === 'Failed').length} />
+          </StaggerItem>
+        </Box>
+      </Stagger>
+
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={3} sx={{ alignItems: 'flex-start' }}>
 
         {/* Left: start panel + session list */}
-        <Stack spacing={2} sx={{ minWidth: 320, maxWidth: 380 }}>
-          <Card variant="outlined">
-            <CardContent>
-              <Typography variant="h6" gutterBottom>New session</Typography>
-              <Stack spacing={2}>
-                <Autocomplete
-                  options={wiOptions}
-                  filterOptions={x => x}
-                  getOptionLabel={o => `#${o.id} — ${o.title}`}
-                  isOptionEqualToValue={(a, b) => a.id === b.id}
-                  onInputChange={(_, v) => setWiQuery(v)}
-                  onChange={(_, v) => setSelectedWi(v)}
-                  renderInput={p => <TextField {...p} label="Search work item" size="small" />}
-                  noOptionsText={wiQuery.length < 2 ? 'Type 2+ chars' : 'No results'}
-                />
-                <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                  <Typography variant="body2">Auto hand-off</Typography>
-                  <Chip label={autoHandoff ? 'On' : 'Off'} size="small"
-                    color={autoHandoff ? 'success' : 'default'} onClick={() => setAutoHandoff(v => !v)}
-                    clickable />
-                </Stack>
-                <Button variant="contained" onClick={start} disabled={starting || !selectedWi}>
-                  {starting ? <CircularProgress size={18} sx={{ color: 'white' }} /> : 'Run Analyst + Tester'}
-                </Button>
-                {startError && <Alert severity="error">{startError}</Alert>}
-              </Stack>
-            </CardContent>
-          </Card>
-
-          <Card variant="outlined">
-            <CardContent>
-              <Typography variant="subtitle2" gutterBottom>Recent sessions</Typography>
-              <Stack spacing={0.5}>
-                {sessions.slice(0, 15).map(s => (
-                  <Box key={s.id} onClick={() => openSession(s.id)} sx={{
-                    p: 1, borderRadius: 1, cursor: 'pointer',
-                    bgcolor: activeSession?.id === s.id ? 'action.selected' : 'transparent',
-                    '&:hover': { bgcolor: 'action.hover' },
-                  }}>
-                    <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                      <Chip label={s.status} size="small" color={statusColors[s.status] ?? 'default'} />
-                      <Typography variant="body2" noWrap>#{s.workItemId}</Typography>
+        <Stack spacing={2} sx={{ minWidth: 320, maxWidth: 380, width: '100%' }}>
+          <Section title="New session">
+            <Stack spacing={2}>
+              <Autocomplete
+                options={wiOptions}
+                filterOptions={x => x}
+                getOptionLabel={o => `#${o.id} — ${o.title}`}
+                isOptionEqualToValue={(a, b) => a.id === b.id}
+                onInputChange={(_, v) => setWiQuery(v)}
+                onChange={(_, v) => setSelectedWi(v)}
+                renderInput={p => <TextField {...p} label="Search work item" size="small" />}
+                noOptionsText={wiQuery.length < 2 ? 'Type 2+ chars' : 'No results'}
+              />
+              <Box>
+                <Typography variant="body2" sx={{ mb: 0.75, fontWeight: 500 }}>
+                  Pipeline mode
+                </Typography>
+                <ToggleButtonGroup
+                  fullWidth size="small" exclusive
+                  value={autoHandoff ? 'auto' : 'manual'}
+                  onChange={(_, v) => { if (v) setAutoHandoff(v === 'auto') }}
+                >
+                  <ToggleButton value="auto">
+                    <Stack sx={{ alignItems: 'flex-start', textAlign: 'left', py: 0.5 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>Automatic</Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.2 }}>
+                        Analyst → Tester runs end-to-end
+                      </Typography>
                     </Stack>
-                    <Typography variant="caption" noWrap>{s.workItemTitle}</Typography>
-                  </Box>
-                ))}
-                {sessions.length === 0 && <Typography variant="body2" color="text.secondary">None yet.</Typography>}
-              </Stack>
-            </CardContent>
-          </Card>
+                  </ToggleButton>
+                  <ToggleButton value="manual">
+                    <Stack sx={{ alignItems: 'flex-start', textAlign: 'left', py: 0.5 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>Manual</Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.2 }}>
+                        Pause after Analyst, then click Run Tester
+                      </Typography>
+                    </Stack>
+                  </ToggleButton>
+                </ToggleButtonGroup>
+              </Box>
+              <Button variant="contained" onClick={start} disabled={starting || !selectedWi}>
+                {starting ? <CircularProgress size={18} sx={{ color: 'white' }} /> : 'Run Analyst + Tester'}
+              </Button>
+              {startError && <Alert severity="error">{startError}</Alert>}
+            </Stack>
+          </Section>
+
+          <Section title="Recent sessions" dense>
+            {sessions.length === 0 ? (
+              <EmptyState compact icon={<HistoryIcon />} title="No sessions yet"
+                hint="Start a session above to see it here." />
+            ) : (
+              <Stagger>
+                <Stack spacing={0.5}>
+                  {sessions.slice(0, 15).map(s => (
+                    <StaggerItem key={s.id}>
+                      <Box onClick={() => openSession(s.id)} sx={{
+                        p: 1, borderRadius: 1.5, cursor: 'pointer',
+                        bgcolor: activeSession?.id === s.id ? 'action.selected' : 'transparent',
+                        '&:hover': { bgcolor: 'action.hover' },
+                      }}>
+                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                          <StatusChip value={s.status} />
+                          <Typography variant="body2" noWrap>#{s.workItemId}</Typography>
+                        </Stack>
+                        <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
+                          {s.workItemTitle}
+                        </Typography>
+                      </Box>
+                    </StaggerItem>
+                  ))}
+                </Stack>
+              </Stagger>
+            )}
+          </Section>
         </Stack>
 
         {/* Right: session detail */}
         {activeSession && (
-          <Box sx={{ flex: 1, minWidth: 0 }}>
-            <Card variant="outlined">
+          <Box sx={{ flex: 1, minWidth: 0, width: '100%' }}>
+            <Card>
               <CardHeader
                 title={<Typography variant="h6">#{activeSession.workItemId} — {activeSession.workItemTitle}</Typography>}
                 subheader={
                   <Stack direction="row" spacing={1} sx={{ mt: 0.5, alignItems: 'center' }}>
-                    <Chip label={activeSession.status} size="small" color={statusColors[activeSession.status] ?? 'default'} />
+                    <StatusChip value={activeSession.status} />
                     {polling && <CircularProgress size={14} />}
                   </Stack>
                 }
@@ -342,60 +400,57 @@ export default function AuthorTestsPage() {
               <Divider />
               <CardContent>
                 {/* Pipeline stepper */}
-                {(() => {
-                  const idx = activeStepIndex(activeSession.status, activeSession.currentActivity)
-                  const inFlight = ['Analyzing', 'Drafting'].includes(activeSession.status)
-                  const failed = activeSession.status === 'Failed' || activeSession.status === 'Cancelled'
-                  return (
-                    <Box sx={{ mb: 2 }}>
-                      <Stepper activeStep={idx} alternativeLabel>
-                        {PIPELINE_STEPS.map((s, i) => {
-                          const completed = i < idx
-                          const active = i === idx && !failed
-                          const running = active && inFlight
-                          return (
-                            <Step key={s.key} completed={completed}>
-                              <StepLabel
-                                slots={{
-                                  stepIcon: () => (
-                                    <PipelineStepIcon
-                                      active={active} completed={completed}
-                                      running={running} failed={failed && i === idx}
-                                      icon={s.icon}
-                                    />
-                                  ),
-                                }}
-                              >
-                                <Typography variant="body2"
-                                  sx={{
-                                    fontWeight: active ? 700 : 500,
-                                    color: active ? 'primary.main' : completed ? 'success.main' : 'text.secondary',
-                                  }}>
-                                  {s.label}
-                                </Typography>
-                              </StepLabel>
-                            </Step>
-                          )
-                        })}
-                      </Stepper>
-                      {activeSession.currentActivity && (
-                        <Stack direction="row" spacing={1} sx={{ mt: 1.5, alignItems: 'center', justifyContent: 'center' }}>
-                          {inFlight && <CircularProgress size={14} />}
-                          <Typography variant="body2" color={inFlight ? 'primary.main' : 'text.secondary'}
-                            sx={{ fontWeight: inFlight ? 600 : 400 }}>
-                            {activeSession.currentActivity}
-                          </Typography>
-                        </Stack>
-                      )}
-                    </Box>
-                  )
-                })()}
+                <AgentPipeline
+                  steps={PIPELINE_STEPS}
+                  activeIndex={activeStepIndex(activeSession.status, activeSession.currentActivity)}
+                  inFlight={['Analyzing', 'Drafting'].includes(activeSession.status)}
+                  failed={activeSession.status === 'Failed' || activeSession.status === 'Cancelled'}
+                  currentActivity={activeSession.currentActivity}
+                />
+
+                <AgentConsole
+                  key={activeSession.id}
+                  title="Pipeline console"
+                  streamUrl={['Analyzing', 'Drafting', 'Pushing'].includes(activeSession.status)
+                    ? `/api/author-tests/sessions/${activeSession.id}/stream` : null}
+                  seedEvents={parseEventLog(activeSession.eventLogJson)}
+                />
 
                 {activeSession.status === 'Failed' && (
-                  <Alert severity="error" sx={{ mb: 2 }}>{activeSession.errorMessage}</Alert>
+                  <Alert severity="error" sx={{ mb: 2 }}>
+                    <Box sx={{ fontWeight: 600, mb: 0.25 }}>Session failed</Box>
+                    <Box sx={{ whiteSpace: 'pre-wrap' }}>
+                      {activeSession.errorMessage
+                        || activeSession.currentActivity
+                        || 'No error details were captured. Check the API console log.'}
+                    </Box>
+                  </Alert>
                 )}
                 {activeSession.status === 'Cancelled' && (
                   <Alert severity="warning" sx={{ mb: 2 }}>Session cancelled by user.</Alert>
+                )}
+
+                {/* Manual hand-off gate */}
+                {activeSession.status === 'AwaitingTester' && (
+                  <Alert severity="info" icon={false} sx={{
+                    mb: 2, alignItems: 'center',
+                    '& .MuiAlert-message': { width: '100%' },
+                  }}>
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}
+                      sx={{ alignItems: { sm: 'center' } }}>
+                      <Box sx={{ flex: 1 }}>
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          Analyst done — review the analysis, then run the Tester
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Manual hand-off is on. Tester will turn the Analyst's expected behavior into test cases.
+                        </Typography>
+                      </Box>
+                      <Button variant="contained" size="small" onClick={runTester}>
+                        Run Tester
+                      </Button>
+                    </Stack>
+                  </Alert>
                 )}
 
                 {/* Drafts */}
@@ -406,15 +461,19 @@ export default function AuthorTestsPage() {
                       <Button size="small" variant="outlined" onClick={approveAll}>Approve all</Button>
                     </Stack>
 
-                    <Stack spacing={2}>
-                      {[...activeSession.drafts].sort((a, b) => a.sortOrder - b.sortOrder).map(d => (
-                        <DraftCard key={d.id} draft={d}
-                          onApprove={() => approveDraft(d.id)}
-                          onReject={() => rejectDraft(d.id)}
-                          onSave={(patch) => saveDraft(d.id, patch)}
-                        />
-                      ))}
-                    </Stack>
+                    <Stagger>
+                      <Stack spacing={2}>
+                        {[...activeSession.drafts].sort((a, b) => a.sortOrder - b.sortOrder).map(d => (
+                          <StaggerItem key={d.id}>
+                            <DraftCard draft={d}
+                              onApprove={() => approveDraft(d.id)}
+                              onReject={() => rejectDraft(d.id)}
+                              onSave={(patch) => saveDraft(d.id, patch)}
+                            />
+                          </StaggerItem>
+                        ))}
+                      </Stack>
+                    </Stagger>
 
                     <Divider sx={{ my: 3 }} />
                     <Typography variant="subtitle2" gutterBottom>Push approved to ADO</Typography>
@@ -460,9 +519,11 @@ export default function AuthorTestsPage() {
                 )}
 
                 {['Analyzing', 'Drafting'].includes(activeSession.status) && activeSession.drafts.length === 0 && (
-                  <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mt: 1 }}>
-                    Work in progress…
-                  </Typography>
+                  <ThinkingShimmer
+                    label={activeSession.status === 'Drafting'
+                      ? 'Tester is drafting test cases…'
+                      : 'Analyst is analyzing the story…'}
+                  />
                 )}
               </CardContent>
             </Card>
@@ -540,10 +601,10 @@ function DraftCard({ draft, onApprove, onReject, onSave }: {
   }
 
   return (
-    <Card variant="outlined" sx={editing ? { borderColor: 'primary.main' } : undefined}>
+    <Card sx={editing ? { borderColor: 'primary.main' } : undefined}>
       <CardContent sx={{ pb: '12px !important' }}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
-          <Chip label={draft.status} size="small" color={draftColors[draft.status] ?? 'default'} />
+          <StatusChip value={draft.status} kind="draft" />
           {editing ? (
             <TextField fullWidth size="small" value={title} onChange={e => setTitle(e.target.value)}
               placeholder="[Module] - [Feature] - Verify that ..." />
@@ -686,7 +747,7 @@ function PushResults({ session, context, adoOrg, adoProject }: {
   }
 
   return (
-    <Card variant="outlined" sx={{ mt: 3, borderColor: 'success.main' }}>
+    <Card sx={{ mt: 3, borderColor: 'success.main' }}>
       <CardContent>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1 }}>
           <CheckIcon color="success" />
