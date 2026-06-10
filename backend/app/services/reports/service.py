@@ -20,6 +20,9 @@ from app.config import settings
 from app.db import SessionLocal, session_scope
 from app.models import Report, ReportStatus, ReportTheme
 from app.services.ado_client import get_ado_client
+from app.services.app_settings import (
+    get_app_settings_service, K_REPORT_TEAM_NAME, K_REPORT_TYPES,
+)
 from app.services.reports.html_builder import build_report_html
 from app.services.reports.summarizer import ReportSummarizer
 from app.services.event_bus import get_event_bus
@@ -113,10 +116,18 @@ class ReportService:
                 return
             try:
                 _rpub(key, "system", text="Report generation started")
-                tickets = await ado.get_tickets_in_range(from_utc, to_utc, boards)
+                types_raw = await get_app_settings_service().get(K_REPORT_TYPES)
+                ticket_types = [t.strip() for t in types_raw.split(";") if t.strip()]
+                tickets = await ado.get_tickets_in_range(from_utc, to_utc, boards, ticket_types)
                 boards_label = "" if not boards else "Boards: " + ", ".join(boards)
                 _rpub(key, "result", "fetch", f"Pulled {len(tickets)} ticket(s) in range",
                       level="success", data={"tickets": len(tickets)})
+
+                # Enrich with comments + change history for the spotlight ticket modal.
+                _rpub(key, "phase", "enrich", "Loading ticket history & comments…")
+                await ado.enrich_tickets_for_report(tickets)
+                _rpub(key, "result", "enrich", "Ticket history & comments loaded",
+                      level="success")
 
                 # AI summarization always runs. Failures don't block — summarizer returns
                 # a minimal fallback so the deck still has a TL;DR.
@@ -128,9 +139,10 @@ class ReportService:
                 _rpub(key, "result", "summarize", "AI insights generated", level="success")
 
                 _rpub(key, "system", "summarize", "Rendering self-contained HTML…")
+                team_name = await get_app_settings_service().get(K_REPORT_TEAM_NAME)
                 html = build_report_html(
                     report.title, from_utc, to_utc, boards_label, tickets,
-                    theme=theme, summary=summary,
+                    theme=theme, summary=summary, team_name=team_name, boards=boards,
                 )
 
                 file_name = (

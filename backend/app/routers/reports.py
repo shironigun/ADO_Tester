@@ -13,8 +13,11 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 
+from app.models import ReportTheme
 from app.schemas import GenerateReportRequest, GenerateReportResponse, ReportSchema
+from app.services.app_settings import get_app_settings_service, K_REPORT_TEAM_NAME
 from app.services.reports import get_report_service
+from app.services.reports.mock import build_mock_report_html
 from app.services.sse import SSE_HEADERS, event_stream, parse_last_event_id
 
 MAX_RANGE_DAYS = 365
@@ -32,6 +35,21 @@ async def stream_report(report_id: int, request: Request) -> StreamingResponse:
         event_stream(f"report:{report_id}", last),
         media_type="text/event-stream", headers=SSE_HEADERS,
     )
+
+
+@router.get("/preview")
+async def preview(theme: str = "Executive", team: str | None = None) -> HTMLResponse:
+    """Render the report deck from fixed mock data — lets Settings preview the format
+    without generating a real report. `theme` picks the palette; `team` overrides the
+    cover eyebrow (so an unsaved Settings value previews live), else the saved setting.
+    NB: declared before the bare GET /{project_id} so 'preview' isn't parsed as an id."""
+    chosen = next(
+        (t for t in ReportTheme if t.value.lower() == (theme or "").lower()),
+        ReportTheme.Executive,
+    )
+    team_name = team if team is not None else await get_app_settings_service().get(K_REPORT_TEAM_NAME)
+    html = build_mock_report_html(theme=chosen, team_name=team_name)
+    return HTMLResponse(content=html)
 
 
 @router.post("/{project_id}/generate", response_model=GenerateReportResponse)

@@ -8,11 +8,12 @@ P3/P4/P5 add the write methods (Test Case / Bug create + suite + link, plus repo
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import html as html_lib
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import quote
 
 import httpx
@@ -74,8 +75,28 @@ class AdoTestSuite:
 
 
 @dataclass(frozen=True)
+class TicketComment:
+    """One discussion comment on a work item (for the report spotlight modal)."""
+    author: str
+    date: str | None
+    html: str
+
+
+@dataclass(frozen=True)
+class TimelineEvent:
+    """One derived history event on a work item (for the report spotlight modal)."""
+    date: str | None
+    actor: str
+    kind: str  # created | state | assignment | comment | other
+    detail: str
+
+
+@dataclass
 class ReportTicket:
-    """Flat ticket shape used by the weekly HTML report (P5)."""
+    """Flat ticket shape used by the weekly HTML report (P5).
+
+    Base fields come from the WIQL batch fetch; ``comments``/``timeline`` are populated
+    lazily by ``enrich_tickets_for_report`` (hence this is not frozen)."""
     id: int
     title: str = ""
     work_item_type: str = ""
@@ -84,6 +105,13 @@ class ReportTicket:
     issue_description: str | None = None
     fix: str | None = None
     closed_at: str | None = None
+    created_by: str | None = None
+    created_date: str | None = None
+    description: str | None = None
+    root_cause: str | None = None
+    area_path: str | None = None
+    comments: list[TicketComment] = field(default_factory=list)
+    timeline: list[TimelineEvent] = field(default_factory=list)
 
 
 def _patch_op(op: str, path: str, value: str) -> dict:
@@ -429,23 +457,32 @@ class AzureDevOpsClient:
     # Skip it — HTML builder's ticket sort handles closed_at=None just fine.
     REPORT_FIELDS = [
         "System.Id", "System.Title", "System.WorkItemType", "System.AssignedTo",
-        "System.State", "System.Description", "System.History",
+        "System.State", "System.Description", "System.History", "System.AreaPath",
+        "System.CreatedBy", "System.CreatedDate",
         "Microsoft.VSTS.TCM.ReproSteps", "Microsoft.VSTS.Common.ResolvedReason",
+        "Microsoft.VSTS.Common.AcceptanceCriteria", "Custom.RootCauseDetails",
     ]
 
+    # Fallback work-item types when the caller passes none (matches the historical set
+    # plus Defect, which the board/spotlight tallies expect).
+    _DEFAULT_REPORT_TYPES = ["User Story", "Bug", "Defect", "Task", "Issue", "Feature"]
+
     async def get_tickets_in_range(
-        self, from_utc, to_utc, boards: list[str],
+        self, from_utc, to_utc, boards: list[str], types: list[str] | None = None,
     ) -> list[ReportTicket]:
         # [System.ChangedDate] is date-precision in WIQL — supplying a time triggers
         # "You cannot supply a time with the date when running a query using date precision."
         from_s = from_utc.strftime("%Y-%m-%d")
         to_s = to_utc.strftime("%Y-%m-%d")
 
+        esc = lambda v: v.replace("'", "''")  # noqa: E731
         area_clause = ""
         if boards:
-            esc = lambda b: b.replace("'", "''")  # noqa: E731
             parts = [f"[System.AreaPath] UNDER '{esc(b)}'" for b in boards]
             area_clause = " AND (" + " OR ".join(parts) + ")"
+
+        chosen_types = [t.strip() for t in (types or []) if t.strip()] or self._DEFAULT_REPORT_TYPES
+        types_csv = ", ".join(f"'{esc(t)}'" for t in chosen_types)
 
         wiql_body = {
             "query": (
@@ -453,7 +490,7 @@ class AzureDevOpsClient:
                 f"WHERE [System.TeamProject] = '{settings.ado_project}' "
                 f"AND [System.ChangedDate] >= '{from_s}' "
                 f"AND [System.ChangedDate] <= '{to_s}' "
-                f"AND [System.WorkItemType] IN ('User Story','Bug','Task','Issue','Feature') "
+                f"AND [System.WorkItemType] IN ({types_csv}) "
                 f"{area_clause}"
                 f" ORDER BY [System.ChangedDate] DESC"
             )
@@ -491,8 +528,108 @@ class AzureDevOpsClient:
                     issue_description=repro if repro else desc,
                     fix=resolved if resolved else history,
                     closed_at=_get_str(f, "System.ClosedDate"),
+                    created_by=_get_identity(f, "System.CreatedBy"),
+                    created_date=_get_str(f, "System.CreatedDate"),
+                    # Description tab prefers the real Description; bugs usually only
+                    # carry repro steps, so fall back to those.
+                    description=desc if desc else repro,
+                    root_cause=_get_str(f, "Custom.RootCauseDetails"),
+                    area_path=_get_str(f, "System.AreaPath"),
                 ))
         return results
+
+    # ── Ticket enrichment for the report spotlight modal ───────────────────────
+
+    async def get_work_item_comments(self, work_item_id: int) -> list[TicketComment]:
+        """Discussion comments, oldest→newest. Empty list on any failure."""
+        url = (
+            f"{settings.ado_base_url}/_apis/wit/workItems/{work_item_id}/comments"
+            f"?api-version=7.0-preview.3"
+        )
+        try:
+            r = await self._http.get(url)
+            r.raise_for_status()
+        except Exception:  # noqa: BLE001 — enrichment is best-effort
+            return []
+        out: list[TicketComment] = []
+        for c in r.json().get("comments", []):
+            text = _get_str(c, "text") or _get_str(c, "renderedText") or ""
+            if not text.strip():
+                continue
+            out.append(TicketComment(
+                author=_get_identity(c, "createdBy") or "Unknown",
+                date=_get_str(c, "createdDate"),
+                html=text,
+            ))
+        out.sort(key=lambda x: x.date or "")
+        return out
+
+    async def get_work_item_updates(self, work_item_id: int) -> list[TimelineEvent]:
+        """Field-change history → derived timeline events (created / state / assignment).
+        Empty list on any failure."""
+        url = (
+            f"{settings.ado_base_url}/_apis/wit/workItems/{work_item_id}/updates"
+            f"?api-version=7.0"
+        )
+        try:
+            r = await self._http.get(url)
+            r.raise_for_status()
+        except Exception:  # noqa: BLE001
+            return []
+        events: list[TimelineEvent] = []
+        for u in r.json().get("value", []):
+            fields = u.get("fields") or {}
+            actor = _get_identity(u, "revisedBy") or "Unknown"
+            date = _get_str(u, "revisedDate")
+            created = fields.get("System.CreatedDate")
+            if isinstance(created, dict) and created.get("newValue") and "oldValue" not in created:
+                cb = fields.get("System.CreatedBy") or {}
+                who = (cb.get("newValue") or {}).get("displayName") if isinstance(cb, dict) else None
+                events.append(TimelineEvent(
+                    date=_get_str(created, "newValue") or date,
+                    actor=who or actor, kind="created", detail="Work item created",
+                ))
+            st = fields.get("System.State")
+            if isinstance(st, dict) and st.get("newValue"):
+                old = st.get("oldValue")
+                detail = f"{old} → {st['newValue']}" if old else f"Set to {st['newValue']}"
+                events.append(TimelineEvent(date=date, actor=actor, kind="state",
+                                            detail=f"State {detail}"))
+            asg = fields.get("System.AssignedTo")
+            if isinstance(asg, dict) and ("newValue" in asg or "oldValue" in asg):
+                old = (asg.get("oldValue") or {}).get("displayName") if isinstance(asg.get("oldValue"), dict) else None
+                new = (asg.get("newValue") or {}).get("displayName") if isinstance(asg.get("newValue"), dict) else None
+                detail = f"{old or 'Unassigned'} → {new or 'Unassigned'}"
+                events.append(TimelineEvent(date=date, actor=actor, kind="assignment",
+                                            detail=f"Assigned to {detail}"))
+        return events
+
+    async def enrich_tickets_for_report(
+        self, tickets: list[ReportTicket], *, limit: int = 150, concurrency: int = 8,
+    ) -> list[ReportTicket]:
+        """Attach comments + timeline (incl. comments folded into the timeline) to each
+        ticket, in place. Bounded by ``limit`` (logged if exceeded) and ``concurrency``."""
+        target = tickets[:limit]
+        if len(tickets) > limit:
+            log.warning("Report enrichment capped at %d of %d tickets", limit, len(tickets))
+        sem = asyncio.Semaphore(concurrency)
+
+        async def _one(t: ReportTicket) -> None:
+            async with sem:
+                comments, timeline = await asyncio.gather(
+                    self.get_work_item_comments(t.id),
+                    self.get_work_item_updates(t.id),
+                )
+            t.comments = comments
+            for c in comments:
+                timeline.append(TimelineEvent(
+                    date=c.date, actor=c.author, kind="comment", detail="Comment added",
+                ))
+            timeline.sort(key=lambda e: e.date or "")
+            t.timeline = timeline
+
+        await asyncio.gather(*(_one(t) for t in target))
+        return tickets
 
     # ── Git repo reads + Code Search (code-analysis phase) ─────────────────────
 

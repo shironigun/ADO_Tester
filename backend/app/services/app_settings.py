@@ -51,6 +51,8 @@ K_DEFAULT_SUITE_ID = "defaults.test_suite_id"
 K_DEFAULT_BOARDS   = "reports.default_boards"     # semicolon-separated area paths
 K_SCHED_ENABLED    = "reports.schedule_enabled"   # "true" | "false"
 K_DEFAULT_RANGE    = "reports.default_range_days" # int as string
+K_REPORT_TEAM_NAME = "reports.team_name"          # shown on the report cover eyebrow
+K_REPORT_TYPES     = "reports.ticket_types"       # semicolon-separated work-item types
 
 ALL_KEYS = [
     K_ADO_ORG, K_ADO_PROJECT, K_ADO_PAT, K_ADO_REPO, K_ADO_BRANCH,
@@ -59,7 +61,8 @@ ALL_KEYS = [
     K_OPENAI_BASE_URL, K_OPENAI_KEY, K_OPENAI_MODEL,
     K_CLAUDE_CLI_PATH, K_CLAUDE_CLI_MODEL, K_CLAUDE_CLI_TIMEOUT,
     K_DEFAULT_PLAN_ID, K_DEFAULT_SUITE_ID,
-    K_DEFAULT_BOARDS, K_SCHED_ENABLED, K_DEFAULT_RANGE,
+    K_DEFAULT_BOARDS, K_SCHED_ENABLED, K_DEFAULT_RANGE, K_REPORT_TEAM_NAME,
+    K_REPORT_TYPES,
 ]
 
 SECRET_KEYS = {K_ADO_PAT, K_ANTHROPIC_KEY, K_AZURE_KEY, K_OPENAI_KEY}
@@ -89,6 +92,8 @@ def _env_default(key: str) -> str:
         K_DEFAULT_BOARDS:   "",
         K_SCHED_ENABLED:    "true",
         K_DEFAULT_RANGE:    "7",
+        K_REPORT_TEAM_NAME: "",
+        K_REPORT_TYPES:     "User Story;Bug;Defect;Task",
     }.get(key, "")
 
 
