@@ -116,7 +116,6 @@ export default function FindBugsPage() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const [actualText, setActualText] = useState('')
-  const [codeText, setCodeText] = useState('')
   const [pushing, setPushing] = useState(false)
   // Code-analysis controls
   const [verifyCode, setVerifyCode] = useState(true)
@@ -154,7 +153,6 @@ export default function FindBugsPage() {
       const { data } = await axios.get<BugSession>(`/api/find-bugs/sessions/detail/${id}`)
       setActive(data)
       setActualText(data.actualBehavior ?? '')
-      setCodeText(data.codeContext ?? '')
       if (['Analyzing', 'Verifying', 'Drafting', 'Pushing'].includes(data.status)) {
         pollRef.current = setInterval(async () => {
           try {
@@ -201,7 +199,6 @@ export default function FindBugsPage() {
     try {
       await axios.post(`/api/find-bugs/sessions/${active.id}/run`, {
         actualBehavior: actualText,
-        codeContext: codeText || null,
         verifyCode,
         prIds: splitIds(prIdsText),
         commitIds: splitIds(commitIdsText),
@@ -386,10 +383,6 @@ export default function FindBugsPage() {
                       <TextField multiline minRows={4} fullWidth value={actualText}
                         onChange={e => setActualText(e.target.value)}
                         placeholder="The SAVE button stays enabled even when the Name field is empty…" />
-                      <Typography variant="subtitle2" sx={{ mt: 2 }}>Code context (optional)</Typography>
-                      <TextField multiline minRows={3} fullWidth value={codeText}
-                        onChange={e => setCodeText(e.target.value)}
-                        placeholder="// PipelineForm.tsx — line 42&#10;<Button disabled={!name}>Save</Button>" />
 
                       {/* Code verification (static analysis against generated test cases) */}
                       <Box sx={{ mt: 2, p: 1.5, borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>

@@ -16,7 +16,7 @@ from typing import Any, Literal, Optional
 EventKind = Literal["phase", "token", "thinking", "system", "stat", "result", "error"]
 EventPhase = Literal[
     "fetch", "retrieve", "analyst", "tester", "bugwriter", "push", "summarize",
-    "discover", "code-verify",
+    "discover", "code-verify", "enrich",
 ]
 EventLevel = Literal["info", "success", "warn", "error"]
 

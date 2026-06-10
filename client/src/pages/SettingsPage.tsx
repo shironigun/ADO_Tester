@@ -56,7 +56,11 @@ const K = {
   DEFAULT_BOARDS: 'reports.default_boards',
   SCHED_ENABLED: 'reports.schedule_enabled',
   DEFAULT_RANGE: 'reports.default_range_days',
+  REPORT_TEAM_NAME: 'reports.team_name',
+  REPORT_TYPES: 'reports.ticket_types',
 }
+
+const REPORT_TYPE_OPTIONS = ['User Story', 'Bug', 'Defect', 'Task', 'Issue', 'Feature']
 
 type Config = Record<string, string | boolean>
 
@@ -279,6 +283,9 @@ export default function SettingsPage() {
   const [defaultSuite, setDefaultSuite] = useState<number | ''>('')
   const [schedEnabled, setSchedEnabled] = useState(true)
   const [defaultRange, setDefaultRange] = useState('7')
+  const [teamName, setTeamName] = useState('')
+  const [typesList, setTypesList] = useState<string[]>([])
+  const [previewTheme, setPreviewTheme] = useState('Executive')
 
   const [plans, setPlans] = useState<TestPlan[]>([])
   const [suites, setSuites] = useState<TestSuite[]>([])
@@ -324,6 +331,8 @@ export default function SettingsPage() {
       setBoardsList(savedBoards.split(/[;,]/).map(s => s.trim()).filter(Boolean))
       setSchedEnabled(String(data[K.SCHED_ENABLED] ?? 'true').toLowerCase() === 'true')
       setDefaultRange(String(data[K.DEFAULT_RANGE] ?? '7'))
+      setTeamName(String(data[K.REPORT_TEAM_NAME] ?? ''))
+      setTypesList(String(data[K.REPORT_TYPES] ?? '').split(';').map(s => s.trim()).filter(Boolean))
     } catch (e) { setError(axiosMessage(e)) }
     finally { setLoading(false) }
   }, [])
@@ -817,6 +826,35 @@ export default function SettingsPage() {
                     subtitle="Schedule, default date range, and which boards / area paths to include by default. The Thursday auto-run only fires while the app is running." />
                   <Panel>
                     <Stack spacing={3}>
+                      <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <FormControl size="small" sx={{ minWidth: 170 }}>
+                          <InputLabel>Preview theme</InputLabel>
+                          <Select label="Preview theme" value={previewTheme}
+                            onChange={e => setPreviewTheme(e.target.value)}>
+                            <MenuItem value="Executive">Executive</MenuItem>
+                            <MenuItem value="Standup">Standup</MenuItem>
+                            <MenuItem value="Branded">Branded</MenuItem>
+                          </Select>
+                        </FormControl>
+                        <Button variant="outlined" startIcon={<VisibilityIcon />}
+                          onClick={() => window.open(
+                            `/api/reports/preview?theme=${encodeURIComponent(previewTheme)}`
+                            + `&team=${encodeURIComponent(teamName)}`, '_blank')}>
+                          Preview report format
+                        </Button>
+                        <Typography variant="caption" color="text.secondary">
+                          Opens a sample report (mock data) in a new tab — no generation needed.
+                        </Typography>
+                      </Box>
+
+                      <Box>
+                        <FieldKey k={K.REPORT_TEAM_NAME} />
+                        <TextField label="Team name" size="small"
+                          sx={{ width: 320 }} value={teamName}
+                          onChange={e => setTeamName(e.target.value)}
+                          helperText="Shown on the report cover, e.g. 'Engineering'." />
+                      </Box>
+
                       <FormControlLabel
                         control={<Switch checked={schedEnabled}
                           onChange={(_, v) => setSchedEnabled(v)} />}
@@ -828,6 +866,19 @@ export default function SettingsPage() {
                           sx={{ width: 220 }} value={defaultRange}
                           onChange={e => setDefaultRange(e.target.value)}
                           helperText="Used by both the auto-run and the Reports page default." />
+                      </Box>
+
+                      <Box>
+                        <FieldKey k={K.REPORT_TYPES} />
+                        <Autocomplete<string, true, false, true>
+                          multiple freeSolo
+                          options={REPORT_TYPE_OPTIONS} value={typesList}
+                          onChange={(_, v) => setTypesList(v as string[])}
+                          renderInput={p => (
+                            <TextField {...p} label="Ticket types" size="small"
+                              helperText="Work-item types included across the whole report (themes, boards, spotlights). Empty = default set." />
+                          )}
+                        />
                       </Box>
 
                       <Box>
@@ -851,9 +902,11 @@ export default function SettingsPage() {
                       </Box>
                     </Stack>
                     <SaveBar onClick={() => save({
+                      [K.REPORT_TEAM_NAME]: teamName,
                       [K.SCHED_ENABLED]: schedEnabled ? 'true' : 'false',
                       [K.DEFAULT_RANGE]: defaultRange,
                       [K.DEFAULT_BOARDS]: boardsList.join('; '),
+                      [K.REPORT_TYPES]: typesList.join('; '),
                     })} />
                   </Panel>
                 </Box>
