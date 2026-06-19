@@ -1,0 +1,13 @@
+# Build output
+bin/
+obj/
+
+# IDE
+.vs/
+*.user
+*.suo
+
+# Local SQLite db copies (if any land here during dev)
+*.db
+*.db-shm
+*.db-wal

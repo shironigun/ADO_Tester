@@ -47,14 +47,18 @@ const FlowConnector = styled(StepConnector)(({ theme }) => ({
  * own `steps` + the computed `activeIndex`; presentation lives here.
  */
 export default function AgentPipeline({
-  steps, activeIndex, inFlight, failed, currentActivity,
+  steps, activeIndex, inFlight, failed, currentActivity, selectedIndex, onSelect,
 }: {
   steps: PipelineStep[]
   activeIndex: number
   inFlight: boolean
   failed: boolean
   currentActivity: string | null
+  /** When set (with onSelect), steps become clickable and the selected one is ringed. */
+  selectedIndex?: number
+  onSelect?: (index: number) => void
 }) {
+  const clickable = !!onSelect
   return (
     <Box sx={{ mb: 2 }}>
       <Stepper activeStep={activeIndex} alternativeLabel connector={<FlowConnector />}>
@@ -62,20 +66,26 @@ export default function AgentPipeline({
           const completed = i < activeIndex
           const active = i === activeIndex && !failed
           const running = active && inFlight
+          const selected = clickable && i === selectedIndex
           return (
             <Step key={s.key} completed={completed}>
-              <StepLabel slots={{
-                stepIcon: () => (
-                  <PipelineStepIcon
-                    active={active} completed={completed}
-                    running={running} failed={failed && i === activeIndex}
-                    icon={s.icon}
-                  />
-                ),
-              }}>
+              <StepLabel
+                onClick={clickable ? () => onSelect!(i) : undefined}
+                sx={clickable ? { cursor: 'pointer', pt: 0.5 } : undefined}
+                slots={{
+                  stepIcon: () => (
+                    <PipelineStepIcon
+                      active={active} completed={completed}
+                      running={running} failed={failed && i === activeIndex}
+                      icon={s.icon}
+                    />
+                  ),
+                }}>
                 <Typography variant="body2" sx={{
-                  fontWeight: active ? 700 : 500,
-                  color: active ? 'primary.main' : completed ? 'success.main' : 'text.secondary',
+                  fontWeight: active || selected ? 700 : 500,
+                  color: selected ? 'primary.main' : active ? 'primary.main' : completed ? 'success.main' : 'text.secondary',
+                  textDecoration: selected ? 'underline' : 'none',
+                  textUnderlineOffset: 4,
                 }}>
                   {s.label}
                 </Typography>

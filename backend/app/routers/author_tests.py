@@ -14,7 +14,9 @@ Author-tests router — mirrors the .NET AuthorTestsController.
 """
 from __future__ import annotations
 
+import json
 import logging
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -32,6 +34,7 @@ from app.schemas import (
     PushRequest,
     StartRequest,
     StartResponse,
+    TestAnalysisUpdate,
     TestCaseDraftSchema,
     TestPlanSchema,
     TestSessionDetailSchema,
@@ -176,6 +179,32 @@ async def get_session_detail(
         raise
     except Exception as e:  # noqa: BLE001
         log.exception("GetSession failed for %d", session_id)
+        raise HTTPException(status_code=500, detail=str(e)) from None
+
+
+# ── Analysis editing ──────────────────────────────────────────────────────
+
+
+@router.patch("/sessions/{session_id}/analysis", response_model=TestSessionDetailSchema)
+async def update_analysis(
+    session_id: int, req: TestAnalysisUpdate,
+    session: AsyncSession = Depends(get_session),
+) -> TestSessionDetailSchema:
+    """Save user edits to the Analyst output. The Tester consumes the edited analysis on its
+    next run, so this lets the user correct/augment before test cases are drafted."""
+    try:
+        row = await session.get(TestSession, session_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Session not found.")
+        row.analysis_json = json.dumps(req.model_dump(by_alias=True))
+        row.updated_at = datetime.utcnow()
+        await session.commit()
+        await session.refresh(row)
+        return TestSessionDetailSchema.model_validate(row)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        log.exception("UpdateTestAnalysis failed for %d", session_id)
         raise HTTPException(status_code=500, detail=str(e)) from None
 
 

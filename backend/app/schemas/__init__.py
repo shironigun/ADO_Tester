@@ -1,5 +1,15 @@
 """Pydantic request/response schemas — camelCase JSON keys to match the .NET API."""
 from app.schemas.ado import AdoWorkItemSchema, WorkItemOption
+from app.schemas.batches import (
+    BatchChild,
+    BatchChildSummary,
+    BatchDetail,
+    BatchList,
+    BatchStartRequest,
+    BatchStartResponse,
+    BatchSummary,
+    ChildrenExpandResponse,
+)
 from app.schemas.author_tests import (
     AcceptedResponse,
     ApproveAllResponse,
@@ -7,6 +17,7 @@ from app.schemas.author_tests import (
     PushRequest,
     StartRequest,
     StartResponse,
+    TestAnalysisUpdate,
     TestCaseDraftSchema,
     TestPlanSchema,
     TestSessionDetailSchema,
@@ -18,7 +29,10 @@ from app.schemas.author_tests import (
 from app.schemas.base import CamelModel
 from app.schemas.diagnostics import DiagnosticsStatus, LlmPingResponse, ProviderInfo, SetProviderRequest
 from app.schemas.find_bugs import (
+    BugAnalysisUpdate,
     BugDraftSchema,
+    BugFromVerdictRequest,
+    BugLinkedChange,
     BugLinkedRefs,
     BugRunRequest,
     BugSessionDetailSchema,
@@ -26,6 +40,7 @@ from app.schemas.find_bugs import (
     BugSessionSummary,
     BugStartRequest,
     BugStartResponse,
+    BugTestCase,
     UpdateBugDraftRequest,
 )
 from app.schemas.knowledgebase import KnowledgebaseDocumentSchema, KnowledgebaseHitSchema
@@ -35,7 +50,18 @@ __all__ = [
     "AcceptedResponse",
     "AdoWorkItemSchema",
     "ApproveAllResponse",
+    "BatchChild",
+    "BatchChildSummary",
+    "BatchDetail",
+    "BatchList",
+    "BatchStartRequest",
+    "BatchStartResponse",
+    "BatchSummary",
+    "ChildrenExpandResponse",
+    "BugAnalysisUpdate",
     "BugDraftSchema",
+    "BugFromVerdictRequest",
+    "BugLinkedChange",
     "BugLinkedRefs",
     "BugRunRequest",
     "BugSessionDetailSchema",
@@ -43,6 +69,7 @@ __all__ = [
     "BugSessionSummary",
     "BugStartRequest",
     "BugStartResponse",
+    "BugTestCase",
     "CamelModel",
     "CancelResponse",
     "DiagnosticsStatus",
@@ -57,6 +84,7 @@ __all__ = [
     "SetProviderRequest",
     "StartRequest",
     "StartResponse",
+    "TestAnalysisUpdate",
     "TestCaseDraftSchema",
     "TestPlanSchema",
     "TestSessionDetailSchema",

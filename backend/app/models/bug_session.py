@@ -51,6 +51,9 @@ class BugSession(Base):
     event_log_json: Mapped[str | None] = mapped_column("EventLogJson", String, nullable=True)
     # Per-test-case static code-verification verdicts as a JSON array.
     code_verification_json: Mapped[str | None] = mapped_column("CodeVerificationJson", String, nullable=True)
+    # Set when this session is part of an Epic/Feature run (a Batch). NULL for single runs.
+    batch_id: Mapped[int | None] = mapped_column(
+        "BatchId", Integer, ForeignKey("Batches.Id", ondelete="SET NULL"), index=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column("CreatedAt", DateTime, nullable=False)
     updated_at: Mapped[datetime] = mapped_column("UpdatedAt", DateTime, nullable=False)
 

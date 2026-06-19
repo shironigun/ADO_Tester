@@ -1,0 +1,6 @@
+@QaAutomation.Api_HostAddress = http://localhost:5118
+
+GET {{QaAutomation.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

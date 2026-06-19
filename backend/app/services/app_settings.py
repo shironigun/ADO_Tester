@@ -54,6 +54,11 @@ K_DEFAULT_RANGE    = "reports.default_range_days" # int as string
 K_REPORT_TEAM_NAME = "reports.team_name"          # shown on the report cover eyebrow
 K_REPORT_TYPES     = "reports.ticket_types"       # semicolon-separated work-item types
 
+# Find Bugs — code verification report
+K_VERIFY_DETAIL      = "find_bugs.verify_detail"       # "case" | "step" | "step_full"
+K_VERIFY_STEP_SCOPE  = "find_bugs.verify_step_scope"   # "fails_only" | "all"
+K_BUG_FROM_CASE_MODE = "find_bugs.bug_from_case_mode"  # "instant" | "agent"
+
 ALL_KEYS = [
     K_ADO_ORG, K_ADO_PROJECT, K_ADO_PAT, K_ADO_REPO, K_ADO_BRANCH,
     K_ANTHROPIC_KEY, K_ANTHROPIC_MODEL,
@@ -63,6 +68,7 @@ ALL_KEYS = [
     K_DEFAULT_PLAN_ID, K_DEFAULT_SUITE_ID,
     K_DEFAULT_BOARDS, K_SCHED_ENABLED, K_DEFAULT_RANGE, K_REPORT_TEAM_NAME,
     K_REPORT_TYPES,
+    K_VERIFY_DETAIL, K_VERIFY_STEP_SCOPE, K_BUG_FROM_CASE_MODE,
 ]
 
 SECRET_KEYS = {K_ADO_PAT, K_ANTHROPIC_KEY, K_AZURE_KEY, K_OPENAI_KEY}
@@ -94,6 +100,9 @@ def _env_default(key: str) -> str:
         K_DEFAULT_RANGE:    "7",
         K_REPORT_TEAM_NAME: "",
         K_REPORT_TYPES:     "User Story;Bug;Defect;Task",
+        K_VERIFY_DETAIL:      "step",
+        K_VERIFY_STEP_SCOPE:  "fails_only",
+        K_BUG_FROM_CASE_MODE: "instant",
     }.get(key, "")
 
 

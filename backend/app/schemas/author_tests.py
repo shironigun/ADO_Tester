@@ -88,6 +88,23 @@ class UpdateDraftRequest(CamelModel):
     status: DraftStatus | None = None
 
 
+class TestAnalysisUpdate(CamelModel):
+    """User-edited Analyst output, saved back over the session's analysis_json. The Tester
+    consumes the edited analysis on its next run."""
+    module: str = ""
+    feature: str = ""
+    summary: str = ""
+    happy_path: str = ""
+    acceptance_criteria: list[str] = []
+    business_rules: list[str] = []
+    edge_cases: list[str] = []
+    negative_cases: list[str] = []
+    permissions: list[str] = []
+    cross_flow: list[str] = []
+    open_questions: list[str] = []
+    question_answers: list[str] = []  # answers aligned by index to open_questions
+
+
 class ApproveAllResponse(CamelModel):
     approved_count: int
 
