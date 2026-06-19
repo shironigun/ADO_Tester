@@ -12,6 +12,7 @@ from app.config import settings
 from app.db import SessionLocal, ensure_fts_table
 from app.models import Project
 from app.routers import author_tests as author_tests_router
+from app.routers import batches as batches_router
 from app.routers import diagnostics as diagnostics_router
 from app.routers import find_bugs as find_bugs_router
 from app.routers import knowledgebase as knowledgebase_router
@@ -79,6 +80,7 @@ app.include_router(settings_router.router)
 app.include_router(knowledgebase_router.router)
 app.include_router(author_tests_router.router)
 app.include_router(find_bugs_router.router)
+app.include_router(batches_router.router)
 app.include_router(reports_router.router)
 
 

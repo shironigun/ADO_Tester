@@ -45,6 +45,48 @@ If a MANUAL DESCRIPTION is provided, add one extra item with testCase = "Manual:
 """
 
 
+# Pass 2 (optional) — per-STEP verdicts. Runs only when settings ask for step-level detail.
+# A batch of test cases is judged in one call (the code context is shared), returning, per case,
+# one verdict per step IN ORDER. {ACTUAL_RULE} is filled depending on the detail level.
+STEP_SYSTEM_PROMPT = """You are the Code Verifier agent — a senior SQA engineer doing STATIC code review
+for YourProduct / YourOrg. You are given a user story, several test cases (each with numbered
+steps as "action → expected"), and excerpts of the ACTUAL repository code. You do NOT run anything —
+you reason about the code as written.
+
+For EVERY step of EVERY test case, decide — based ONLY on the provided code — whether the code satisfies
+that step's expected result:
+- "pass"         — the code clearly implements what the step asserts.
+- "fail"         — the code clearly contradicts or is missing it (a real defect signal).
+- "inconclusive" — the provided code is insufficient to judge (prefer this over guessing).
+
+Rules:
+- Base every verdict ONLY on the provided code. Never invent files, functions, or behavior.
+- Be conservative: only "fail" when the code genuinely shows the defect; otherwise "inconclusive".
+- {ACTUAL_RULE}
+
+Output ONLY a JSON array (no markdown fences, no prose), one object per test case, in the SAME order and
+numbering you were given. Each object:
+[
+  {
+    "case": 1,
+    "steps": [
+      { "status": "pass | fail | inconclusive", "actual": "string" }
+    ]
+  }
+]
+Each "steps" array MUST have EXACTLY one item per step of that test case, in the given order.
+"""
+
+_ACTUAL_RULE_FULL = (
+    "For \"actual\", write a concise, code-grounded note of what the code actually does at that step "
+    "(name the file). Fill it for every step."
+)
+_ACTUAL_RULE_LITE = (
+    "For \"actual\", write a one-line, code-grounded note ONLY for steps you mark \"fail\" or "
+    "\"inconclusive\"; use an empty string \"\" for \"pass\" steps."
+)
+
+
 @dataclass
 class CodeVerdict:
     test_case: str = ""
@@ -69,6 +111,33 @@ class CodeVerdict:
             "testCase": self.test_case, "status": self.status,
             "evidence": self.evidence, "reasoning": self.reasoning,
         }
+
+
+@dataclass
+class StepVerdict:
+    """Per-step result of a test case during code verification (pass 2)."""
+    action: str = ""
+    expected: str = ""
+    status: str = "inconclusive"  # pass | fail | inconclusive
+    actual: str = ""
+
+    @staticmethod
+    def from_result(step: dict, result: dict | None) -> "StepVerdict":
+        """Combine a source step ({action, expected}) with the LLM's per-step result."""
+        r = result or {}
+        status = str(r.get("status") or "inconclusive").strip().lower()
+        if status not in {"pass", "fail", "inconclusive"}:
+            status = "inconclusive"
+        return StepVerdict(
+            action=str(step.get("action") or step.get("Action") or ""),
+            expected=str(step.get("expected") or step.get("Expected") or ""),
+            status=status,
+            actual=str(r.get("actual") or ""),
+        )
+
+    def to_dict(self) -> dict:
+        return {"action": self.action, "expected": self.expected,
+                "status": self.status, "actual": self.actual}
 
 
 @dataclass
@@ -102,6 +171,88 @@ class CodeVerifierAgent:
         if not isinstance(data, list):
             raise RuntimeError("Code Verifier returned non-array JSON.")
         return [CodeVerdict.from_dict(x) for x in data if isinstance(x, dict)]
+
+    async def verify_steps(
+        self,
+        work_item: AdoWorkItem,
+        analysis: AnalystOutput,
+        cases: list[TestCaseInput],
+        code_context: str,
+        *,
+        full: bool,
+        progress=None,
+        emit=None,
+    ) -> list[list[StepVerdict]]:
+        """Pass 2 — judge EACH step of each given case against the code. `cases` is a batch
+        (the code context is shared across them). Returns one list[StepVerdict] per input case,
+        in the same order. On any parse trouble a case degrades to all-inconclusive steps rather
+        than raising, so the report always renders."""
+        if not cases:
+            return []
+        system = STEP_SYSTEM_PROMPT.replace("{ACTUAL_RULE}", _ACTUAL_RULE_FULL if full else _ACTUAL_RULE_LITE)
+        prompt = self._build_steps_prompt(work_item, analysis, cases, code_context)
+        raw = await self._llm.complete(system, prompt, progress=progress, emit=emit)
+
+        # Key step-lists by the model's 1-based `case` number when it's a valid in-range int; also
+        # keep them in array order so we can fall back to positional mapping if the numbering drifts.
+        by_case: dict[int, list[dict]] = {}
+        positional: list[list[dict]] = []
+        try:
+            data = json.loads(strip_fences(raw, opener="["))
+            if isinstance(data, list):
+                for item in data:
+                    if not isinstance(item, dict):
+                        continue
+                    raw_steps = item.get("steps")
+                    steps = [s for s in raw_steps if isinstance(s, dict)] if isinstance(raw_steps, list) else []
+                    positional.append(steps)
+                    try:
+                        num = int(item.get("case"))
+                    except (TypeError, ValueError):
+                        continue
+                    if 1 <= num <= len(cases):
+                        by_case[num] = steps
+        except json.JSONDecodeError:
+            pass
+        # No usable case numbers but the array lines up 1:1 → map by position.
+        if not by_case and len(positional) == len(cases):
+            by_case = {i + 1: positional[i] for i in range(len(cases))}
+
+        # One StepVerdict list per INPUT case, in order (a stepless case yields []), so the caller's
+        # positional zip stays aligned no matter which cases carried steps.
+        out: list[list[StepVerdict]] = []
+        for i, case in enumerate(cases, start=1):
+            results = by_case.get(i, [])
+            out.append([
+                StepVerdict.from_result(step, results[j] if j < len(results) else None)
+                for j, step in enumerate(case.steps)
+            ])
+        return out
+
+    @staticmethod
+    def _build_steps_prompt(
+        wi: AdoWorkItem, a: AnalystOutput, cases: list[TestCaseInput], code_context: str,
+    ) -> str:
+        lines: list[str] = []
+        lines.append(f"# Story #{wi.id} — {wi.title}")
+        if a.module or a.feature:
+            lines.append(f"Module: {a.module} · Feature: {a.feature}")
+        lines.append("")
+        lines.append("## Test cases (judge every step)")
+        for i, tc in enumerate(cases, 1):
+            lines.append(f"### Case {i}: {tc.title}")
+            if tc.preconditions:
+                lines.append(f"preconditions: {tc.preconditions}")
+            for j, st in enumerate(tc.steps, 1):
+                act = str(st.get("action") or st.get("Action") or "")
+                exp = str(st.get("expected") or st.get("Expected") or "")
+                lines.append(f"  {j}. {act} → {exp}")
+        lines.append("")
+        lines.append("## Actual repository code (excerpts)")
+        lines.append(code_context or "(no code retrieved)")
+        lines.append("")
+        lines.append("Return ONLY the JSON array of per-case, per-step verdicts described in the system prompt.")
+        return "\n".join(lines)
 
     @staticmethod
     def _build_prompt(

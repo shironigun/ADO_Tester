@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     # Git repository used by the code-analysis (verify-against-code) phase.
     ado_repository: str = "Your Repo"
     ado_default_branch: str = "main"
+    # Bug-filing house style (mirrors the targetcrm-bug-suite `bugger` skill).
+    ado_bug_area_path: str = "Your Project\\Your Team"        # board Bugs live on
+    ado_qa_owner: str = "Mahmood Ahmad"  # Custom.QA owner
 
     # ── Anthropic ───────────────────────────────────────────────────────────
     anthropic_api_key: str = ""

@@ -1,0 +1,143 @@
+{
+  "areaPath": "Your Project\\Your Team",
+  "qaOwner": "Mahmood Ahmad",
+  "inputs": {
+    "steps": [
+      {
+        "action": "Click \"SAVE\" & confirm",
+        "expected": "Record's saved <ok> — done"
+      },
+      {
+        "action": "Login to YourProduct",
+        "expected": "Dashboard loads"
+      }
+    ],
+    "tc": {
+      "title": "Verify that user's data — saved & <validated>",
+      "preconditions": "Logged in & 'ready' <prod>"
+    },
+    "bug": {
+      "title": "Bug: can't save — data & <lost>",
+      "severity": "High",
+      "preconditions": "User's logged in & on QA",
+      "reproSteps": [
+        "Open the 'Quote' tab & wait",
+        "Click <Save> — twice"
+      ],
+      "expected": "It's saved — no error & visible",
+      "actual": "Error 500 — 'lost' & <broken>",
+      "suggestedFix": "Guard the null & re-fetch user's id"
+    },
+    "suite": {
+      "planId": 10,
+      "suiteId": 20,
+      "testCaseId": 30
+    },
+    "testedBy": {
+      "storyId": 100,
+      "testCaseId": 200
+    },
+    "related": {
+      "fromId": 100,
+      "toId": 200
+    }
+  },
+  "stepsXml": "<steps id=\"0\" last=\"3\"><step id=\"2\" type=\"ActionStep\"><parameterizedString isformatted=\"true\">&lt;DIV&gt;Click &quot;SAVE&quot; &amp; confirm&lt;/DIV&gt;</parameterizedString><parameterizedString isformatted=\"true\">&lt;DIV&gt;Record&#x27;s saved &lt;ok&gt; — done&lt;/DIV&gt;</parameterizedString><description/></step><step id=\"3\" type=\"ActionStep\"><parameterizedString isformatted=\"true\">&lt;DIV&gt;Login to YourProduct&lt;/DIV&gt;</parameterizedString><parameterizedString isformatted=\"true\">&lt;DIV&gt;Dashboard loads&lt;/DIV&gt;</parameterizedString><description/></step></steps>",
+  "tcPatch": [
+    {
+      "op": "add",
+      "path": "/fields/System.Title",
+      "value": "Verify that user's data — saved & <validated>"
+    },
+    {
+      "op": "add",
+      "path": "/fields/Microsoft.VSTS.TCM.Steps",
+      "value": "<steps id=\"0\" last=\"3\"><step id=\"2\" type=\"ActionStep\"><parameterizedString isformatted=\"true\">&lt;DIV&gt;Click &quot;SAVE&quot; &amp; confirm&lt;/DIV&gt;</parameterizedString><parameterizedString isformatted=\"true\">&lt;DIV&gt;Record&#x27;s saved &lt;ok&gt; — done&lt;/DIV&gt;</parameterizedString><description/></step><step id=\"3\" type=\"ActionStep\"><parameterizedString isformatted=\"true\">&lt;DIV&gt;Login to YourProduct&lt;/DIV&gt;</parameterizedString><parameterizedString isformatted=\"true\">&lt;DIV&gt;Dashboard loads&lt;/DIV&gt;</parameterizedString><description/></step></steps>"
+    },
+    {
+      "op": "add",
+      "path": "/fields/System.Description",
+      "value": "<div><b>Preconditions:</b> Logged in &amp; &#x27;ready&#x27; &lt;prod&gt;</div>"
+    }
+  ],
+  "bugPatch": [
+    {
+      "op": "add",
+      "path": "/fields/System.Title",
+      "value": "Bug: can't save — data & <lost>"
+    },
+    {
+      "op": "add",
+      "path": "/fields/Microsoft.VSTS.TCM.ReproSteps",
+      "value": "<div><b>Preconditions:</b> User&#x27;s logged in &amp; on QA</div><ul><li>Open the &#x27;Quote&#x27; tab &amp; wait</li><li>Click &lt;Save&gt; — twice</li></ul><div><b>OBSERVATION:</b></div><div><ul><li>Error 500 — &#x27;lost&#x27; &amp; &lt;broken&gt;</li></ul></div><div><i>[Attach screenshot/GIF here]</i></div>"
+    },
+    {
+      "op": "add",
+      "path": "/fields/Microsoft.VSTS.Common.Severity",
+      "value": "2 - High"
+    },
+    {
+      "op": "add",
+      "path": "/fields/System.AreaPath",
+      "value": "Your Project\\Your Team"
+    },
+    {
+      "op": "add",
+      "path": "/fields/Microsoft.VSTS.Common.Priority",
+      "value": 2
+    },
+    {
+      "op": "add",
+      "path": "/fields/Microsoft.VSTS.Common.ValueArea",
+      "value": "Business"
+    },
+    {
+      "op": "add",
+      "path": "/fields/Custom.QA",
+      "value": "Mahmood Ahmad"
+    },
+    {
+      "op": "add",
+      "path": "/fields/Custom.FoundWith",
+      "value": "Manual Test"
+    },
+    {
+      "op": "add",
+      "path": "/fields/Microsoft.VSTS.Common.AcceptanceCriteria",
+      "value": "<div>I know this bug is resolved when:</div><div><ul><li>It&#x27;s saved — no error &amp; visible</li></ul></div>"
+    },
+    {
+      "op": "add",
+      "path": "/fields/Microsoft.VSTS.TCM.SystemInfo",
+      "value": "<div><b>Suggested fix:</b> Guard the null &amp; re-fetch user&#x27;s id</div>"
+    }
+  ],
+  "suiteBody": [
+    {
+      "workItem": {
+        "id": "30"
+      },
+      "pointAssignments": []
+    }
+  ],
+  "testedByBody": [
+    {
+      "op": "add",
+      "path": "/relations/-",
+      "value": {
+        "rel": "Microsoft.VSTS.Common.TestedBy-Reverse",
+        "url": "https://dev.azure.com/your-org/Ideal%20Agile/_apis/wit/workItems/200"
+      }
+    }
+  ],
+  "relatedBody": [
+    {
+      "op": "add",
+      "path": "/relations/-",
+      "value": {
+        "rel": "System.LinkTypes.Related",
+        "url": "https://dev.azure.com/your-org/Ideal%20Agile/_apis/wit/workItems/200"
+      }
+    }
+  ]
+}

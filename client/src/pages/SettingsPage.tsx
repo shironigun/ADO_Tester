@@ -25,6 +25,7 @@ import CloudOutlinedIcon from '@mui/icons-material/CloudOutlined'
 import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined'
 import RuleOutlinedIcon from '@mui/icons-material/RuleOutlined'
 import AssessmentOutlinedIcon from '@mui/icons-material/AssessmentOutlined'
+import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined'
 import HealthAndSafetyOutlinedIcon from '@mui/icons-material/HealthAndSafetyOutlined'
 import RadioButtonCheckedIcon from '@mui/icons-material/RadioButtonChecked'
 import axios from 'axios'
@@ -58,6 +59,9 @@ const K = {
   DEFAULT_RANGE: 'reports.default_range_days',
   REPORT_TEAM_NAME: 'reports.team_name',
   REPORT_TYPES: 'reports.ticket_types',
+  VERIFY_DETAIL: 'find_bugs.verify_detail',
+  VERIFY_STEP_SCOPE: 'find_bugs.verify_step_scope',
+  BUG_FROM_CASE_MODE: 'find_bugs.bug_from_case_mode',
 }
 
 const REPORT_TYPE_OPTIONS = ['User Story', 'Bug', 'Defect', 'Task', 'Issue', 'Feature']
@@ -245,6 +249,7 @@ const TABS = [
   { key: 'ado',        label: 'Azure DevOps', icon: <CloudOutlinedIcon fontSize="small" /> },
   { key: 'llm',        label: 'LLM Providers', icon: <SmartToyOutlinedIcon fontSize="small" /> },
   { key: 'tests',      label: 'Author Tests', icon: <RuleOutlinedIcon fontSize="small" /> },
+  { key: 'findbugs',   label: 'Find Bugs',    icon: <BugReportOutlinedIcon fontSize="small" /> },
   { key: 'reports',    label: 'Reports',      icon: <AssessmentOutlinedIcon fontSize="small" /> },
   { key: 'diag',       label: 'Diagnostics',  icon: <HealthAndSafetyOutlinedIcon fontSize="small" /> },
 ] as const
@@ -286,6 +291,9 @@ export default function SettingsPage() {
   const [teamName, setTeamName] = useState('')
   const [typesList, setTypesList] = useState<string[]>([])
   const [previewTheme, setPreviewTheme] = useState('Executive')
+  const [verifyDetail, setVerifyDetail] = useState('step')
+  const [verifyScope, setVerifyScope] = useState('fails_only')
+  const [bugFromMode, setBugFromMode] = useState('instant')
 
   const [plans, setPlans] = useState<TestPlan[]>([])
   const [suites, setSuites] = useState<TestSuite[]>([])
@@ -333,6 +341,9 @@ export default function SettingsPage() {
       setDefaultRange(String(data[K.DEFAULT_RANGE] ?? '7'))
       setTeamName(String(data[K.REPORT_TEAM_NAME] ?? ''))
       setTypesList(String(data[K.REPORT_TYPES] ?? '').split(';').map(s => s.trim()).filter(Boolean))
+      setVerifyDetail(String(data[K.VERIFY_DETAIL] ?? 'step'))
+      setVerifyScope(String(data[K.VERIFY_STEP_SCOPE] ?? 'fails_only'))
+      setBugFromMode(String(data[K.BUG_FROM_CASE_MODE] ?? 'instant'))
     } catch (e) { setError(axiosMessage(e)) }
     finally { setLoading(false) }
   }, [])
@@ -818,10 +829,71 @@ export default function SettingsPage() {
                 </Box>
               )}
 
+              {/* ── FIND BUGS ───────────────────────────────────────────────── */}
+              {tab === 'findbugs' && (
+                <Box>
+                  <SectionHeader eyebrow="05 · Find Bugs"
+                    title="Code verification report"
+                    subtitle="How deeply the Find Bugs code-verification analyzes each test case, and how the “Create bug” action on a failed case builds its draft." />
+                  <Panel>
+                    <Stack spacing={3}>
+                      <Box>
+                        <FieldKey k={K.VERIFY_DETAIL} />
+                        <FormControl size="small" sx={{ minWidth: 340 }}>
+                          <InputLabel>Step detail</InputLabel>
+                          <Select label="Step detail" value={verifyDetail}
+                            onChange={e => setVerifyDetail(e.target.value)}>
+                            <MenuItem value="case">Case-level only — one verdict per test case (fastest)</MenuItem>
+                            <MenuItem value="step">Per-step pass / fail (recommended)</MenuItem>
+                            <MenuItem value="step_full">Per-step + what the code does at each step (most detail)</MenuItem>
+                          </Select>
+                        </FormControl>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                          Step detail shows a green tick / red ✗ on each step and pinpoints the failing step — at the cost of more LLM tokens.
+                        </Typography>
+                      </Box>
+                      <Box>
+                        <FieldKey k={K.VERIFY_STEP_SCOPE} />
+                        <FormControl size="small" sx={{ minWidth: 340 }}>
+                          <InputLabel>Per-step coverage</InputLabel>
+                          <Select label="Per-step coverage" value={verifyScope}
+                            onChange={e => setVerifyScope(e.target.value)}>
+                            <MenuItem value="fails_only">Failing &amp; inconclusive cases only (recommended)</MenuItem>
+                            <MenuItem value="all">Every test case</MenuItem>
+                          </Select>
+                        </FormControl>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                          Which cases get the per-step drill-down. Applies only when step detail is on.
+                        </Typography>
+                      </Box>
+                      <Box>
+                        <FieldKey k={K.BUG_FROM_CASE_MODE} />
+                        <FormControl size="small" sx={{ minWidth: 340 }}>
+                          <InputLabel>Create bug from a failed case</InputLabel>
+                          <Select label="Create bug from a failed case" value={bugFromMode}
+                            onChange={e => setBugFromMode(e.target.value)}>
+                            <MenuItem value="instant">Instant pre-fill — no LLM (recommended)</MenuItem>
+                            <MenuItem value="agent">Run Bug Writer on that case — polished, slower</MenuItem>
+                          </Select>
+                        </FormControl>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                          How the “Create bug” button on a failed test case builds the bug draft.
+                        </Typography>
+                      </Box>
+                    </Stack>
+                    <SaveBar onClick={() => save({
+                      [K.VERIFY_DETAIL]: verifyDetail,
+                      [K.VERIFY_STEP_SCOPE]: verifyScope,
+                      [K.BUG_FROM_CASE_MODE]: bugFromMode,
+                    })} />
+                  </Panel>
+                </Box>
+              )}
+
               {/* ── REPORTS ─────────────────────────────────────────────────── */}
               {tab === 'reports' && (
                 <Box>
-                  <SectionHeader eyebrow="05 · Reports"
+                  <SectionHeader eyebrow="06 · Reports"
                     title="Weekly report configuration"
                     subtitle="Schedule, default date range, and which boards / area paths to include by default. The Thursday auto-run only fires while the app is running." />
                   <Panel>
@@ -915,7 +987,7 @@ export default function SettingsPage() {
               {/* ── DIAGNOSTICS ─────────────────────────────────────────────── */}
               {tab === 'diag' && (
                 <Box>
-                  <SectionHeader eyebrow="06 · Diagnostics"
+                  <SectionHeader eyebrow="07 · Diagnostics"
                     title="Live checks"
                     subtitle="Verify ADO + the active LLM are working end-to-end. Useful right after changing credentials or switching providers." />
 

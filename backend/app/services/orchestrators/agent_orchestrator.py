@@ -33,6 +33,7 @@ from app.services.llm import get_llm_client
 from app.services.llm.base import StreamProgress
 from app.services.event_bus import get_event_bus
 from app.services.events import ConsoleEvent
+from app.services.orchestrators.concurrency import PIPELINE_SEM, mark_cancelled, mark_queued
 
 log = logging.getLogger("qa.orchestrator")
 
@@ -66,7 +67,10 @@ class AgentOrchestrator:
 
     # ── start (Analyst, then Tester if auto) ────────────────────────────────
 
-    async def start(self, project_id: int, work_item_id: int, auto_handoff: bool = True) -> int:
+    async def start(
+        self, project_id: int, work_item_id: int, auto_handoff: bool = True,
+        batch_id: int | None = None,
+    ) -> int:
         ado = get_ado_client()
         wi = await ado.get_work_item(work_item_id)
 
@@ -77,6 +81,7 @@ class AgentOrchestrator:
                 work_item_title=wi.title,
                 status=SessionStatus.Analyzing,
                 current_activity="Fetched work item from Azure DevOps",
+                batch_id=batch_id,
                 created_at=datetime.utcnow(),
                 updated_at=datetime.utcnow(),
             )
@@ -107,6 +112,20 @@ class AgentOrchestrator:
     # ── pipelines ───────────────────────────────────────────────────────────
 
     async def _run_pipeline(
+        self, session_id: int, project_id: int, work_item_id: int, auto_handoff: bool,
+    ) -> None:
+        """Queue behind the global concurrency cap, then run the pipeline. A child cancelled while
+        still queued (semaphore not yet acquired) is marked Cancelled here, since its inner body
+        never runs."""
+        try:
+            await mark_queued(TestSession, session_id)
+            async with PIPELINE_SEM:
+                await self._run_pipeline_inner(session_id, project_id, work_item_id, auto_handoff)
+        except asyncio.CancelledError:
+            await mark_cancelled(TestSession, session_id, SessionStatus.Cancelled)
+            raise
+
+    async def _run_pipeline_inner(
         self, session_id: int, project_id: int, work_item_id: int, auto_handoff: bool,
     ) -> None:
         ado = get_ado_client()

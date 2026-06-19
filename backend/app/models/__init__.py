@@ -1,5 +1,6 @@
 """ORM models — mirror the .NET entities one-for-one."""
 from app.models.app_setting import AppSetting
+from app.models.batch import Batch, BatchMode, BatchModule
 from app.models.bug_session import BugDraft, BugDraftStatus, BugSession, BugSessionStatus, BugSeverity
 from app.models.knowledgebase import KnowledgebaseDocument
 from app.models.project import Project
@@ -8,6 +9,9 @@ from app.models.test_session import DraftStatus, SessionStatus, TestCaseDraft, T
 
 __all__ = [
     "AppSetting",
+    "Batch",
+    "BatchMode",
+    "BatchModule",
     "BugDraft",
     "BugDraftStatus",
     "BugSession",

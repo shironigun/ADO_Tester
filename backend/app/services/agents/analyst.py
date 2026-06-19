@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from app.services.agents.json_utils import coerce_string, coerce_string_list, strip_fences
+from app.services.agents.json_utils import coerce_string, coerce_string_list, complete_json
 from app.services.knowledgebase import KnowledgebaseHit
 from app.services.llm.base import LlmClient, StreamProgress
 from app.services.ado_client import AdoWorkItem
@@ -34,6 +34,46 @@ Schema:
   "crossFlow":          ["string — other modules/features this story touches; empty if none"],
   "openQuestions":      ["string — genuine ambiguities in the story; empty if none"]
 }
+
+## YourProduct domain you operate in (carry this vocabulary into your output)
+- Modules: Deals, Messenger, Customers, Settings, Leads, Payments, Reports, Integrations.
+- DMS back-ends a story may touch: ASPEN, INFINITY, EVEREST, IDEAL (and TARGET itself). Sync issues
+  flow DMS <-> YourProduct — call those out explicitly when relevant.
+- Environments: QA, Staging, Production. Most stories are tested on QA/Staging against a specific
+  dealer; capture the dealer ID + environment whenever the ticket names one.
+- ALL-CAPS the domain keywords when you reference them in summary/rules/cases — states & entities
+  (CLOSED, OPEN, EMAIL, MMS, PDF, CSV, FB), DMS names (ASPEN, INFINITY, EVEREST, IDEAL, TARGET),
+  and environments (QA, STAGING) — so the Tester and Bug Writer inherit the house voice.
+- Do NOT add new JSON keys for these — fold dealer/environment/DMS context into `summary`,
+  `happyPath`, and the relevant list items.
+
+## How to derive each field (think like a senior SQA analyst)
+The Tester and Bug Writer agents consume your output — make every list an explicit test-case seed.
+- acceptanceCriteria: restate each AC as a clear, testable statement. Where an AC has a boundary
+  or restriction, phrase it so both the pass condition AND the enforcement/fail condition are visible.
+- businessRules: capture stated AND implied rules — time constraints (e.g. "FB messages only
+  sendable within 24h"), role restrictions, limits ("one FB page per department"), format
+  validations, state requirements. One rule per item; each becomes a positive + negative case.
+- edgeCases: enumerate concretely — empty states, min/max boundary values, expired tokens,
+  duplicate attempts, missing/deleted/merged records referenced mid-flow.
+- negativeCases: invalid input, wrong state, and actions the system must block.
+- permissions: if the feature is role-gated, list each role's allowed/blocked behavior.
+- crossFlow: name each other module/feature that shares data or state with this story (a regression
+  guard is needed for each).
+- openQuestions: only genuine ambiguities — do not pad. If the story is clear, return [].
+
+## CITE YOUR EVIDENCE (mandatory) — tag every item in acceptanceCriteria, businessRules,
+## edgeCases, negativeCases, permissions, and crossFlow with exactly ONE trailing tag:
+- `[src: <fileName>]` — when the item is grounded in a provided Domain Knowledge chunk. Use the
+  EXACT file name shown in its "### From: <fileName>" header (e.g. "[src: messenger.md]"). If two
+  docs back it, cite the most specific one.
+- `[ticket]` — when it comes straight from the ticket's own Title / Description / Acceptance Criteria.
+- `[ASSUMED]` — when YOU inferred it from domain experience with no doc or ticket statement backing it.
+- `[UNCLEAR]` — when the ticket/docs are ambiguous about it (and consider also raising it in openQuestions).
+The tag is the LAST thing in the string, after a single space. Example:
+  "FB messages are only sendable within the 24-hour window. [src: messenger.md]"
+  "SAVE is disabled until a pipeline Name is entered. [ticket]"
+Do NOT tag summary, happyPath, or openQuestions. Keep every list item a plain string (tag included).
 """
 
 
@@ -50,6 +90,9 @@ class AnalystOutput:
     permissions: list[str] = field(default_factory=list)
     cross_flow: list[str] = field(default_factory=list)
     open_questions: list[str] = field(default_factory=list)
+    # Answers the QA supplies to the open questions, aligned by index to open_questions
+    # (empty string = still unanswered). Not produced by the Analyst — filled in via the UI.
+    question_answers: list[str] = field(default_factory=list)
 
     def to_json(self) -> str:
         return json.dumps({
@@ -64,6 +107,7 @@ class AnalystOutput:
             "permissions": self.permissions,
             "crossFlow": self.cross_flow,
             "openQuestions": self.open_questions,
+            "questionAnswers": self.question_answers,
         })
 
     @staticmethod
@@ -92,6 +136,7 @@ class AnalystOutput:
             permissions=getl("permissions"),
             cross_flow=getl("crossFlow", "cross_flow"),
             open_questions=getl("openQuestions", "open_questions"),
+            question_answers=getl("questionAnswers", "question_answers"),
         )
 
 
@@ -107,12 +152,10 @@ class AnalystAgent:
         emit=None,
     ) -> AnalystOutput:
         prompt = self._build_user_prompt(work_item, context)
-        raw = await self._llm.complete(SYSTEM_PROMPT, prompt, progress=progress, emit=emit)
-        cleaned = strip_fences(raw, opener="{")
-        try:
-            data = json.loads(cleaned)
-        except json.JSONDecodeError as e:
-            raise RuntimeError(f"Analyst returned invalid JSON: {e}") from None
+        data = await complete_json(
+            self._llm, SYSTEM_PROMPT, prompt, opener="{",
+            progress=progress, emit=emit, label="Analyst",
+        )
         if not isinstance(data, dict):
             raise RuntimeError("Analyst returned non-object JSON.")
         return AnalystOutput.from_dict(data)

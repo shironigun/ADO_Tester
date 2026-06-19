@@ -13,6 +13,9 @@ import base64
 import html as html_lib
 import json
 import logging
+import re
+import time
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from urllib.parse import quote
 
@@ -32,6 +35,13 @@ WORK_ITEM_FIELDS = [
     "System.State",
     "Microsoft.VSTS.Common.AcceptanceCriteria",
 ]
+
+# Work-item hierarchy for Epic/Feature runs: descend through containers and collect the most-specific
+# testable level below them. Types vary by project (some go Epic→Feature→Story, others Epic→Task), so
+# rather than an allow-list of leaf types we descend only through containers and collect everything
+# else, excluding pure test artifacts. The user then picks which to run.
+CONTAINER_WORK_ITEM_TYPES = {"Epic", "Feature"}
+NON_TESTABLE_WORK_ITEM_TYPES = {"Test Case", "Test Plan", "Test Suite", "Shared Steps", "Shared Parameter"}
 
 
 class AdoApiError(RuntimeError):
@@ -60,6 +70,31 @@ class AdoWorkItem:
 class TestCaseStep:
     action: str
     expected: str
+
+
+@dataclass(frozen=True)
+class LinkedTestCase:
+    """A Test Case work item linked to a story in ADO (source of truth)."""
+    id: int
+    title: str
+    preconditions: str
+    steps: list[TestCaseStep]
+
+
+@dataclass(frozen=True)
+class ChangedFile:
+    """One file touched by a PR or commit (the diff anchor)."""
+    path: str
+    change_type: str  # add | edit | delete | rename | edit, rename | seed
+
+
+@dataclass(frozen=True)
+class LinkedChange:
+    """A PR or commit linked to a work item, enriched with a human title + browser URL."""
+    kind: str   # "pr" | "commit"
+    id: str     # PR id or commit sha
+    title: str
+    url: str    # Azure DevOps web URL for the changeset
 
 
 @dataclass(frozen=True)
@@ -135,6 +170,34 @@ def _build_steps_xml(steps: list[TestCaseStep]) -> str:
     return "".join(parts)
 
 
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _strip_tags(s: str) -> str:
+    return _TAG_RE.sub(" ", s or "").replace("&nbsp;", " ").strip()
+
+
+def _parse_steps_xml(xml: str) -> list[TestCaseStep]:
+    """Inverse of _build_steps_xml: Microsoft.VSTS.TCM.Steps XML → action/expected pairs.
+    Each <step> holds two <parameterizedString> nodes (action, expected) of inner HTML."""
+    if not xml or "<step" not in xml:
+        return []
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError:
+        return []
+    steps: list[TestCaseStep] = []
+    for step in root.iter("step"):
+        ps = step.findall("parameterizedString")
+        if len(ps) < 2:
+            continue
+        action = _strip_tags(html_lib.unescape(ps[0].text or ""))
+        expected = _strip_tags(html_lib.unescape(ps[1].text or ""))
+        if action or expected:
+            steps.append(TestCaseStep(action=action, expected=expected))
+    return steps
+
+
 def _get_str(d: dict, key: str) -> str | None:
     v = d.get(key)
     return v if isinstance(v, str) else None
@@ -155,6 +218,22 @@ def _change_paths(changes: list) -> list[str]:
     return out
 
 
+def _change_entries(changes: list) -> list[ChangedFile]:
+    """Like _change_paths but keeps the change type and (unlike it) keeps deletes —
+    a deleted file is still part of 'what changed' for the diff summary."""
+    out: list[ChangedFile] = []
+    seen: set[str] = set()
+    for c in changes or []:
+        item = c.get("item") or {}
+        if item.get("isFolder") or item.get("gitObjectType") == "tree":
+            continue
+        p = item.get("path")
+        if isinstance(p, str) and p and p not in seen:
+            out.append(ChangedFile(path=p, change_type=str(c.get("changeType", "") or "").lower()))
+            seen.add(p)
+    return out
+
+
 def _get_identity(d: dict, key: str) -> str | None:
     v = d.get(key)
     if isinstance(v, dict):
@@ -171,6 +250,10 @@ def _basic_auth_header(pat: str) -> str:
 class AzureDevOpsClient:
     """One client per process. Reuses a single AsyncClient for connection pooling."""
 
+    # Short-TTL cache so one logical operation (validate → stamp title → analyze) doesn't
+    # re-fetch the same work item several times. Expires quickly so re-runs still see edits.
+    _WI_CACHE_TTL = 60.0  # seconds
+
     def __init__(self) -> None:
         self._http = httpx.AsyncClient(
             timeout=30.0,
@@ -179,6 +262,7 @@ class AzureDevOpsClient:
                 "Accept": "application/json",
             },
         )
+        self._wi_cache: dict[int, tuple[float, AdoWorkItem]] = {}
 
     async def close(self) -> None:
         await self._http.aclose()
@@ -236,7 +320,14 @@ class AzureDevOpsClient:
 
     # ── reads ───────────────────────────────────────────────────────────────
 
-    async def get_work_item(self, work_item_id: int) -> AdoWorkItem:
+    async def get_work_item(
+        self, work_item_id: int, *, force_refresh: bool = False,
+    ) -> AdoWorkItem:
+        if not force_refresh:
+            hit = self._wi_cache.get(work_item_id)
+            if hit is not None and (time.monotonic() - hit[0]) < self._WI_CACHE_TTL:
+                return hit[1]
+
         fields = ",".join(WORK_ITEM_FIELDS)
         url = (
             f"{settings.ado_base_url}/_apis/wit/workitems/{work_item_id}"
@@ -250,7 +341,7 @@ class AzureDevOpsClient:
         assigned_to: str | None = None
         if isinstance(identity, dict):
             assigned_to = identity.get("displayName")
-        return AdoWorkItem(
+        wi = AdoWorkItem(
             id=int(data.get("id", work_item_id)),
             title=f.get("System.Title", "") or "",
             description=f.get("System.Description"),
@@ -260,6 +351,8 @@ class AzureDevOpsClient:
             assigned_to=assigned_to,
             url=data.get("url", "") or "",
         )
+        self._wi_cache[work_item_id] = (time.monotonic(), wi)
+        return wi
 
     async def search_work_items(self, query: str, top: int = 20) -> list[AdoWorkItem]:
         """
@@ -290,6 +383,136 @@ class AzureDevOpsClient:
         if not ids:
             return []
         return [await self.get_work_item(i) for i in ids]
+
+    async def get_linked_test_cases(self, story_id: int) -> list[LinkedTestCase]:
+        """Test Case work items linked to a story via TestedBy relations, with their
+        steps parsed from the Microsoft.VSTS.TCM.Steps XML. These are the real ADO
+        Test Cases (source of truth), as opposed to local Author-Tests drafts."""
+        url = (
+            f"{settings.ado_base_url}/_apis/wit/workitems/{story_id}"
+            f"?$expand=relations&api-version={settings.ado_api_version}"
+        )
+        r = await self._http.get(url)
+        await self._raise_if_failed(r, f"Get work item relations {story_id}")
+
+        ids: list[int] = []
+        for rel in r.json().get("relations", []) or []:
+            if "TestedBy" not in str(rel.get("rel") or ""):
+                continue
+            m = re.search(r"/work[iI]tems?/(\d+)\b", str(rel.get("url") or ""))
+            if m:
+                ids.append(int(m.group(1)))
+        # de-dupe, preserve order
+        ids = list(dict.fromkeys(ids))
+        if not ids:
+            return []
+
+        out: list[LinkedTestCase] = []
+        fields_csv = "System.Title,System.WorkItemType,Microsoft.VSTS.TCM.Steps"
+        for chunk_start in range(0, len(ids), 200):
+            chunk = ids[chunk_start:chunk_start + 200]
+            batch_url = (
+                f"{settings.ado_base_url}/_apis/wit/workitems?ids={','.join(map(str, chunk))}"
+                f"&fields={fields_csv}&api-version={settings.ado_api_version}"
+            )
+            br = await self._http.get(batch_url)
+            await self._raise_if_failed(br, "Linked test case batch fetch")
+            for e in br.json().get("value", []):
+                f = e.get("fields", {})
+                if (_get_str(f, "System.WorkItemType") or "") != "Test Case":
+                    continue
+                out.append(LinkedTestCase(
+                    id=int(e["id"]),
+                    title=_get_str(f, "System.Title") or "",
+                    preconditions="",
+                    steps=_parse_steps_xml(_get_str(f, "Microsoft.VSTS.TCM.Steps") or ""),
+                ))
+        return out
+
+    # ── Work-item hierarchy (Epic/Feature → child stories) ─────────────────
+
+    async def _direct_children(self, parent_id: int) -> list[AdoWorkItem]:
+        """One level of Hierarchy-Forward children of a work item, as lightweight AdoWorkItems
+        (id/title/type/state). Modeled on get_linked_test_cases' relations+batch-fetch pattern."""
+        url = (
+            f"{settings.ado_base_url}/_apis/wit/workitems/{parent_id}"
+            f"?$expand=relations&api-version={settings.ado_api_version}"
+        )
+        r = await self._http.get(url)
+        await self._raise_if_failed(r, f"Get child relations {parent_id}")
+        ids: list[int] = []
+        for rel in r.json().get("relations", []) or []:
+            if "Hierarchy-Forward" not in str(rel.get("rel") or ""):
+                continue
+            m = re.search(r"/work[iI]tems?/(\d+)\b", str(rel.get("url") or ""))
+            if m:
+                ids.append(int(m.group(1)))
+        ids = list(dict.fromkeys(ids))
+        if not ids:
+            return []
+        out: list[AdoWorkItem] = []
+        fields_csv = "System.Title,System.WorkItemType,System.State"
+        for chunk_start in range(0, len(ids), 200):
+            chunk = ids[chunk_start:chunk_start + 200]
+            batch_url = (
+                f"{settings.ado_base_url}/_apis/wit/workitems?ids={','.join(map(str, chunk))}"
+                f"&fields={fields_csv}&api-version={settings.ado_api_version}"
+            )
+            br = await self._http.get(batch_url)
+            await self._raise_if_failed(br, "Child work item batch fetch")
+            for e in br.json().get("value", []):
+                f = e.get("fields", {})
+                out.append(AdoWorkItem(
+                    id=int(e["id"]),
+                    title=_get_str(f, "System.Title") or "",
+                    work_item_type=_get_str(f, "System.WorkItemType") or "",
+                    state=_get_str(f, "System.State"),
+                ))
+        return out
+
+    async def get_child_work_items(
+        self, parent_id: int, *, recursive: bool = True,
+        max_depth: int = 5, max_nodes: int = 500, max_leaves: int = 200,
+    ) -> tuple[list[AdoWorkItem], bool]:
+        """Children of an Epic/Feature. When recursive, BFS down the hierarchy — descending through
+        CONTAINER_WORK_ITEM_TYPES (Epic/Feature) and collecting TESTABLE_LEAF_TYPES (User Story/Bug/
+        Issue) as leaves. Returns (work_items, truncated); truncated is True if a cap was hit."""
+        if not recursive:
+            return await self._direct_children(parent_id), False
+
+        leaves: list[AdoWorkItem] = []
+        seen: set[int] = {parent_id}
+        truncated = False
+        nodes_fetched = 0
+        frontier: list[tuple[int, int]] = [(parent_id, 0)]
+        while frontier:
+            next_frontier: list[tuple[int, int]] = []
+            for pid, depth in frontier:
+                children = await self._direct_children(pid)
+                nodes_fetched += len(children)
+                for c in children:
+                    if c.id in seen:
+                        continue
+                    seen.add(c.id)
+                    if c.work_item_type in CONTAINER_WORK_ITEM_TYPES:
+                        # Descend into containers; a container is never itself a batch target.
+                        if depth + 1 < max_depth:
+                            next_frontier.append((c.id, depth + 1))
+                        else:
+                            truncated = True  # hit the depth cap with an unexpanded container
+                        continue
+                    if c.work_item_type not in NON_TESTABLE_WORK_ITEM_TYPES:
+                        if len(leaves) >= max_leaves:
+                            truncated = True
+                            continue
+                        leaves.append(c)
+                    # else: a pure test artifact (Test Case/Plan/Suite) — never a batch target.
+                if nodes_fetched >= max_nodes:
+                    truncated = True
+                    next_frontier = []
+                    break
+            frontier = next_frontier
+        return leaves, truncated
 
     # ── Test Plans / Suites ────────────────────────────────────────────────
 
@@ -385,26 +608,39 @@ class AzureDevOpsClient:
         actual: str,
         suggested_fix: str,
     ) -> int:
+        # Repro in Mahmood's house anatomy (mirrors the `bugger` skill): environment-first
+        # <ul> steps, then a bold OBSERVATION block with the actual result, then a screenshot
+        # placeholder for the user to attach in the ADO UI.
         repro_html_parts: list[str] = []
         if preconditions and preconditions.strip():
             repro_html_parts.append(
                 f"<div><b>Preconditions:</b> {html_lib.escape(preconditions)}</div>"
             )
-        repro_html_parts.append("<div><b>Steps to reproduce:</b></div><ol>")
+        repro_html_parts.append("<ul>")
         for s in repro_steps:
             repro_html_parts.append(f"<li>{html_lib.escape(s)}</li>")
-        repro_html_parts.append("</ol>")
+        repro_html_parts.append("</ul>")
+        if actual and actual.strip():
+            repro_html_parts.append(
+                "<div><b>OBSERVATION:</b></div>"
+                f"<div><ul><li>{html_lib.escape(actual)}</li></ul></div>"
+            )
+        repro_html_parts.append("<div><i>[Attach screenshot/GIF here]</i></div>")
         repro_html = "".join(repro_html_parts)
 
-        sys_info_parts = [
-            f"<div><b>Expected:</b> {html_lib.escape(expected)}</div>",
-            f"<div><b>Actual:</b> {html_lib.escape(actual)}</div>",
-        ]
-        if suggested_fix and suggested_fix.strip():
-            sys_info_parts.append(
-                f"<div><b>Suggested fix:</b> {html_lib.escape(suggested_fix)}</div>"
+        # Acceptance criteria phrased the way Mahmood closes the loop.
+        acceptance_html = ""
+        if expected and expected.strip():
+            acceptance_html = (
+                "<div>I know this bug is resolved when:</div>"
+                f"<div><ul><li>{html_lib.escape(expected)}</li></ul></div>"
             )
-        sys_info = "".join(sys_info_parts)
+
+        # SystemInfo is reserved for test creds (DmsDealerId / Username / Password); we don't
+        # collect those, so use it to carry the optional dev-facing suggested fix instead.
+        sys_info = ""
+        if suggested_fix and suggested_fix.strip():
+            sys_info = f"<div><b>Suggested fix:</b> {html_lib.escape(suggested_fix)}</div>"
 
         sev_value = {
             "Critical": "1 - Critical",
@@ -416,9 +652,20 @@ class AzureDevOpsClient:
         body = [
             _patch_op("add", "/fields/System.Title", title),
             _patch_op("add", "/fields/Microsoft.VSTS.TCM.ReproSteps", repro_html),
-            _patch_op("add", "/fields/Microsoft.VSTS.TCM.SystemInfo", sys_info),
             _patch_op("add", "/fields/Microsoft.VSTS.Common.Severity", sev_value),
+            # House-style standing fields (from the bug-suite field reference).
+            _patch_op("add", "/fields/System.AreaPath", settings.ado_bug_area_path),
+            _patch_op("add", "/fields/Microsoft.VSTS.Common.Priority", 2),
+            _patch_op("add", "/fields/Microsoft.VSTS.Common.ValueArea", "Business"),
+            _patch_op("add", "/fields/Custom.QA", settings.ado_qa_owner),
+            _patch_op("add", "/fields/Custom.FoundWith", "Manual Test"),
         ]
+        if acceptance_html:
+            body.append(_patch_op(
+                "add", "/fields/Microsoft.VSTS.Common.AcceptanceCriteria", acceptance_html,
+            ))
+        if sys_info:
+            body.append(_patch_op("add", "/fields/Microsoft.VSTS.TCM.SystemInfo", sys_info))
 
         url = (
             f"{settings.ado_base_url}/_apis/wit/workitems/$Bug"
@@ -678,6 +925,64 @@ class AzureDevOpsClient:
                 commit_shas.append(raw.rsplit("/", 1)[-1])
         return {"pull_request_ids": pr_ids, "commit_shas": commit_shas}
 
+    async def get_linked_changes(self, work_item_id: int) -> list[LinkedChange]:
+        """Linked PRs/commits for a work item, enriched with a title + ADO web URL so the UI
+        can list them (title + id) and deep-link to the changeset. Best-effort: never raises;
+        falls back to an id-only label if the detail lookup fails."""
+        try:
+            refs = await self.get_work_item_git_refs(work_item_id)
+        except AdoApiError:
+            return []
+        pr_ids = refs.get("pull_request_ids", [])
+        commit_shas = refs.get("commit_shas", [])
+        if not pr_ids and not commit_shas:
+            return []
+        try:
+            rid: str | None = await self.resolve_repository_id()
+        except AdoApiError:
+            rid = None
+        repo = quote(settings.ado_repository)
+        out: list[LinkedChange] = []
+
+        for pr in pr_ids:
+            title = f"Pull Request #{pr}"
+            if rid:
+                try:
+                    r = await self._http.get(
+                        f"{settings.ado_base_url}/_apis/git/repositories/{rid}"
+                        f"/pullRequests/{pr}?api-version={settings.ado_api_version}"
+                    )
+                    if r.status_code < 400:
+                        t = str(r.json().get("title") or "").strip()
+                        if t:
+                            title = t
+                except httpx.HTTPError:
+                    pass
+            out.append(LinkedChange(
+                kind="pr", id=str(pr), title=title,
+                url=f"{settings.ado_base_url}/_git/{repo}/pullrequest/{pr}",
+            ))
+
+        for sha in commit_shas:
+            title = f"Commit {sha[:8]}"
+            if rid:
+                try:
+                    r = await self._http.get(
+                        f"{settings.ado_base_url}/_apis/git/repositories/{rid}"
+                        f"/commits/{sha}?api-version={settings.ado_api_version}"
+                    )
+                    if r.status_code < 400:
+                        msg = str(r.json().get("comment") or "").strip()
+                        if msg:
+                            title = msg.splitlines()[0][:120]
+                except httpx.HTTPError:
+                    pass
+            out.append(LinkedChange(
+                kind="commit", id=str(sha), title=title,
+                url=f"{settings.ado_base_url}/_git/{repo}/commit/{sha}",
+            ))
+        return out
+
     async def get_pull_request_changed_files(self, pr_id: int | str, repo_id: str | None = None) -> list[str]:
         rid = repo_id or await self.resolve_repository_id()
         base = f"{settings.ado_base_url}/_apis/git/repositories/{rid}/pullRequests/{pr_id}"
@@ -700,6 +1005,43 @@ class AzureDevOpsClient:
         r = await self._http.get(url)
         await self._raise_if_failed(r, f"Commit {sha} changes")
         return _change_paths(r.json().get("changes", []))
+
+    async def get_pull_request_diff(self, pr_id: int | str, repo_id: str | None = None) -> list[ChangedFile]:
+        """Changed files (+ change type) of a PR's latest iteration — the diff anchor."""
+        rid = repo_id or await self.resolve_repository_id()
+        base = f"{settings.ado_base_url}/_apis/git/repositories/{rid}/pullRequests/{pr_id}"
+        it = await self._http.get(f"{base}/iterations?api-version={settings.ado_api_version}")
+        await self._raise_if_failed(it, f"PR {pr_id} iterations")
+        iters = it.json().get("value", [])
+        if not iters:
+            return []
+        last = max(int(i["id"]) for i in iters)
+        ch = await self._http.get(f"{base}/iterations/{last}/changes?api-version={settings.ado_api_version}")
+        await self._raise_if_failed(ch, f"PR {pr_id} changes")
+        return _change_entries(ch.json().get("changeEntries", []))
+
+    async def get_commit_diff(self, sha: str, repo_id: str | None = None) -> list[ChangedFile]:
+        """Changed files (+ change type) of a single commit — the diff anchor."""
+        rid = repo_id or await self.resolve_repository_id()
+        url = (
+            f"{settings.ado_base_url}/_apis/git/repositories/{rid}/commits/{sha}/changes"
+            f"?api-version={settings.ado_api_version}"
+        )
+        r = await self._http.get(url)
+        await self._raise_if_failed(r, f"Commit {sha} diff")
+        return _change_entries(r.json().get("changes", []))
+
+    async def get_commits_for_path(self, path: str, top: int = 5, repo_id: str | None = None) -> list[str]:
+        """Most recent commit SHAs that touched a given file path (no-ref fallback anchor)."""
+        rid = repo_id or await self.resolve_repository_id()
+        url = (
+            f"{settings.ado_base_url}/_apis/git/repositories/{rid}/commits"
+            f"?searchCriteria.itemPath={quote(path)}&searchCriteria.$top={top}"
+            f"&api-version={settings.ado_api_version}"
+        )
+        r = await self._http.get(url)
+        await self._raise_if_failed(r, f"Commits for {path}")
+        return [str(c.get("commitId")) for c in r.json().get("value", []) if c.get("commitId")]
 
     async def get_file_content(
         self, path: str, ref: str | None = None, repo_id: str | None = None, version_type: str = "branch",
