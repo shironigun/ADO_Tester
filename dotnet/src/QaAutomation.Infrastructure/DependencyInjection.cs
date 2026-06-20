@@ -8,8 +8,10 @@ using QaAutomation.Core.Abstractions;
 using QaAutomation.Core.Configuration;
 using QaAutomation.Infrastructure.AzureDevOps;
 using QaAutomation.Infrastructure.Data;
+using QaAutomation.Infrastructure.Events;
 using QaAutomation.Infrastructure.Knowledgebase;
 using QaAutomation.Infrastructure.Llm;
+using QaAutomation.Infrastructure.Orchestrators;
 
 namespace QaAutomation.Infrastructure;
 
@@ -27,6 +29,17 @@ public static class DependencyInjection
         services.AddAzureDevOps(config);
         services.AddLlm(config);
         services.AddKnowledgebase(config);
+        services.AddPipelineInfrastructure();
+        return services;
+    }
+
+    private static IServiceCollection AddPipelineInfrastructure(this IServiceCollection services)
+    {
+        // Shared B5 infra: live-console pub/sub, the process-wide concurrency gate, and the
+        // per-session cancellation registry. All singletons (in-memory, span the whole process).
+        services.AddSingleton<IEventBus, EventBus>();
+        services.AddSingleton<PipelineConcurrency>();
+        services.AddSingleton<CancellationRegistry>();
         return services;
     }
 
