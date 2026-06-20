@@ -17,7 +17,10 @@ dist/
 *.db
 *.db-shm
 *.db-wal
-data/
+# Runtime data dirs only (anchored) — must NOT match the C# source folder
+# dotnet/src/QaAutomation.Infrastructure/Data/ (Git is case-insensitive on Windows).
+/data/
+backend/data/
 
 # Python
 __pycache__/

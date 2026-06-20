@@ -8,6 +8,7 @@ using QaAutomation.Core.Abstractions;
 using QaAutomation.Core.Configuration;
 using QaAutomation.Infrastructure.AzureDevOps;
 using QaAutomation.Infrastructure.Data;
+using QaAutomation.Infrastructure.Knowledgebase;
 using QaAutomation.Infrastructure.Llm;
 
 namespace QaAutomation.Infrastructure;
@@ -25,6 +26,15 @@ public static class DependencyInjection
         services.AddScoped<DatabaseInitializer>();
         services.AddAzureDevOps(config);
         services.AddLlm(config);
+        services.AddKnowledgebase(config);
+        return services;
+    }
+
+    private static IServiceCollection AddKnowledgebase(this IServiceCollection services, IConfiguration config)
+    {
+        services.AddOptions<StorageOptions>().Bind(config.GetSection(StorageOptions.SectionName));
+        // Scoped: shares the request/background DbContext scope (FTS writes + BM25 reads go through it).
+        services.AddScoped<IKnowledgebaseService, KnowledgebaseService>();
         return services;
     }
 
