@@ -32,9 +32,13 @@ export async function getAdoProjects(organization: string): Promise<AdoProject[]
   return data.projects ?? []
 }
 
-export async function getAdoAreaPaths(organization: string, project: string): Promise<string[]> {
-  const { data } = await api.get<{ areaPaths: string[] }>('/api/settings/ado/area-paths',
-    { params: { organization, project } })
+// Both args optional: when omitted the backend falls back to the saved ado.organization / ado.project
+// config (the Reports page calls this with no params to discover boards for the saved connection).
+export async function getAdoAreaPaths(organization?: string, project?: string): Promise<string[]> {
+  const params: Record<string, string> = {}
+  if (organization) params.organization = organization
+  if (project) params.project = project
+  const { data } = await api.get<{ areaPaths: string[] }>('/api/settings/ado/area-paths', { params })
   return data.areaPaths ?? []
 }
 
