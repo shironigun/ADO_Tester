@@ -6,6 +6,17 @@ export type Config = Record<string, string | boolean>
 
 interface AdoProject { id: string; name: string }
 
+export interface ProviderInfo { current: string; available: string[] }
+
+export async function getProvider(): Promise<ProviderInfo> {
+  const { data } = await api.get<ProviderInfo>('/api/settings/provider')
+  return data
+}
+
+export async function setProvider(provider: string): Promise<void> {
+  await api.put('/api/settings/provider', { provider })
+}
+
 export async function getConfig(): Promise<Config> {
   const { data } = await api.get<Config>('/api/settings/config')
   return data
