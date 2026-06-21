@@ -72,6 +72,9 @@ public static class EventPhases
     public const string Discover = "discover";
     public const string CodeVerify = "code-verify";
     public const string Enrich = "enrich";
+    /// <summary>Emitted by the Find-Bugs triage pass (used at runtime by the Python orchestrator
+    /// though absent from its declared phase literal).</summary>
+    public const string Triage = "triage";
 }
 
 /// <summary>Frozen <c>level</c> wire values.</summary>
