@@ -13,6 +13,7 @@ using QaAutomation.Infrastructure.Events;
 using QaAutomation.Infrastructure.Knowledgebase;
 using QaAutomation.Infrastructure.Llm;
 using QaAutomation.Infrastructure.Orchestrators;
+using QaAutomation.Infrastructure.Reports;
 using QaAutomation.Infrastructure.Settings;
 
 namespace QaAutomation.Infrastructure;
@@ -35,6 +36,17 @@ public static class DependencyInjection
         services.AddKnowledgebase(config);
         services.AddPipelineInfrastructure();
         services.AddSettingsLayer();
+        services.AddReports();
+        return services;
+    }
+
+    /// <summary>B7 reports: summarizer, HTML builder, generation service, and the weekly scheduler.</summary>
+    private static IServiceCollection AddReports(this IServiceCollection services)
+    {
+        services.AddSingleton<ReportSummarizer>();
+        services.AddSingleton<IReportHtmlBuilder, ReportHtmlBuilder>();
+        services.AddSingleton<IReportService, ReportService>();
+        services.AddHostedService<WeeklyReportScheduler>();
         return services;
     }
 
