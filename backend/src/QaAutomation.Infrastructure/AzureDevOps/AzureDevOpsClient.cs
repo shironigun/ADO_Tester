@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization.Metadata;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
@@ -52,7 +53,15 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
 
     // json-patch + ADO request bodies are serialized raw (NOT through the global camelCase options).
     // UnsafeRelaxed leaves <>&'" unescaped, matching Python's json.dumps for the HTML-bearing values.
-    private static readonly JsonSerializerOptions RawJson = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+    // The explicit reflection resolver lets ToJsonString serialize node trees that contain POCO-backed
+    // JsonValues (e.g. collection-initializer arrays like `new JsonArray { str }` → JsonValueCustomized);
+    // without it those throw "must specify a TypeInfoResolver" (the JsonNode writer doesn't auto-populate
+    // one like JsonSerializer.Serialize does). Encoder + naming are unchanged, so wire output is identical.
+    private static readonly JsonSerializerOptions RawJson = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+    };
 
     private const double WiCacheTtlSeconds = 60.0;
 
