@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
   Alert, Autocomplete, Box, Button, Card, CardContent, Chip, CircularProgress, Dialog,
   DialogContent, DialogTitle, FormControl, IconButton, InputLabel, MenuItem,
@@ -60,22 +61,24 @@ export default function ReportsPage() {
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState('')
 
-  const [reports, setReports] = useState<Report[]>([])
   const [viewing, setViewing] = useState<Report | null>(null)
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Reports list, kept live via React Query (F2). Polls every 2.5s only while a report is still
+  // generating, with a 25-min cap (600 polls) so a stuck "Generating" can't poll forever.
   const pollCountRef = useRef(0)
-  const MAX_POLLS = 600 // 2.5s * 600 = 25 min cap
-
-  const loadReports = useCallback(async () => {
-    const data = await listReports(PROJECT_ID)
-    setReports(data)
-    return data
-  }, [])
-
-  useEffect(() => {
-    loadReports().catch(() => {})
-    return () => { if (pollRef.current) clearInterval(pollRef.current) }
-  }, [loadReports])
+  const MAX_POLLS = 600
+  const reportsQuery = useQuery({
+    queryKey: ['reports', PROJECT_ID],
+    queryFn: () => listReports(PROJECT_ID),
+    refetchInterval: (q) => {
+      const generating = (q.state.data ?? []).some(r => r.status === 'Generating')
+      if (!generating) { pollCountRef.current = 0; return false }
+      pollCountRef.current += 1
+      return pollCountRef.current > MAX_POLLS ? false : 2500
+    },
+  })
+  const reports = reportsQuery.data ?? []
+  const loadReports = () => { void reportsQuery.refetch() }
 
   // Pull the saved default boards (from Settings) + the discoverable area paths.
   useEffect(() => {
@@ -99,31 +102,13 @@ export default function ReportsPage() {
     return () => { cancelled = true }
   }, [])
 
-  // Poll while any report is generating
-  useEffect(() => {
-    const hasGenerating = reports.some(r => r.status === 'Generating')
-    if (hasGenerating && !pollRef.current) {
-      pollCountRef.current = 0
-      pollRef.current = setInterval(() => {
-        pollCountRef.current += 1
-        if (pollCountRef.current > MAX_POLLS) {
-          if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
-          return
-        }
-        loadReports().catch(() => {})
-      }, 2500)
-    } else if (!hasGenerating && pollRef.current) {
-      clearInterval(pollRef.current); pollRef.current = null
-    }
-  }, [reports, loadReports])
-
   async function generate() {
     setError(''); setGenerating(true)
     try {
       const from = new Date(fromDate + 'T00:00:00').toISOString()
       const to = new Date(toDate + 'T23:59:59').toISOString()
       await generateReport(PROJECT_ID, { fromUtc: from, toUtc: to, boards, theme })
-      await loadReports()
+      await reportsQuery.refetch()
     } catch (e: unknown) {
       // Server may return ProblemDetails JSON or a long HTML error page — guard the body length.
       setError(axiosMessage(e, { maxLen: 500 }))
