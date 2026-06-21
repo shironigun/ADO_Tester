@@ -10,15 +10,19 @@ DotNetEnv.Env.TraversePath().Load();
 
 var builder = WebApplication.CreateBuilder(args);
 
-// SQLite db path. Defaults to the live qa.db shared with the Python app during migration (D6 adopts it).
-// Override via config key Storage:DatabasePath (env: Storage__DatabasePath). Relative paths resolve
-// against the content root (the Api project dir under `dotnet run`).
+// Single data root: <backend>/data — the API project sits at <backend>/src/QaAutomation.Api, so
+// ../../data resolves to the backend's own data folder (name-independent). Holds the SQLite DB, KB
+// uploads, and report HTML, so everything lives under one folder. Override the DB via Storage:DatabasePath
+// (env: Storage__DatabasePath); relative overrides resolve against the content root.
+var dataDir = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data"));
 var configuredDbPath = builder.Configuration["Storage:DatabasePath"];
 var dbPath = string.IsNullOrWhiteSpace(configuredDbPath)
-    ? Path.Combine("..", "..", "..", "backend", "data", "qa.db")
-    : configuredDbPath;
-if (!Path.IsPathRooted(dbPath))
-    dbPath = Path.GetFullPath(dbPath, builder.Environment.ContentRootPath);
+    ? Path.Combine(dataDir, "qa.db")
+    : (Path.IsPathRooted(configuredDbPath)
+        ? configuredDbPath
+        : Path.GetFullPath(configuredDbPath, builder.Environment.ContentRootPath));
+// Point KB/reports at the same data root (they bind Storage:DataDirectory).
+builder.Configuration["Storage:DataDirectory"] = dataDir;
 
 // Program.cs stays a list of AddCustom*/Configure* one-liners (house style — see ConfigurationExtensions).
 builder.Services.AddCustomControllers();

@@ -24,6 +24,7 @@ public sealed class QaDbContext : DbContext
     public DbSet<BugDraft> BugDrafts => Set<BugDraft>();
     public DbSet<Report> Reports => Set<Report>();
     public DbSet<Batch> Batches => Set<Batch>();
+    public DbSet<ErrorLog> ErrorLogs => Set<ErrorLog>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
@@ -179,6 +180,24 @@ public sealed class QaDbContext : DbContext
             e.Property(x => x.Mode).HasColumnName("Mode").HasConversion(modeConverter);
             e.Property(x => x.CreatedAt).HasColumnName("CreatedAt").IsRequired();
             e.Property(x => x.UpdatedAt).HasColumnName("UpdatedAt").IsRequired();
+        });
+
+        // ErrorLogs is NOT part of the adopted Alembic schema — it's added by the AddErrorLogs EF
+        // migration (applied on boot). Free, DB-only error/warning capture for debugging.
+        model.Entity<ErrorLog>(e =>
+        {
+            e.ToTable("ErrorLogs");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("Id").ValueGeneratedOnAdd();
+            e.Property(x => x.CreatedAt).HasColumnName("CreatedAt").IsRequired();
+            e.Property(x => x.Source).HasColumnName("Source").IsRequired();
+            e.Property(x => x.Level).HasColumnName("Level").IsRequired();
+            e.Property(x => x.Category).HasColumnName("Category");
+            e.Property(x => x.Message).HasColumnName("Message").IsRequired();
+            e.Property(x => x.Exception).HasColumnName("Exception");
+            e.Property(x => x.Path).HasColumnName("Path");
+            e.Property(x => x.Context).HasColumnName("Context");
+            e.HasIndex(x => x.CreatedAt).HasDatabaseName("ix_ErrorLogs_CreatedAt");
         });
     }
 }
