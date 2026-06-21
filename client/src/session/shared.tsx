@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Box, Chip, Stack, Typography } from '@mui/material'
-import axios from 'axios'
 import { useEventStream, type ConsoleEvent } from '../hooks/useEventStream'
 import { MONO_FONT } from '../theme/tokens'
 import type { SessionDetail, SessionModuleConfig, SessionSummary } from './types'
+
+// Re-export the shared error helper so the session-config files importing it from `./shared` keep
+// working unchanged after the F1 consolidation into common/errors.
+export { axiosMessage } from '../common/errors'
 
 const PHASE_LABEL: Record<string, string> = {
   fetch: 'FETCH', retrieve: 'KB', analyst: 'ANALYST', tester: 'TESTER',
@@ -20,18 +23,6 @@ function fmtClock(ts: number): string {
 export function parseEventLog(json: string | null | undefined): ConsoleEvent[] {
   if (!json) return []
   try { const v = JSON.parse(json); return Array.isArray(v) ? v : [] } catch { return [] }
-}
-
-export function axiosMessage(e: unknown): string {
-  if (!axios.isAxiosError(e)) return e instanceof Error ? e.message : String(e)
-  const d = e.response?.data as unknown
-  if (typeof d === 'string') return d
-  if (d && typeof d === 'object') {
-    if ('detail' in d) return String((d as { detail: unknown }).detail)
-    if ('title' in d) return String((d as { title: unknown }).title)
-    if ('error' in d) return String((d as { error: unknown }).error)
-  }
-  return e.message
 }
 
 /**
