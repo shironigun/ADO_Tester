@@ -54,6 +54,40 @@ Errors + warnings from both ends are persisted to the **`ErrorLogs`** table in `
 
 ---
 
+## Frontend re-architecture F0–F5 (DONE, `dev` branch)
+
+Re-architected `client/` onto a centralized API + state layer. All steps are behaviour-preserving,
+each its own commit, `tsc + vite build` clean, and the whole stack was smoke-tested live against the
+.NET backend (see "Runtime verification" below).
+
+- **F0** — Redux Toolkit + React Query providers mounted; `config/env.ts` (`apiUrl`, central `PROJECT_ID`).
+- **F1** — every feature calls through one axios instance (`api/client.ts`) via per-feature modules
+  (`api/{knowledgebase,settings,diagnostics,reports,authorTests,findBugs,batches}.ts`); shared
+  `common/errors.ts`. All transports (axios, SSE `EventSource`, report iframe/download, Settings
+  preview, error-logger `fetch`) build URLs from `config/env` → honour `VITE_QA_API`. Legacy
+  global-axios interceptor removed. Only `client.ts`/`common/errors.ts` still import `axios`.
+- **F2** — polling moved to React Query: `useSessionDetail`/`useSessionsLive`, the Reports list, and
+  the Epic-runs list/detail now use `useQuery` + status-gated `refetchInterval` (off when terminal).
+  SSE keeps using `useEventStream`.
+- **F3** — colour mode is a Redux slice (`app/colorModeSlice`); active LLM provider is React Query
+  (server state). Redux = client UI state only; server state stays in React Query.
+- **F4** — central route table `routes/AppRoutes.tsx` + `routes/paths.ts` (path builders); nav, page
+  routes, and all `navigate()` deep-links source paths from there. (Optional page→`components/<feature>/`
+  folder reshuffle was intentionally skipped — cosmetic, high-churn.)
+- **F5** — `VITE_QA_API` mechanism documented in `client/.env.example`; empty in dev (Vite proxy),
+  set to an absolute origin to point a build at a remote backend.
+
+### Runtime verification (2026-06-21, this session, live browser smoke test)
+
+Backend healthy on :5250 (`ClaudeCli`, PAT ✔). API contracts confirmed to match the `api/*` modules
+(author-tests/find-bugs sessions, reports, knowledgebase, batches, settings/provider all 200 with the
+expected shapes). Every page rendered with live data and **zero console errors / zero failed
+requests**: Settings, Author Tests (list + detail drawer = React Query hooks), Find Bugs, Reports
+(87 area paths discovered), Dashboard (aggregates), Knowledgebase. Colour-mode toggle flips palette +
+persists to `localStorage`; full-screen session route renders outside the shell.
+
+---
+
 ## Open issues — verify / fix manually
 
 ### 1. Author-Tests **Tester** phase fails on large tickets — `Claude CLI exited 1 (no stderr)`  ⛔ blocking
