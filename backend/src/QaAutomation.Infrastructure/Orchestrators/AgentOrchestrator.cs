@@ -124,7 +124,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 _concurrency.Gate.Release();
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             await MarkCancelledAsync(sessionId);   // guarded against terminal — no-op if the inner body already set it
         }
@@ -198,7 +198,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 await db.SaveChangesAsync(ct);
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             _log.LogInformation("Pipeline cancelled for session {SessionId}", sessionId);
             session.Status = SessionStatus.Cancelled;
@@ -248,7 +248,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             var wi = await _ado.GetWorkItemAsync(session.WorkItemId, ct: ct);
             await RunTesterInnerAsync(db, session, analysis, wi, key, ct);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             session.Status = SessionStatus.Cancelled;
             session.CurrentActivity = "Cancelled by user";
@@ -382,7 +382,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             session.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             var pushedCount = drafts.Count(d => d.Status == DraftStatus.Pushed);
             session.Status = SessionStatus.Cancelled;
