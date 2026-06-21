@@ -36,6 +36,7 @@ import type {
 } from '../types'
 import { parseEventLog } from '../shared'
 import { axiosMessage } from '../../common/errors'
+import { useAdoWorkItemUrl } from '../../common/adoLinks'
 import { PROJECT_ID } from '../../config/env'
 import {
   getPlans, getSuites, searchWorkItems, startSession, listSessionsPage, getSessionDetail,
@@ -43,10 +44,7 @@ import {
   sessionStreamUrl, type TestPlan, type TestSuite,
 } from '../../api/authorTests'
 
-const ADO_WI_URL = (id: number) => `https://dev.azure.com/${encodeURIComponent(ADO_ORG)}/${encodeURIComponent(ADO_PROJECT)}/_workitems/edit/${id}`
-
-const ADO_ORG = 'YourOrg'
-const ADO_PROJECT = 'Your Project'
+// ADO work-item deep-links are built from the configured org/project via useAdoWorkItemUrl().
 
 interface Step { action: string; expected: string }
 interface Draft {
@@ -212,11 +210,11 @@ function TestDraftCard({ draft, onApprove, onReject, onSave }: {
 function TestPushResults({ session, context }: {
   session: SessionDetail; context: { plan: TestPlan; suite: TestSuite } | undefined
 }) {
+  const wiUrl = useAdoWorkItemUrl()
   const drafts = session.drafts as unknown as Draft[]
   const pushed = drafts.filter(d => d.status === 'Pushed' && d.adoTestCaseId)
   if (pushed.length === 0) return null
   if (!['Done', 'Cancelled', 'Failed'].includes(session.status)) return null
-  const wiUrl = (id: number) => `https://dev.azure.com/${encodeURIComponent(ADO_ORG)}/${encodeURIComponent(ADO_PROJECT)}/_workitems/edit/${id}`
 
   function downloadCsv() {
     const header = ['SessionId','StoryId','StoryTitle','TestCaseId','TestCaseTitle','PlanId','PlanName','SuiteId','SuiteName','AdoUrl']
@@ -259,6 +257,7 @@ function TestPushResults({ session, context }: {
 
 // ── Detail body (pipeline + gate + tiles→popup + push) ───────────────────────
 function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
+  const wiUrl = useAdoWorkItemUrl()
   const drafts = session.drafts as unknown as Draft[]
   const [plans, setPlans] = useState<TestPlan[]>([])
   const [suites, setSuites] = useState<TestSuite[]>([])
@@ -381,7 +380,7 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
             <Chip size="small" label={`#${session.workItemId}`} />
             {wiType && <Chip size="small" variant="outlined" label={wiType} />}
             <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }}>{session.workItemTitle}</Typography>
-            <Link href={ADO_WI_URL(session.workItemId)} target="_blank" rel="noreferrer" variant="body2">Open in Azure DevOps</Link>
+            <Link href={wiUrl(session.workItemId)} target="_blank" rel="noreferrer" variant="body2">Open in Azure DevOps</Link>
           </Stack>
         </CardContent></Card>
       )}
