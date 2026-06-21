@@ -86,6 +86,16 @@ requests**: Settings, Author Tests (list + detail drawer = React Query hooks), F
 (87 area paths discovered), Dashboard (aggregates), Knowledgebase. Colour-mode toggle flips palette +
 persists to `localStorage`; full-screen session route renders outside the shell.
 
+### Full re-verification pass (2026-06-21) — findings + fixes
+
+Swept every page (Dashboard, Knowledgebase, Author Tests incl. detail drawer, Find Bugs incl. detail + 256-case test-execution report, Reports, Settings all 7 tabs incl. live LLM ping + ADO read), all 3 report themes (Executive/Standup/Branded) in Explore + Present + modal, and a console/network sweep. Three items found:
+
+1. **KB search returned nothing (real bug, FIXED).** The seeded `domain-base.md` was an orphan from the adopted Alembic DB — a `Documents` row claiming 3 chunks but with NO file on disk and **0 rows in the `doc_chunks` FTS5 index**, so every BM25 query returned `[]` (and the Author-Tests Retrieve-KB phase got nothing). DB adoption brings the Documents metadata but not the .NET FTS content. Fixed by deleting the orphan; the real `targetcrm-knowledge-base.md` (156 chunks) indexes + searches correctly ("serial number on hand" → 8 hits w/ bm25 scores). Anyone re-adopting a fresh Python qa.db must re-upload KB docs so the .NET FTS index is populated.
+2. **Report viewer DialogTitle invalid nesting (FIXED, commit on dev).** The full-screen report viewer's `DialogTitle` defaulted to `<h2>` wrapping a `subtitle1` Typography (`<h6>`) → an `<h6>`-in-`<h2>` React DOM-nesting error on every open. Added `component="div"` (every other DialogTitle already had it); zero console errors after.
+3. **Stale pre-fix reports (noted, not a bug).** Report HTML is persisted at generation time, so reports generated before the builder port (e.g. the "Done" 181-ticket report id=3) still render the OLD simplified format in the viewer. Regenerate to get the new deck; new generations + the live preview use the new builder.
+
+Otherwise clean: zero failed network requests, zero console errors across the app.
+
 ---
 
 ## Open issues — verify / fix manually
