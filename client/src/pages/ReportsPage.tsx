@@ -261,7 +261,7 @@ export default function ReportsPage() {
       {/* Full-screen viewer — kept OUTSIDE any motion/AnimatePresence so the iframe
           never remounts (which would reload the report). */}
       <Dialog open={!!viewing} onClose={() => setViewing(null)} fullScreen>
-        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1 }}>
+        <DialogTitle component="div" sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1 }}>
           <Typography variant="subtitle1" sx={{ flex: 1 }}>{viewing?.title}</Typography>
           {viewing && (
             <Button variant="outlined" size="small" startIcon={<DownloadIcon />}
