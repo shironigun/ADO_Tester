@@ -7,7 +7,7 @@ public interface IReportService
     /// <summary>Kicks off report generation in the background. Returns the new report ID.</summary>
     Task<int> GenerateAsync(
         int projectId, DateTime fromUtc, DateTime toUtc, IReadOnlyList<string> boards,
-        string trigger = "Manual", CancellationToken cancellationToken = default);
+        string trigger = "Manual", ReportTheme theme = ReportTheme.Executive, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<Report>> ListAsync(int projectId, CancellationToken cancellationToken = default);
 

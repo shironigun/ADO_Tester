@@ -11,4 +11,6 @@ public sealed class StorageOptions
     public string DatabaseFileName { get; set; } = "qa.db";
 
     public string KnowledgebaseFolderName { get; set; } = "kb";
+
+    public string ReportsFolderName { get; set; } = "reports";
 }
