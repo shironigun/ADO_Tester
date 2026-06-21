@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using QaAutomation.Core.Models;
 using QaAutomation.Infrastructure.Data;
 
 namespace QaAutomation.Tests;
@@ -106,6 +107,41 @@ public sealed class DatabaseInitializerTests
         }
     }
 
+    [Fact]
+    public void Enums_persist_as_their_exact_wire_strings()
+    {
+        // 🔴 EF must store enums as their exact string value, NOT as int and NOT camelCased. BatchModule
+        // and BatchMode use non-PascalCase wire strings via a custom converter; if that regresses (e.g.
+        // EF's default int mapping), the adopted Python DB silently breaks. Round-trip and read raw.
+        var db = TempDbPath("enums");
+        Cleanup(db);
+        try
+        {
+            Initialize(db);
+            using (var ctx = NewContext(db))
+            {
+                ctx.Batches.Add(new Batch
+                {
+                    ProjectId = 1,
+                    Module = BatchModule.AuthorTests,
+                    Mode = BatchMode.Auto,
+                    Title = "t",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                });
+                ctx.SaveChanges();
+            }
+
+            // Custom-converter enums store kebab/lowercase wire strings, not the C# member names.
+            Assert.Equal("author-tests", RawString(db, "SELECT Module FROM Batches LIMIT 1"));
+            Assert.Equal("auto", RawString(db, "SELECT Mode FROM Batches LIMIT 1"));
+        }
+        finally
+        {
+            Cleanup(db);
+        }
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     private static string? FindLiveDb()
@@ -131,6 +167,15 @@ public sealed class DatabaseInitializerTests
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         return Convert.ToInt64(cmd.ExecuteScalar());
+    }
+
+    private static string? RawString(string dbPath, string sql)
+    {
+        using var conn = new SqliteConnection($"Data Source={dbPath}");
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        return cmd.ExecuteScalar() as string;
     }
 
     private static void Cleanup(string dbPath)
