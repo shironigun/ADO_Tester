@@ -102,7 +102,7 @@ def seed(cx: sqlite3.Connection) -> None:
                ("Ideal Agile", "ConstellationDealer", "Ideal Agile"))
 
     cx.executemany('INSERT INTO "Settings" ("Key","Value") VALUES (?,?)',
-                   [("llm.provider", "Anthropic"), ("schedule.weekly_report", "true")])
+                   [("llm.provider", "ClaudeCli"), ("schedule.weekly_report", "true")])
 
     cx.executemany(
         'INSERT INTO "TestSessions" '
