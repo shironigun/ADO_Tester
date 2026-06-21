@@ -128,7 +128,7 @@ public sealed class BugOrchestrator : IBugOrchestrator
                 _concurrency.Gate.Release();
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             await MarkCancelledAsync(sessionId);
         }
@@ -189,7 +189,7 @@ public sealed class BugOrchestrator : IBugOrchestrator
                     await db.SaveChangesAsync(ct);
                 }
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 await FailAsCancelledAsync(db, session, key);
                 throw;
@@ -397,7 +397,7 @@ public sealed class BugOrchestrator : IBugOrchestrator
             session.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             await FailAsCancelledAsync(db, session, key);
             throw;
@@ -773,7 +773,7 @@ public sealed class BugOrchestrator : IBugOrchestrator
             session.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             var pushedCount = drafts.Count(d => d.Status == BugDraftStatus.Pushed);
             session.Status = BugSessionStatus.Cancelled;
