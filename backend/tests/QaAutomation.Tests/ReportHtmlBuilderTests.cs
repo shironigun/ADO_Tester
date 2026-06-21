@@ -45,9 +45,12 @@ public sealed class ReportHtmlBuilderTests
             teamName: "QA Team",
             boards: []);
 
-        // System.Text.Json escapes '<' to < by default, so the title's "</script>" can't break
-        // out of the <script> element — it appears as </script in the window.__REPORT__ data.
-        Assert.Contains("\\u003C/script", html);
+        // The payload is serialized with UnsafeRelaxedJsonEscaping (to match Python's
+        // json.dumps(ensure_ascii=False) — '<' stays literal), then the security-critical
+        // payload.Replace("</", "<\\/") turns every "</" into "<\/". So the title's "</script>"
+        // appears escaped as "<\/script>" in window.__REPORT__ and can't break out of the
+        // <script> element. (Python emits the same "<\/script>" form.)
+        Assert.Contains("Import bug <\\/script> x", html);     // </ escaped to <\/
         Assert.DoesNotContain("Import bug </script>", html);   // never emitted raw
     }
 }
