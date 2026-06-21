@@ -84,12 +84,17 @@ Verified this session (read/wiring surfaces, no large LLM generation):
 - ✅ **List endpoints** — reports / batches / find-bugs sessions / author-tests sessions all 200 with data.
 - ✅ **Find-Bugs start → cancel** on 171740 — `{sessionId}` then `{cancelled:true}` (start validates the
   work item, creates the session, kicks off the analyst; cancel works).
+- ✅ **Reports full `generate`** — generated a real report end-to-end: **181 tickets** queried from ADO
+  (board `Your Project\Your Team`), summarizer + HTML builder produced a **1.17 MB** report, persisted to
+  `backend/data/reports/` and served via `GET /api/reports/html/{id}` (200). **B7 verified end-to-end.**
+  (Note: pass the *full* area path as the board, e.g. `Your Project\Your Team`, not the bare `Your Team`.)
+- ✅ **Error logger proven on real backend errors** — the failed first generate surfaced automatically as a
+  `backend/Error` (`ReportService :: Report 2 generation failed`) plus an operational `backend/Warning`
+  (`AzureDevOpsClient :: Report enrichment capped at 150 of 181`) in the `ErrorLogs` table.
 
 Still NOT exercised end-to-end (LLM-completion paths + external writes):
 - **Find-Bugs full pipeline** (analyst→discover→code-verify→**bug-writer**) — the bug-writer is a large
   single-shot generation, so it shares the **same Claude CLI exit-1 risk as Issue #1**. Verify manually.
-- **Reports full `generate`** (`POST /api/reports/{projectId}/generate`) — ADO range query + enrich +
-  summarizer LLM (the summarizer output is small → low CLI risk). Not run this session.
 - **Push-to-ADO** (`POST .../sessions/{id}/push`) — **deliberately not run**; writes test cases/bugs to
   Azure DevOps. Verify manually against a safe Test Plan/Suite.
 - **Batches / Epic runs** — fan-out start not run (each child is an Author-Tests/Find-Bugs run → inherits
