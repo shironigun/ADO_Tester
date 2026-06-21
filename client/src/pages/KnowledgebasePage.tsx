@@ -11,27 +11,14 @@ import MenuBookIcon from '@mui/icons-material/MenuBookOutlined'
 import ArticleIcon from '@mui/icons-material/ArticleOutlined'
 import DataObjectIcon from '@mui/icons-material/DataObjectOutlined'
 import SearchOffIcon from '@mui/icons-material/SearchOffOutlined'
-import axios from 'axios'
 import PageHeader from '../components/PageHeader'
 import Section from '../components/Section'
 import StatTile from '../components/StatTile'
 import EmptyState from '../components/EmptyState'
 import { Stagger, StaggerItem } from '../motion/primitives'
-
-const PROJECT_ID = 1
-
-function axiosMessage(e: unknown): string {
-  if (!axios.isAxiosError(e)) return String(e)
-  const d = e.response?.data as unknown
-  if (typeof d === 'string') return d
-  if (d && typeof d === 'object' && 'title' in d) return String((d as { title: string }).title)
-  return e.message
-}
-
-interface Doc {
-  id: number; fileName: string; chunkCount: number; sizeBytes: number; uploadedAt: string
-}
-interface Hit { documentId: number; fileName: string; content: string; score: number }
+import { PROJECT_ID } from '../config/env'
+import { axiosMessage } from '../common/errors'
+import { listDocs, uploadDocs, deleteDoc, searchDocs, type Doc, type Hit } from '../api/knowledgebase'
 
 export default function KnowledgebasePage() {
   const [docs, setDocs] = useState<Doc[]>([])
@@ -46,8 +33,7 @@ export default function KnowledgebasePage() {
   const [toast, setToast] = useState('')
 
   const loadDocs = useCallback(async () => {
-    const { data } = await axios.get<Doc[]>(`/api/knowledgebase/${PROJECT_ID}`)
-    setDocs(data)
+    setDocs(await listDocs(PROJECT_ID))
   }, [])
 
   useEffect(() => { loadDocs().catch(() => {}) }, [loadDocs])
@@ -67,7 +53,7 @@ export default function KnowledgebasePage() {
     try {
       const form = new FormData()
       mdFiles.forEach(f => form.append('files', f))
-      await axios.post(`/api/knowledgebase/${PROJECT_ID}`, form)
+      await uploadDocs(PROJECT_ID, form)
       await loadDocs()
       const skipped = picked.length - mdFiles.length
       setToast(skipped > 0
@@ -84,7 +70,7 @@ export default function KnowledgebasePage() {
 
   async function remove(id: number) {
     try {
-      await axios.delete(`/api/knowledgebase/doc/${id}`)
+      await deleteDoc(id)
       await loadDocs()
       setToast('Document deleted')
     } catch (e) { setError(axiosMessage(e)) }
@@ -97,8 +83,7 @@ export default function KnowledgebasePage() {
     setError('')
     setSearching(true); setHits(null)
     try {
-      const { data } = await axios.get<Hit[]>(`/api/knowledgebase/${PROJECT_ID}/search`, { params: { q: query, k: 8 } })
-      setHits(data)
+      setHits(await searchDocs(PROJECT_ID, query, 8))
     } catch (e) { setError(axiosMessage(e)) }
     finally { setSearching(false) }
   }
