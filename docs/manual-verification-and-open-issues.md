@@ -77,13 +77,23 @@ Errors + warnings from both ends are persisted to the **`ErrorLogs`** table in `
   so "exited 1: (no stderr)" hides *why* the CLI ended. Surfacing the result `subtype` would make this
   class of failure self-explaining — consider as a follow-up improvement.
 
-### 2. Flows not yet exercised (verify with ticket 171740)
-- **Push-to-ADO** (`POST /api/author-tests/sessions/{id}/push` and the Find-Bugs equivalent) — **not
-  run** because it writes test cases/bugs to Azure DevOps (a real external mutation). Verify manually
-  against a safe Test Plan/Suite.
-- **Find-Bugs** (`/api/find-bugs/...`) — start/run/verify pipeline not exercised this session.
-- **Reports** (`/api/reports/...`) — weekly report generation/scheduling not exercised.
-- **Batches / Epic runs** (`/api/batches/...`) — Epic/Feature fan-out not exercised.
+### 2. Flows — partially verified (2026-06-21)
+Verified this session (read/wiring surfaces, no large LLM generation):
+- ✅ **Reports HTML builder** — `GET /api/reports/preview` returns a full HTML report from mock data
+  (the riskiest ~1500-line B7 component; no LLM/ADO).
+- ✅ **List endpoints** — reports / batches / find-bugs sessions / author-tests sessions all 200 with data.
+- ✅ **Find-Bugs start → cancel** on 171740 — `{sessionId}` then `{cancelled:true}` (start validates the
+  work item, creates the session, kicks off the analyst; cancel works).
+
+Still NOT exercised end-to-end (LLM-completion paths + external writes):
+- **Find-Bugs full pipeline** (analyst→discover→code-verify→**bug-writer**) — the bug-writer is a large
+  single-shot generation, so it shares the **same Claude CLI exit-1 risk as Issue #1**. Verify manually.
+- **Reports full `generate`** (`POST /api/reports/{projectId}/generate`) — ADO range query + enrich +
+  summarizer LLM (the summarizer output is small → low CLI risk). Not run this session.
+- **Push-to-ADO** (`POST .../sessions/{id}/push`) — **deliberately not run**; writes test cases/bugs to
+  Azure DevOps. Verify manually against a safe Test Plan/Suite.
+- **Batches / Epic runs** — fan-out start not run (each child is an Author-Tests/Find-Bugs run → inherits
+  Issue #1's risk).
 
 ---
 
