@@ -89,7 +89,7 @@ public sealed class AuthorTestsController : ControllerBase
         }
         try
         {
-            var sessionId = await _orchestrator.StartAsync(projectId, request.WorkItemId, request.AutoHandoff, cancellationToken);
+            var sessionId = await _orchestrator.StartAsync(projectId, request.WorkItemId, request.AutoHandoff, cancellationToken: cancellationToken);
             return Ok(new StartResponse { SessionId = sessionId });
         }
         catch (Exception e)

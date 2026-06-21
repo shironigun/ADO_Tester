@@ -13,6 +13,7 @@ public interface IAgentOrchestrator
         int projectId,
         int workItemId,
         bool autoHandoff = true,
+        int? batchId = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
