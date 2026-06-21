@@ -1,3 +1,5 @@
+import { apiUrl } from './config/env'
+
 // Free, DB-only frontend error/warning logger. Captures uncaught errors, unhandled promise
 // rejections, React render errors (via ErrorBoundary), explicit logger.warn/error calls, and failed
 // API requests, then batches them to the backend (POST /api/logs → ErrorLogs table). There is no
@@ -58,7 +60,7 @@ function flush(): void {
   if (queue.length === 0) return
   const batch = queue.splice(0, queue.length)
   try {
-    void fetch('/api/logs', {
+    void fetch(apiUrl('/api/logs'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(batch),
