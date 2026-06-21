@@ -142,7 +142,9 @@ public sealed class AgentOrchestratorTests
 
             var services = new ServiceCollection();
             services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
-            services.AddDbContext<QaDbContext>(o => o.UseSqlite($"Data Source={dbPath}"));
+            services.AddDbContext<QaDbContext>(o => o
+                .UseSqlite($"Data Source={dbPath}")
+                .AddInterceptors(SqliteBusyTimeoutInterceptor.Instance));
             services.AddScoped<DatabaseInitializer>();
             services.AddScoped<IKnowledgebaseService, KnowledgebaseService>();
             services.AddSingleton(Options.Create(new StorageOptions { DataDirectory = dataDir, KnowledgebaseFolderName = "kb" }));

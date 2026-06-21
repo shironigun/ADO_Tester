@@ -169,6 +169,14 @@ public sealed partial class KnowledgebaseService : IKnowledgebaseService
             await conn.OpenAsync(cancellationToken);
         try
         {
+            // This is a raw open (the EF busy-timeout interceptor only covers EF-managed opens), so set
+            // busy_timeout here too — otherwise an FTS read during a pipeline write can fail with "locked".
+            await using (var pragma = conn.CreateCommand())
+            {
+                pragma.CommandText = $"PRAGMA busy_timeout={SqliteBusyTimeoutInterceptor.BusyTimeoutMs};";
+                await pragma.ExecuteNonQueryAsync(cancellationToken);
+            }
+
             await using var cmd = conn.CreateCommand();
             cmd.CommandText =
                 """

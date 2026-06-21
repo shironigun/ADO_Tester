@@ -24,7 +24,9 @@ public static class DependencyInjection
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services, IConfiguration config, string sqliteConnectionString)
     {
-        services.AddDbContext<QaDbContext>(o => o.UseSqlite(sqliteConnectionString));
+        services.AddDbContext<QaDbContext>(o => o
+            .UseSqlite(sqliteConnectionString)
+            .AddInterceptors(SqliteBusyTimeoutInterceptor.Instance));
         services.AddScoped<DatabaseInitializer>();
         services.AddAzureDevOps(config);
         services.AddLlm(config);
@@ -41,6 +43,7 @@ public static class DependencyInjection
         services.AddSingleton<PipelineConcurrency>();
         services.AddSingleton<CancellationRegistry>();
         services.AddSingleton<IAgentOrchestrator, AgentOrchestrator>();
+        services.AddSingleton<IBugOrchestrator, BugOrchestrator>();
         return services;
     }
 
