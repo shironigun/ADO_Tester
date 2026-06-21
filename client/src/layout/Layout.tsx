@@ -16,6 +16,7 @@ import ProviderSwitcher from '../components/ProviderSwitcher'
 import EmptyState from '../components/EmptyState'
 import { PageTransition } from '../motion/primitives'
 import { useColorMode } from '../theme/ColorModeContext'
+import { paths } from '../routes/paths'
 
 import SettingsPage from '../pages/SettingsPage'
 import KnowledgebasePage from '../pages/KnowledgebasePage'
@@ -28,12 +29,12 @@ const DRAWER_WIDTH = 244
 
 interface NavItem { label: string; path: string; icon: ReactNode }
 const navItems: NavItem[] = [
-  { label: 'Dashboard', path: '/projects', icon: <DashboardIcon /> },
-  { label: 'Knowledgebase', path: '/knowledgebase', icon: <MenuBookIcon /> },
-  { label: 'Author Tests', path: '/author-tests', icon: <RuleIcon /> },
-  { label: 'Find Bugs', path: '/find-bugs', icon: <BugReportIcon /> },
-  { label: 'Reports', path: '/reports', icon: <AssessmentIcon /> },
-  { label: 'Settings', path: '/settings', icon: <SettingsIcon /> },
+  { label: 'Dashboard', path: paths.dashboard, icon: <DashboardIcon /> },
+  { label: 'Knowledgebase', path: paths.knowledgebase, icon: <MenuBookIcon /> },
+  { label: 'Author Tests', path: paths.authorTests, icon: <RuleIcon /> },
+  { label: 'Find Bugs', path: paths.findBugs, icon: <BugReportIcon /> },
+  { label: 'Reports', path: paths.reports, icon: <AssessmentIcon /> },
+  { label: 'Settings', path: paths.settings, icon: <SettingsIcon /> },
 ]
 
 function ColorModeToggle() {
@@ -132,14 +133,14 @@ export default function Layout() {
           <PageTransition key={location.pathname}>
             <Routes location={location}>
               <Route path="/" element={<SettingsPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
+              <Route path={paths.settings} element={<SettingsPage />} />
               {/* Back-compat: old /diagnostics URL still resolves */}
               <Route path="/diagnostics" element={<SettingsPage />} />
-              <Route path="/projects" element={<ProjectsPage />} />
-              <Route path="/knowledgebase" element={<KnowledgebasePage />} />
-              <Route path="/author-tests" element={<AuthorTestsPage />} />
-              <Route path="/find-bugs" element={<FindBugsPage />} />
-              <Route path="/reports" element={<ReportsPage />} />
+              <Route path={paths.dashboard} element={<ProjectsPage />} />
+              <Route path={paths.knowledgebase} element={<KnowledgebasePage />} />
+              <Route path={paths.authorTests} element={<AuthorTestsPage />} />
+              <Route path={paths.findBugs} element={<FindBugsPage />} />
+              <Route path={paths.reports} element={<ReportsPage />} />
               <Route path="*" element={<EmptyState title="Coming soon" hint="This page isn't available yet." />} />
             </Routes>
           </PageTransition>

@@ -16,6 +16,7 @@ import RuleIcon from '@mui/icons-material/Rule'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
 import { axiosMessage, SessionTimeline, useSessionDetail, useSessionsLive } from './shared'
 import { EpicRunDialog, EpicRunsTab } from './epicRuns'
+import { paths } from '../routes/paths'
 import type { SessionDetail, SessionModuleConfig, SessionSummary } from './types'
 
 const PAGE_SIZE = 17
@@ -214,7 +215,7 @@ export default function SessionWorkspace({ config }: { config: SessionModuleConf
             {summaries.map(s => (
               <SessionCard key={s.id} summary={s} config={config}
                 onOpenPanel={() => setPanelId(s.id)}
-                onOpenFull={() => navigate(`${config.route}/${s.id}`)} />
+                onOpenFull={() => navigate(paths.session(config.route, s.id))} />
             ))}
           </Box>
           {!loading && total === 0 && (
@@ -235,7 +236,7 @@ export default function SessionWorkspace({ config }: { config: SessionModuleConf
       <SessionDetailPanel config={config} sessionId={panelId}
         onClose={() => { setPanelId(null); refresh() }}
         onError={onError} onTerminal={refresh}
-        onOpenFull={id => { setPanelId(null); navigate(`${config.route}/${id}`) }} />
+        onOpenFull={id => { setPanelId(null); navigate(paths.session(config.route, id)) }} />
 
       <Dialog open={newOpen} onClose={() => setNewOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle component="div" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -255,7 +256,7 @@ export default function SessionWorkspace({ config }: { config: SessionModuleConf
         </DialogTitle>
         <DialogContent>
           <EpicRunDialog config={config} onClose={() => setEpicOpen(false)} onError={onError}
-            onStarted={batchId => { setEpicOpen(false); navigate(`${config.route}/epic/${batchId}`) }} />
+            onStarted={batchId => { setEpicOpen(false); navigate(paths.epic(config.route, batchId)) }} />
         </DialogContent>
       </Dialog>
 
