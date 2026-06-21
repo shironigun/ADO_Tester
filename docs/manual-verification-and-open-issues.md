@@ -11,7 +11,10 @@ _Last updated: 2026-06-21._
 ## Repository layout (renamed 2026-06-21)
 
 - **`backend/`** — the .NET backend (was `dotnet/`). Owns the live data at **`backend/data/qa.db`** (the DB, KB uploads, and report HTML all live under `backend/data/`).
-- **`legacy-backend/`** — the original Python FastAPI backend (was `backend/`). Untouched; keeps its own `legacy-backend/data/qa.db` copy so it can still be run for the manual Tester comparison. Being retired.
+- **`legacy-backend/`** — **REMOVED 2026-06-21.** The original Python FastAPI backend has been retired
+  (the .NET `backend/` is now the sole backend). Recover from git history if its source — or a Python
+  parity reference for a future golden-diff — is ever needed. Any "run the Python backend" step in the
+  open issues below is now obsolete.
 - **`client/`** — React frontend (unchanged). Vite dev proxy `/api → http://localhost:5250`.
 
 ## Error logging (free, DB-only)
