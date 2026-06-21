@@ -1,22 +1,20 @@
 import { useEffect, useState } from 'react'
 import { FormControl, MenuItem, Select, type SelectChangeEvent } from '@mui/material'
-import axios from 'axios'
-
-interface ProviderInfo { current: string; available: string[] }
+import { getProvider, setProvider, type ProviderInfo } from '../api/settings'
 
 export default function ProviderSwitcher() {
   const [info, setInfo] = useState<ProviderInfo | null>(null)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    axios.get<ProviderInfo>('/api/settings/provider').then(r => setInfo(r.data)).catch(() => {})
+    getProvider().then(setInfo).catch(() => {})
   }, [])
 
   async function change(e: SelectChangeEvent) {
     const provider = e.target.value
     setSaving(true)
     try {
-      await axios.put('/api/settings/provider', { provider })
+      await setProvider(provider)
       setInfo(prev => prev ? { ...prev, current: provider } : prev)
     } finally { setSaving(false) }
   }
