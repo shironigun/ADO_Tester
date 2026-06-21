@@ -13,6 +13,7 @@ using QaAutomation.Infrastructure.Events;
 using QaAutomation.Infrastructure.Knowledgebase;
 using QaAutomation.Infrastructure.Llm;
 using QaAutomation.Infrastructure.Orchestrators;
+using QaAutomation.Infrastructure.Settings;
 
 namespace QaAutomation.Infrastructure;
 
@@ -33,6 +34,50 @@ public static class DependencyInjection
         services.AddLlm(config);
         services.AddKnowledgebase(config);
         services.AddPipelineInfrastructure();
+        services.AddSettingsLayer();
+        return services;
+    }
+
+    /// <summary>B9 UI-editable settings. The RuntimeSettings overlay PostConfigures are registered AFTER
+    /// the env bridge (in AddAzureDevOps/AddLlm) so a persisted DB value wins over the .env value.</summary>
+    private static IServiceCollection AddSettingsLayer(this IServiceCollection services)
+    {
+        services.AddSingleton<RuntimeSettings>();
+
+        services.AddOptions<AzureDevOpsOptions>().PostConfigure<RuntimeSettings>((o, rt) =>
+        {
+            o.Organization = rt.Get("ado.organization") ?? o.Organization;
+            o.Project = rt.Get("ado.project") ?? o.Project;
+            o.PersonalAccessToken = rt.Get("ado.pat") ?? o.PersonalAccessToken;
+            o.Repository = rt.Get("ado.repository") ?? o.Repository;
+            o.DefaultBranch = rt.Get("ado.default_branch") ?? o.DefaultBranch;
+        });
+        services.AddOptions<AnthropicOptions>().PostConfigure<RuntimeSettings>((o, rt) =>
+        {
+            o.ApiKey = rt.Get("anthropic.api_key") ?? o.ApiKey;
+            o.Model = rt.Get("anthropic.model") ?? o.Model;
+        });
+        services.AddOptions<AzureOpenAiOptions>().PostConfigure<RuntimeSettings>((o, rt) =>
+        {
+            o.Endpoint = rt.Get("azure_openai.endpoint") ?? o.Endpoint;
+            o.ApiKey = rt.Get("azure_openai.api_key") ?? o.ApiKey;
+            o.Deployment = rt.Get("azure_openai.deployment") ?? o.Deployment;
+        });
+        services.AddOptions<OpenAiCompatibleOptions>().PostConfigure<RuntimeSettings>((o, rt) =>
+        {
+            o.BaseUrl = rt.Get("openai.base_url") ?? o.BaseUrl;
+            o.ApiKey = rt.Get("openai.api_key") ?? o.ApiKey;
+            o.Model = rt.Get("openai.model") ?? o.Model;
+        });
+        services.AddOptions<ClaudeCliOptions>().PostConfigure<RuntimeSettings>((o, rt) =>
+        {
+            o.Path = rt.Get("claude_cli.path") ?? o.Path;
+            o.Model = rt.Get("claude_cli.model") ?? o.Model;
+            if (rt.Get("claude_cli.timeout_seconds") is { } ts && int.TryParse(ts, out var t))
+                o.TimeoutSeconds = Math.Max(10, t);
+        });
+
+        services.AddSingleton<IAppSettingsService, AppSettingsService>();
         return services;
     }
 
