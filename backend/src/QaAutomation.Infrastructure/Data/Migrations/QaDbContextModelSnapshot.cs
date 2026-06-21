@@ -217,6 +217,56 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                     b.ToTable("BugSessions", (string)null);
                 });
 
+            modelBuilder.Entity("QaAutomation.Core.Models.ErrorLog", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("Id");
+
+                    b.Property<string>("Category")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Category");
+
+                    b.Property<string>("Context")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Context");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("CreatedAt");
+
+                    b.Property<string>("Exception")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Exception");
+
+                    b.Property<string>("Level")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Level");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Message");
+
+                    b.Property<string>("Path")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Path");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Source");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt")
+                        .HasDatabaseName("ix_ErrorLogs_CreatedAt");
+
+                    b.ToTable("ErrorLogs", (string)null);
+                });
+
             modelBuilder.Entity("QaAutomation.Core.Models.KnowledgebaseDocument", b =>
                 {
                     b.Property<int>("Id")

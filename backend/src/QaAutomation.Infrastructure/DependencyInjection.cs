@@ -12,6 +12,7 @@ using QaAutomation.Infrastructure.Data;
 using QaAutomation.Infrastructure.Events;
 using QaAutomation.Infrastructure.Knowledgebase;
 using QaAutomation.Infrastructure.Llm;
+using QaAutomation.Infrastructure.Logging;
 using QaAutomation.Infrastructure.Orchestrators;
 using QaAutomation.Infrastructure.Reports;
 using QaAutomation.Infrastructure.Settings;
@@ -31,6 +32,7 @@ public static class DependencyInjection
             .UseSqlite(sqliteConnectionString)
             .AddInterceptors(SqliteBusyTimeoutInterceptor.Instance));
         services.AddScoped<DatabaseInitializer>();
+        services.AddDbLogging();
         services.AddAzureDevOps(config);
         services.AddLlm(config);
         services.AddKnowledgebase(config);
