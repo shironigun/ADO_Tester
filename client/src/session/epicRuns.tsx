@@ -4,7 +4,8 @@
  * roll-up. Reuses the per-story session pipeline + detail unchanged — this is just the grouping UI.
  * Config-driven, so Author Tests and Find Bugs share it.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   Alert, AppBar, Autocomplete, Box, Button, Card, CardContent, Checkbox, Chip, CircularProgress,
@@ -25,7 +26,7 @@ import { PROJECT_ID } from '../config/env'
 import { searchWorkItems } from '../api/authorTests'
 import {
   expandChildren, startBatch, listBatches, getBatchDetail, cancelBatch,
-  type BatchChild, type BatchSummary, type BatchDetail,
+  type BatchChild,
 } from '../api/batches'
 import type { SessionModuleConfig, WorkItemOption } from './types'
 
@@ -190,23 +191,18 @@ const borderColor = (s: string): string =>
 
 export function EpicRunsTab({ config }: { config: SessionModuleConfig }) {
   const navigate = useNavigate()
-  const [batches, setBatches] = useState<BatchSummary[]>([])
-  const [loaded, setLoaded] = useState(false)
 
-  const load = useCallback(async () => {
-    try {
-      const data = await listBatches(PROJECT_ID, 100)
-      setBatches((data.items ?? []).filter(b => b.module === config.key))
-    } catch { /* ignore */ } finally { setLoaded(true) }
-  }, [config.key])
-
-  useEffect(() => { load() }, [load])
-  const anyRunning = batches.some(b => RUNNING(b.derivedStatus))
-  useEffect(() => {
-    if (!anyRunning) return
-    const t = setInterval(load, 3000)
-    return () => clearInterval(t)
-  }, [anyRunning, load])
+  // Batches for this module, kept live via React Query (F2). Polls every 3s only while one is
+  // Running. The endpoint returns all modules' batches; we filter to this module client-side.
+  const batchesQuery = useQuery({
+    queryKey: ['batches', config.key],
+    queryFn: () => listBatches(PROJECT_ID, 100),
+    refetchInterval: (q) =>
+      (q.state.data?.items ?? []).some(b => b.module === config.key && RUNNING(b.derivedStatus))
+        ? 3000 : false,
+  })
+  const batches = (batchesQuery.data?.items ?? []).filter(b => b.module === config.key)
+  const loaded = !batchesQuery.isLoading
 
   if (loaded && batches.length === 0) {
     return <EmptyState icon={<AccountTreeIcon />} title="No epic runs yet"
@@ -239,26 +235,21 @@ export default function EpicRunDetailFullScreen({ config }: { config: SessionMod
   const { batchId } = useParams()
   const navigate = useNavigate()
   const bid = batchId ? Number(batchId) : null
-  const [detail, setDetail] = useState<BatchDetail | null>(null)
   const [actionError, setActionError] = useState('')
   const unit = unitOf(config)
 
-  const load = useCallback(async () => {
-    if (bid == null) return
-    try { setDetail(await getBatchDetail(bid)) } catch { /* ignore */ }
-  }, [bid])
-
-  useEffect(() => { load() }, [load])
-  const running = detail?.derivedStatus === 'Running'
-  useEffect(() => {
-    if (!running) return
-    const t = setInterval(load, 2500)
-    return () => clearInterval(t)
-  }, [running, load])
+  // Roll-up detail, kept live via React Query (F2). Polls every 2.5s only while Running.
+  const detailQuery = useQuery({
+    queryKey: ['batch-detail', bid],
+    queryFn: () => getBatchDetail(bid as number),
+    enabled: bid != null,
+    refetchInterval: (q) => (q.state.data?.derivedStatus === 'Running' ? 2500 : false),
+  })
+  const detail = detailQuery.data ?? null
 
   const cancel = async () => {
     if (bid == null) return
-    try { await cancelBatch(bid); load() }
+    try { await cancelBatch(bid); void detailQuery.refetch() }
     catch (e) { setActionError(`Cancel failed: ${axiosMessage(e)}`) }
   }
 
