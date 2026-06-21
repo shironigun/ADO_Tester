@@ -16,30 +16,18 @@ import CloseIcon from '@mui/icons-material/Close'
 import StopIcon from '@mui/icons-material/Stop'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
-import axios from 'axios'
 import StatTile from '../components/StatTile'
 import StatusChip from '../components/StatusChip'
 import EmptyState from '../components/EmptyState'
 import { ThinkingShimmer } from '../components/LoadingSkeleton'
-import { axiosMessage } from './shared'
+import { axiosMessage } from '../common/errors'
+import { PROJECT_ID } from '../config/env'
+import { searchWorkItems } from '../api/authorTests'
+import {
+  expandChildren, startBatch, listBatches, getBatchDetail, cancelBatch,
+  type BatchChild, type BatchSummary, type BatchDetail,
+} from '../api/batches'
 import type { SessionModuleConfig, WorkItemOption } from './types'
-
-const PROJECT_ID = 1
-
-export interface BatchChild { id: number; title: string; workItemType: string; state?: string | null }
-interface ChildrenExpand { parentWorkItemId: number; parentTitle: string; children: BatchChild[]; truncated: boolean }
-export interface BatchChildSummary {
-  sessionId: number; workItemId: number; workItemTitle: string; status: string
-  currentActivity?: string | null; errorMessage?: string | null; count: number
-}
-export interface BatchSummary {
-  id: number; module: string; parentWorkItemId?: number | null; title: string; mode?: string | null
-  createdAt: string; childCount: number; doneCount: number; failedCount: number; runningCount: number; derivedStatus: string
-}
-export interface BatchDetail {
-  id: number; module: string; parentWorkItemId?: number | null; title: string; mode?: string | null
-  createdAt: string; updatedAt: string; derivedStatus: string; children: BatchChildSummary[]
-}
 
 const unitOf = (config: SessionModuleConfig) => (config.key === 'find-bugs' ? 'bug' : 'test')
 
@@ -63,8 +51,7 @@ export function EpicRunDialog({ config, onClose, onStarted, onError }: {
   useEffect(() => {
     if (wiQuery.length < 2) { setWiOptions([]); return }
     const t = setTimeout(() => {
-      axios.get<WorkItemOption[]>('/api/author-tests/search', { params: { q: wiQuery } })
-        .then(r => setWiOptions(r.data)).catch(() => setWiOptions([]))
+      searchWorkItems(wiQuery).then(setWiOptions).catch(() => setWiOptions([]))
     }, 400)
     return () => clearTimeout(t)
   }, [wiQuery])
@@ -86,8 +73,7 @@ export function EpicRunDialog({ config, onClose, onStarted, onError }: {
     // "epics" are typed User Story — so we don't gate on the work-item type.)
     setExpanding(true)
     try {
-      const { data } = await axios.get<ChildrenExpand>('/api/batches/children-expand',
-        { params: { parentWorkItemId: o.id, recursive: true } })
+      const data = await expandChildren(o.id, true)
       if (data.children.length > 0) {
         if (parentId == null) setParentId(o.id)
         addItems(data.children)
@@ -111,10 +97,10 @@ export function EpicRunDialog({ config, onClose, onStarted, onError }: {
     if (selectedIds.length === 0) return
     setStarting(true)
     try {
-      const body: Record<string, unknown> = { parentWorkItemId: parentId, workItemIds: selectedIds }
-      if (config.key === 'find-bugs') body.mode = mode
-      const { data } = await axios.post<{ batchId: number; sessionIds?: number[]; skipped?: number[] }>(
-        `/api/batches/${config.key}/${PROJECT_ID}/start`, body)
+      const data = await startBatch(config.key, PROJECT_ID, {
+        parentWorkItemId: parentId, workItemIds: selectedIds,
+        ...(config.key === 'find-bugs' ? { mode } : {}),
+      })
       if (!data.sessionIds || data.sessionIds.length === 0) {
         // Every child failed to start (e.g. ADO unreachable) — don't navigate to an empty roll-up.
         onError(new Error('No stories could be started — Azure DevOps may be unreachable. Nothing was queued.'),
@@ -209,7 +195,7 @@ export function EpicRunsTab({ config }: { config: SessionModuleConfig }) {
 
   const load = useCallback(async () => {
     try {
-      const { data } = await axios.get<{ total: number; items: BatchSummary[] }>(`/api/batches/${PROJECT_ID}`, { params: { take: 100 } })
+      const data = await listBatches(PROJECT_ID, 100)
       setBatches((data.items ?? []).filter(b => b.module === config.key))
     } catch { /* ignore */ } finally { setLoaded(true) }
   }, [config.key])
@@ -259,7 +245,7 @@ export default function EpicRunDetailFullScreen({ config }: { config: SessionMod
 
   const load = useCallback(async () => {
     if (bid == null) return
-    try { const { data } = await axios.get<BatchDetail>(`/api/batches/detail/${bid}`); setDetail(data) } catch { /* ignore */ }
+    try { setDetail(await getBatchDetail(bid)) } catch { /* ignore */ }
   }, [bid])
 
   useEffect(() => { load() }, [load])
@@ -271,7 +257,8 @@ export default function EpicRunDetailFullScreen({ config }: { config: SessionMod
   }, [running, load])
 
   const cancel = async () => {
-    try { await axios.post(`/api/batches/${bid}/cancel`); load() }
+    if (bid == null) return
+    try { await cancelBatch(bid); load() }
     catch (e) { setActionError(`Cancel failed: ${axiosMessage(e)}`) }
   }
 
