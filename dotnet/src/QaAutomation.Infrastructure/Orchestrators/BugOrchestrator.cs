@@ -58,7 +58,7 @@ public sealed class BugOrchestrator : IBugOrchestrator
 
     // ── public entry points ───────────────────────────────────────────────────
 
-    public async Task<int> StartAsync(int projectId, int workItemId, bool auto = false, CancellationToken cancellationToken = default)
+    public async Task<int> StartAsync(int projectId, int workItemId, bool auto = false, int? batchId = null, CancellationToken cancellationToken = default)
     {
         var wi = await _ado.GetWorkItemAsync(workItemId, ct: cancellationToken);
         int sessionId;
@@ -73,6 +73,7 @@ public sealed class BugOrchestrator : IBugOrchestrator
                 WorkItemTitle = wi.Title,
                 Status = BugSessionStatus.Analyzing,
                 CurrentActivity = "Fetched ticket from Azure DevOps",
+                BatchId = batchId,
                 CreatedAt = now,
                 UpdatedAt = now,
             };

@@ -11,7 +11,7 @@ public interface IBugOrchestrator
 {
     /// <summary>Seed a BugSession and run the Analyst. Parks at AwaitingActual unless <paramref name="auto"/>
     /// (Epic AUTO run), which continues straight into code-verify + Bug Writer. Returns the session id.</summary>
-    Task<int> StartAsync(int projectId, int workItemId, bool auto = false, CancellationToken cancellationToken = default);
+    Task<int> StartAsync(int projectId, int workItemId, bool auto = false, int? batchId = null, CancellationToken cancellationToken = default);
 
     /// <summary>Run the code-analysis phase (always on) + Bug Writer against the supplied observed actual.</summary>
     Task RunBugWriterAsync(

@@ -51,7 +51,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     // ── start (Analyst, then Tester if auto) ─────────────────────────────────
 
     public async Task<int> StartAsync(
-        int projectId, int workItemId, bool autoHandoff = true, CancellationToken cancellationToken = default)
+        int projectId, int workItemId, bool autoHandoff = true, int? batchId = null, CancellationToken cancellationToken = default)
     {
         var wi = await _ado.GetWorkItemAsync(workItemId, ct: cancellationToken);
 
@@ -67,6 +67,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 WorkItemTitle = wi.Title,
                 Status = SessionStatus.Analyzing,
                 CurrentActivity = "Fetched work item from Azure DevOps",
+                BatchId = batchId,
                 CreatedAt = now,
                 UpdatedAt = now,
             };

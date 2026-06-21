@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using QaAutomation.Core.Abstractions;
 using QaAutomation.Core.Configuration;
 using QaAutomation.Infrastructure.AzureDevOps;
+using QaAutomation.Infrastructure.Batches;
 using QaAutomation.Infrastructure.Data;
 using QaAutomation.Infrastructure.Events;
 using QaAutomation.Infrastructure.Knowledgebase;
@@ -44,6 +45,7 @@ public static class DependencyInjection
         services.AddSingleton<CancellationRegistry>();
         services.AddSingleton<IAgentOrchestrator, AgentOrchestrator>();
         services.AddSingleton<IBugOrchestrator, BugOrchestrator>();
+        services.AddScoped<IBatchService, BatchService>();   // scoped: uses the request/background DbContext
         return services;
     }
 
