@@ -40,6 +40,7 @@ public static class DependencyInjection
         services.AddSingleton<IEventBus, EventBus>();
         services.AddSingleton<PipelineConcurrency>();
         services.AddSingleton<CancellationRegistry>();
+        services.AddSingleton<IAgentOrchestrator, AgentOrchestrator>();
         return services;
     }
 
