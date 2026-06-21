@@ -1,5 +1,7 @@
+using Microsoft.Extensions.DependencyInjection;
 using QaAutomation.Api.Configurations;
 using QaAutomation.Api.Middlewares;
+using QaAutomation.Core.Abstractions;
 using QaAutomation.Infrastructure;
 
 // Load local secrets (ADOACCESS_PAT, ANTHROPIC_API_KEY, …) from a .env file into process env vars.
@@ -29,6 +31,9 @@ var app = builder.Build();
 
 // Migrate/adopt the DB, bootstrap FTS, seed Project id=1 (spec §6 B1 startup ordering).
 app.Services.InitializeDatabase();
+
+// Pull UI-edited overrides (Settings table) into the live options before serving (spec B9 apply()).
+await app.Services.GetRequiredService<IAppSettingsService>().ApplyAsync();
 
 // Exception handling FIRST so it wraps every downstream component (spec §4).
 app.UseMiddleware<ExceptionHandlingMiddleware>();
