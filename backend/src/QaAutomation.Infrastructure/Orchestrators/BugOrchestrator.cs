@@ -417,7 +417,7 @@ public sealed class BugOrchestrator : IBugOrchestrator
     {
         string repoId;
         try { repoId = await _ado.ResolveRepositoryIdAsync(ct: ct); }
-        catch (AdoApiError e) { Pub(key, EventKinds.System, EventPhases.Discover, $"Repo resolve failed: {e.Message}", EventLevels.Warn); return ("", ""); }
+        catch (Exception e) when (!ct.IsCancellationRequested) { Pub(key, EventKinds.System, EventPhases.Discover, $"Repo resolve failed: {e.Message}", EventLevels.Warn); return ("", ""); }
 
         var changed = new List<ChangedFile>();
         bool Have(string p) => changed.Any(c => c.Path == p);
@@ -426,16 +426,16 @@ public sealed class BugOrchestrator : IBugOrchestrator
         // 1. Anchor on linked + manual PRs/commits.
         IReadOnlyList<string> autoPr = [], autoCommit = [];
         try { var refs = await _ado.GetWorkItemGitRefsAsync(workItemId, ct); autoPr = refs.PullRequestIds; autoCommit = refs.CommitShas; }
-        catch (AdoApiError) { }
+        catch (Exception) when (!ct.IsCancellationRequested) { }
         foreach (var pr in autoPr.Concat(prIds).Distinct())
         {
             try { AddChanged(await _ado.GetPullRequestDiffAsync(pr, repoId, ct)); Pub(key, EventKinds.System, EventPhases.Discover, $"PR #{pr}: {changed.Count} changed file(s)"); }
-            catch (AdoApiError e) { Pub(key, EventKinds.System, EventPhases.Discover, $"PR #{pr} skipped: {e.Message}", EventLevels.Warn); }
+            catch (Exception e) when (!ct.IsCancellationRequested) { Pub(key, EventKinds.System, EventPhases.Discover, $"PR #{pr} skipped: {e.Message}", EventLevels.Warn); }
         }
         foreach (var sha in autoCommit.Concat(commitIds).Distinct())
         {
             try { AddChanged(await _ado.GetCommitDiffAsync(sha, repoId, ct)); Pub(key, EventKinds.System, EventPhases.Discover, $"commit {Short(sha)}: {changed.Count} changed file(s)"); }
-            catch (AdoApiError e) { Pub(key, EventKinds.System, EventPhases.Discover, $"commit {Short(sha)} skipped: {e.Message}", EventLevels.Warn); }
+            catch (Exception e) when (!ct.IsCancellationRequested) { Pub(key, EventKinds.System, EventPhases.Discover, $"commit {Short(sha)} skipped: {e.Message}", EventLevels.Warn); }
         }
 
         // 2. No linked refs → search + recent commits.
@@ -445,7 +445,7 @@ public sealed class BugOrchestrator : IBugOrchestrator
             Pub(key, EventKinds.Phase, EventPhases.Discover, $"No linked PRs/commits — searching for '{terms}'");
             IReadOnlyList<string> seeds = [];
             try { seeds = terms.Length > 0 ? await _ado.SearchCodeAsync(terms, 8, ct: ct) : []; Pub(key, EventKinds.Result, EventPhases.Discover, $"Code Search → {seeds.Count} seed file(s)"); }
-            catch (AdoApiError e) { Pub(key, EventKinds.System, EventPhases.Discover, $"Code Search unavailable: {e.Message}", EventLevels.Warn); }
+            catch (Exception e) when (!ct.IsCancellationRequested) { Pub(key, EventKinds.System, EventPhases.Discover, $"Code Search unavailable: {e.Message}", EventLevels.Warn); }
             foreach (var seed in seeds.Take(2))
             {
                 try
@@ -453,7 +453,7 @@ public sealed class BugOrchestrator : IBugOrchestrator
                     var shas = await _ado.GetCommitsForPathAsync(seed, 1, repoId, ct);
                     if (shas.Count > 0) { AddChanged(await _ado.GetCommitDiffAsync(shas[0], repoId, ct)); Pub(key, EventKinds.System, EventPhases.Discover, $"recent commit {Short(shas[0])} on {seed}"); }
                 }
-                catch (AdoApiError) { }
+                catch (Exception) when (!ct.IsCancellationRequested) { }
             }
             foreach (var sp in seeds)
                 if (!Have(sp)) changed.Add(new ChangedFile(sp, "seed"));
@@ -476,7 +476,7 @@ public sealed class BugOrchestrator : IBugOrchestrator
         {
             if (c.ChangeType == "delete") continue;
             string txt;
-            try { txt = await _ado.GetFileContentAsync(c.Path, ct: ct); } catch (AdoApiError) { continue; }
+            try { txt = await _ado.GetFileContentAsync(c.Path, ct: ct); } catch (Exception) when (!ct.IsCancellationRequested) { continue; }
             if (string.IsNullOrEmpty(txt)) continue;
             contents[c.Path] = Slice(txt, MaxBytesPerFile);
             foreach (var spec in BugHelpers.ExtractRelativeImports(txt))
@@ -495,7 +495,7 @@ public sealed class BugOrchestrator : IBugOrchestrator
                 foreach (var h in await _ado.SearchCodeAsync(symbol, 6, ct: ct))
                     if (!contents.ContainsKey(h) && !callerCands.Contains(h)) callerCands.Add(h);
             }
-            catch (AdoApiError) { break; }
+            catch (Exception) when (!ct.IsCancellationRequested) { break; }
         }
 
         // 5. Triage: one LLM pass picks the extra files actually needed.
@@ -514,7 +514,7 @@ public sealed class BugOrchestrator : IBugOrchestrator
         {
             if (total >= MaxTotalBytes || fetched.Contains(path)) continue;
             string txt;
-            try { txt = await _ado.GetFileContentAsync(path, ct: ct); } catch (AdoApiError) { continue; }
+            try { txt = await _ado.GetFileContentAsync(path, ct: ct); } catch (Exception) when (!ct.IsCancellationRequested) { continue; }
             if (string.IsNullOrEmpty(txt)) continue;
             var snippet = Slice(txt, MaxBytesPerFile);
             blocks.Add($"=== [{(roleOf.TryGetValue(path, out var r) ? r : "related").ToUpperInvariant()}] {path} ===\n{snippet}");
@@ -567,7 +567,7 @@ public sealed class BugOrchestrator : IBugOrchestrator
         // 1. ADO-linked Test Cases (preferred).
         IReadOnlyList<LinkedTestCase> linked;
         try { linked = await _ado.GetLinkedTestCasesAsync(workItemId, ct); }
-        catch (AdoApiError e) { _log.LogInformation("Linked test cases unavailable for #{Id}: {Err}", workItemId, e.Message); linked = []; }
+        catch (Exception e) when (!ct.IsCancellationRequested) { _log.LogInformation("Linked test cases unavailable for #{Id}: {Err}", workItemId, e.Message); linked = []; }
         foreach (var tc in linked)
         {
             sourced.Add(new SourcedTestCase(
