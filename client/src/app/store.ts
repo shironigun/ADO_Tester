@@ -1,9 +1,9 @@
 import { configureStore } from '@reduxjs/toolkit'
+import colorMode from './colorModeSlice'
 
-// Root Redux store. Cross-cutting UI slices (provider state, etc.) are introduced in F3; the
-// placeholder reducer keeps the store valid until then.
+// Root Redux store. Holds cross-cutting UI state (F3). Server state lives in React Query, not here.
 export const store = configureStore({
-  reducer: { _root: (state: Record<string, never> = {}) => state },
+  reducer: { colorMode },
 })
 
 export type RootState = ReturnType<typeof store.getState>
