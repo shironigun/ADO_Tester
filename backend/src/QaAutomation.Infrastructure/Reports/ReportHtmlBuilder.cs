@@ -112,6 +112,10 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
         return sb.ToString();
     }
 
+    // Faithful port of the Python mock deck (legacy-backend reports/mock.py): a fixed, realistic
+    // sample dataset (no ADO, no DB) that exercises EVERY slide — cover, by-board matrix + issues,
+    // by-person, themes (modules), risks, wins, per-developer spotlights, and the ticket modal
+    // (comments + timeline). 15 tickets across 4 boards / 4 assignees, 3 themes.
     public string BuildMock(ReportTheme theme, string teamName)
     {
         TicketComment C(string a, string d, string h) => new(a, d, h);
@@ -124,22 +128,48 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
             {
                 Id = id, Title = title, WorkItemType = type, State = state, AssignedTo = who,
                 IssueDescription = desc, Fix = closed ? "Resolved in build 2026.05.3." : null,
+                ClosedAt = closed ? "2026-05-22T10:00:00Z" : null,
+                CreatedBy = "Hajra Baksh", CreatedDate = "2026-05-19T09:00:00Z",
                 Description = desc, RootCause = rca, AreaPath = "Ideal Agile\\" + board,
                 Comments = comments ?? [], Timeline = timeline ?? [],
             };
         }
 
+        List<TicketComment> cmts =
+        [
+            C("Sarah Chen", "2026-05-20T11:00:00Z", "<div>Reproduced on staging — looks like the parser rejects non-CSV extensions.</div>"),
+            C("Marcus Lee", "2026-05-21T14:30:00Z", "<div>Fix deployed to QA, please re-verify the XLSX path.</div>"),
+        ];
+        List<TimelineEvent> tl =
+        [
+            new("2026-05-19T09:00:00Z", "Hajra Baksh", "created", "Work item created"),
+            new("2026-05-19T09:05:00Z", "Hajra Baksh", "state", "State New → Active"),
+            new("2026-05-20T11:00:00Z", "Sarah Chen", "assignment", "Assigned to Unassigned → Sarah Chen"),
+            new("2026-05-20T11:00:00Z", "Sarah Chen", "comment", "Comment added"),
+            new("2026-05-22T10:00:00Z", "Marcus Lee", "state", "State Active → Resolved"),
+        ];
+
         var tickets = new List<ReportTicket>
         {
-            T(101, "CSV import rejects valid XLSX files", "Bug", "Resolved", "Sarah Chen", "CRM Team",
-                comments: [C("Sarah Chen", "2026-05-20T11:00:00Z", "<div>Reproduced on staging.</div>"), C("Marcus Lee", "2026-05-21T14:30:00Z", "<div>Fix deployed to QA.</div>")],
-                timeline: [new("2026-05-19T09:00:00Z", "Hajra Baksh", "created", "Work item created"), new("2026-05-22T10:00:00Z", "Marcus Lee", "state", "State Active → Resolved")]),
+            // CRM Team — Sarah Chen (spotlight)
+            T(101, "CSV import rejects valid XLSX files", "Bug", "Resolved", "Sarah Chen", "CRM Team", comments: cmts, timeline: tl),
             T(102, "Duplicate customers created on re-import", "Defect", "Closed", "Sarah Chen", "CRM Team"),
             T(103, "Add column-mapping step to import wizard", "User Story", "Active", "Sarah Chen", "CRM Team"),
+            T(104, "Import preview shows wrong row count", "Bug", "New", "Sarah Chen", "CRM Team"),
+            T(105, "Document import size limits", "Task", "Closed", "Sarah Chen", "CRM Team", rca: "Parser missing extension validation."),
+            // Backend — Marcus Lee (spotlight)
             T(201, "Permission API 500 when user has no password", "Defect", "Closed", "Marcus Lee", "Backend"),
-            T(202, "Harden order-import auth check", "User Story", "Closed", "Marcus Lee", "Backend", rca: "Null user not handled."),
+            T(202, "Harden order-import auth check", "User Story", "Closed", "Marcus Lee", "Backend", rca: "Null user not handled in validation."),
+            T(203, "Token refresh race condition", "Bug", "Active", "Marcus Lee", "Backend"),
+            T(204, "Add audit log for permission changes", "Task", "New", "Marcus Lee", "Backend"),
+            // Payments — Priya Nair (spotlight)
             T(301, "Webhook refund event not received", "Defect", "Resolved", "Priya Nair", "Payments"),
+            T(302, "Retry failed webhook deliveries", "User Story", "Active", "Priya Nair", "Payments"),
+            T(303, "Webhook signature validation missing", "Bug", "New", "Priya Nair", "Payments"),
+            // Mobile — Unassigned (rolls into Others)
             T(401, "Mobile grid zoom resets on rotate", "Bug", "Closed", "Unassigned", "Mobile"),
+            T(402, "Offline cache sync drops edits", "User Story", "Active", "Unassigned", "Mobile"),
+            T(403, "Crash on rapid rotate", "Defect", "New", "Unassigned", "Mobile"),
         };
         var summary = new ReportSummary
         {
@@ -147,11 +177,16 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
             Tldr = ["Import pipeline hardened", "Auth edge-cases closed", "Webhook retries in progress"],
             Themes =
             [
-                new ThemeCluster { Name = "CSV Import", Description = "File-upload import flow", TicketIds = [101, 102, 103] },
-                new ThemeCluster { Name = "Auth & Permissions", Description = "Order-import authorization", TicketIds = [201, 202] },
+                new ThemeCluster { Name = "CSV Import", Description = "File-upload import flow", TicketIds = [101, 102, 103, 104, 105] },
+                new ThemeCluster { Name = "Auth & Permissions", Description = "Order-import authorization", TicketIds = [201, 202, 203, 204] },
+                new ThemeCluster { Name = "Webhooks", Description = "Payment webhook delivery", TicketIds = [301, 302, 303] },
             ],
-            Risks = ["CSV duplicate-sync still under review"],
-            Wins = ["XLSX import validated end-to-end", "Order-import auth hardened"],
+            Risks = ["CSV duplicate-sync still under review", "Token-refresh race not yet root-caused"],
+            Wins =
+            [
+                "XLSX import validated end-to-end", "Order-import auth hardened",
+                "Refund webhook flow verified", "Import wizard column-mapping spiked",
+            ],
         };
         return Build("Weekly Report — 2026-05-19 to 2026-05-23", new DateTime(2026, 5, 19), new DateTime(2026, 5, 23),
             "Boards: CRM Team, Backend, Payments, Mobile", tickets, theme, summary, teamName, []);
