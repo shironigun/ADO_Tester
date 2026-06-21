@@ -34,6 +34,7 @@ import type {
 // (SessionSummary is referenced only via api/findBugs now.)
 import { parseEventLog } from '../shared'
 import { PROJECT_ID } from '../../config/env'
+import { useAdoWorkItemUrl } from '../../common/adoLinks'
 import { searchWorkItems } from '../../api/authorTests'
 import {
   listSessionsPage, getSessionDetail, startSession, getLinkedRefs, getTestCases,
@@ -42,9 +43,7 @@ import {
   type AttachedTestCase, type LinkedChange,
 } from '../../api/findBugs'
 
-const ADO_ORG = 'ConstellationDealer'
-const ADO_PROJECT = 'Ideal Agile'
-const ADO_WI_URL = (id: number) => `https://dev.azure.com/${encodeURIComponent(ADO_ORG)}/${encodeURIComponent(ADO_PROJECT)}/_workitems/edit/${id}`
+// ADO work-item deep-links are built from the configured org/project via useAdoWorkItemUrl().
 
 type Severity = 'Critical' | 'High' | 'Medium' | 'Low'
 type DraftStatus = 'Draft' | 'Approved' | 'Rejected' | 'Pushed'
@@ -108,6 +107,7 @@ function BugDraftCard({ draft, onApprove, onReject, onSave }: {
   draft: BugDraft; onApprove: () => void; onReject: () => void
   onSave: (patch: Partial<BugDraft>) => Promise<void> | void
 }) {
+  const wiUrl = useAdoWorkItemUrl()
   const initialSteps = (): string[] => { try { return JSON.parse(draft.reproStepsJson) } catch { return [] } }
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -209,7 +209,7 @@ function BugDraftCard({ draft, onApprove, onReject, onSave }: {
             {draft.adoBugId && (
               <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
                 <Typography variant="caption" color="success.main">ADO Bug #{draft.adoBugId}</Typography>
-                <IconButton size="small" component="a" href={`https://dev.azure.com/${ADO_ORG}/${encodeURIComponent(ADO_PROJECT)}/_workitems/edit/${draft.adoBugId}`} target="_blank" rel="noreferrer"><OpenInNewIcon fontSize="small" /></IconButton>
+                <IconButton size="small" component="a" href={wiUrl(draft.adoBugId)} target="_blank" rel="noreferrer"><OpenInNewIcon fontSize="small" /></IconButton>
               </Stack>
             )}
           </Stack>
@@ -237,10 +237,11 @@ function BugDraftCard({ draft, onApprove, onReject, onSave }: {
 const verdictColor = (s: string) => (s === 'pass' ? 'success' : s === 'fail' ? 'error' : 'warning') as 'success' | 'error' | 'warning'
 
 function SourceChip({ source, adoTestCaseId }: { source?: 'plan' | 'draft'; adoTestCaseId?: number | null }) {
+  const wiUrl = useAdoWorkItemUrl()
   if (source === 'plan') {
     return adoTestCaseId
       ? <Chip size="small" color="info" variant="outlined" clickable component="a"
-          href={ADO_WI_URL(adoTestCaseId)} target="_blank" rel="noreferrer"
+          href={wiUrl(adoTestCaseId)} target="_blank" rel="noreferrer"
           icon={<OpenInNewIcon />} label={`Test Plan · #${adoTestCaseId}`} />
       : <Chip size="small" color="info" variant="outlined" label="Test Plan" />
   }
@@ -248,7 +249,7 @@ function SourceChip({ source, adoTestCaseId }: { source?: 'plan' | 'draft'; adoT
     // A draft that was already pushed to ADO carries its Test Case id — link it.
     return adoTestCaseId
       ? <Chip size="small" variant="outlined" clickable component="a"
-          href={ADO_WI_URL(adoTestCaseId)} target="_blank" rel="noreferrer"
+          href={wiUrl(adoTestCaseId)} target="_blank" rel="noreferrer"
           icon={<OpenInNewIcon />} label={`Draft · #${adoTestCaseId}`} />
       : <Chip size="small" variant="outlined" label="Draft (Author Tests)" />
   }
@@ -521,11 +522,11 @@ function TestExecutionReport({
 }
 
 function BugPushResults({ session }: { session: SessionDetail }) {
+  const url = useAdoWorkItemUrl()
   const drafts = session.drafts as unknown as BugDraft[]
   const pushed = drafts.filter(d => d.status === 'Pushed' && d.adoBugId)
   if (pushed.length === 0) return null
   if (!['Done', 'Cancelled', 'Failed'].includes(session.status)) return null
-  const url = (id: number) => `https://dev.azure.com/${ADO_ORG}/${encodeURIComponent(ADO_PROJECT)}/_workitems/edit/${id}`
   return (
     <Card sx={{ mt: 3, borderColor: 'success.main' }}>
       <CardContent>
@@ -545,6 +546,7 @@ function BugPushResults({ session }: { session: SessionDetail }) {
 }
 
 function BugDetailBody({ session, refetch, onError }: DetailBodyProps) {
+  const wiUrl = useAdoWorkItemUrl()
   const drafts = session.drafts as unknown as BugDraft[]
   const [actualText, setActualText] = useState(session.actualBehavior ?? '')
   const [prIdsText, setPrIdsText] = useState('')
@@ -684,7 +686,7 @@ function BugDetailBody({ session, refetch, onError }: DetailBodyProps) {
             <Chip size="small" label={`#${session.workItemId}`} />
             {wiType && <Chip size="small" variant="outlined" label={wiType} />}
             <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }}>{session.workItemTitle}</Typography>
-            <Link href={ADO_WI_URL(session.workItemId)} target="_blank" rel="noreferrer" variant="body2">Open in Azure DevOps</Link>
+            <Link href={wiUrl(session.workItemId)} target="_blank" rel="noreferrer" variant="body2">Open in Azure DevOps</Link>
           </Stack>
         </CardContent></Card>
       )}
