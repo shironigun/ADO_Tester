@@ -28,6 +28,7 @@ import {
   expandChildren, startBatch, listBatches, getBatchDetail, cancelBatch,
   type BatchChild,
 } from '../api/batches'
+import { paths } from '../routes/paths'
 import type { SessionModuleConfig, WorkItemOption } from './types'
 
 const unitOf = (config: SessionModuleConfig) => (config.key === 'find-bugs' ? 'bug' : 'test')
@@ -211,7 +212,7 @@ export function EpicRunsTab({ config }: { config: SessionModuleConfig }) {
   return (
     <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(3, 1fr)' } }}>
       {batches.map(b => (
-        <Card key={b.id} variant="outlined" onClick={() => navigate(`${config.route}/epic/${b.id}`)}
+        <Card key={b.id} variant="outlined" onClick={() => navigate(paths.epic(config.route, b.id))}
           sx={{ cursor: 'pointer', borderLeft: '4px solid', borderLeftColor: borderColor(b.derivedStatus),
                 transition: 'transform .15s, box-shadow .15s', '&:hover': { transform: 'translateY(-2px)', boxShadow: 3 } }}>
           <CardContent sx={{ p: 1.75, '&:last-child': { pb: 1.75 } }}>
@@ -309,7 +310,7 @@ export default function EpicRunDetailFullScreen({ config }: { config: SessionMod
                       {c.count > 0 && <Chip size="small" variant="outlined" label={`${c.count} ${unit}${c.count === 1 ? '' : 's'}`} />}
                       <Tooltip title="Open this story">
                         <Button size="small" variant="outlined" endIcon={<OpenInNewIcon />}
-                          onClick={() => navigate(`${config.route}/${c.sessionId}`)}>Open</Button>
+                          onClick={() => navigate(paths.session(config.route, c.sessionId))}>Open</Button>
                       </Tooltip>
                     </Stack>
                     {c.errorMessage && <Typography variant="caption" color="error.main" sx={{ display: 'block', mt: 0.5 }}>{c.errorMessage}</Typography>}
