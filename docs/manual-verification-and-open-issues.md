@@ -110,15 +110,18 @@ ever reaches the bug-writer LLM. Two are fixed; one remains:
   `catch (OperationCanceledException)` and mislabelled "Cancelled by user", hiding the real error. Guarded
   all 8 catches in both orchestrators with `when (ct.IsCancellationRequested)`. Unit-tested (94 pass);
   **in-situ effect not re-confirmed** (re-running `/run` on a terminal session is a no-op — needs a fresh session).
-- ⛔ **REMAINING — discovery doesn't "degrade-never-raise"**: the original run cancelled ~31s into
-  `DiscoverAnchoredContextAsync` (during seed-file reads after code search returned 8 files). The per-call
-  catches there only catch `AdoApiError` (e.g. line ~479 `catch (AdoApiError) { continue; }`), NOT an ADO
-  HTTP timeout (`OperationCanceledException`/`TaskCanceledException`), so a slow file read aborts the whole
-  run. Spec says discovery must degrade and never raise. **Fix:** broaden those per-call catches to
-  `catch (Exception) when (!ct.IsCancellationRequested) { continue; }` so timeouts skip the file but a
-  genuine user-cancel still propagates. Until then, Find-Bugs `/run` won't complete on tickets whose
-  discovery hits a slow ADO call. The bug-writer LLM (the actual Issue #1-class large generation) is **not
-  yet reached**, so whether it also hits the CLI ceiling is still unknown.
+- ✅ **FIXED — discovery degrade-never-raise** (commit `f554d69`): `DiscoverAnchoredContextAsync` caught only
+  `AdoApiError`, so an ADO HTTP timeout aborted the run. Broadened its per-call catches to
+  `catch (Exception) when (!ct.IsCancellationRequested) { … }`.
+- ✅ **FIXED — code-verify duplicate-key crash** (commit `41b69c7`): pass-2 built a title→case map via
+  `ToDictionary`, which throws when two sourced cases (plan + drafts) normalize to the same title. Switched
+  to a last-wins dictionary.
+- ✅ **VERIFIED (2026-06-21)**: with all four fixes, a fresh run progressed analyst → discovery →
+  code-verify pass-1 → pass-2 (`72/195` step-cases) with **no crash**; cancelled cleanly per the
+  cap-at-10-then-cancel convention. Cancel still marks "Cancelled by user" correctly (OCE guard intact).
+  The bug-writer LLM itself wasn't reached in this run (pass-2 over 195 cases is slow), but the run path is
+  healthy — its only remaining risk is the shared Issue #1 large-generation ceiling, mitigated by the
+  cap-and-cancel convention.
 - Note: re-running `/run` on a Cancelled/terminal session is a no-op; always start a fresh session to test.
 
 ---
