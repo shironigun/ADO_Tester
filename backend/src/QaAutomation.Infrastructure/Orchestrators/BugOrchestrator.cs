@@ -299,7 +299,10 @@ public sealed class BugOrchestrator : IBugOrchestrator
             var scopeSetting = await GetSettingAsync(db, KVerifyStepScope, "fails_only");
             if (detail is "step" or "step_full")
             {
-                var byTitle = sourced.ToDictionary(t => t.Input.Title.Trim().ToLowerInvariant(), t => t.Input, StringComparer.Ordinal);
+                // Last-wins (NOT ToDictionary, which throws): plan + draft titles can normalize to the same key.
+                var byTitle = new Dictionary<string, TestCaseInput>(StringComparer.Ordinal);
+                foreach (var t in sourced)
+                    byTitle[t.Input.Title.Trim().ToLowerInvariant()] = t.Input;
                 var targets = new List<(int Index, TestCaseInput Case)>();
                 for (var idx = 0; idx < verdictDicts.Count; idx++)
                 {
