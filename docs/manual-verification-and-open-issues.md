@@ -93,12 +93,33 @@ Verified this session (read/wiring surfaces, no large LLM generation):
   (`AzureDevOpsClient :: Report enrichment capped at 150 of 181`) in the `ErrorLogs` table.
 
 Still NOT exercised end-to-end (LLM-completion paths + external writes):
-- **Find-Bugs full pipeline** (analyst→discover→code-verify→**bug-writer**) — the bug-writer is a large
-  single-shot generation, so it shares the **same Claude CLI exit-1 risk as Issue #1**. Verify manually.
 - **Push-to-ADO** (`POST .../sessions/{id}/push`) — **deliberately not run**; writes test cases/bugs to
   Azure DevOps. Verify manually against a safe Test Plan/Suite.
 - **Batches / Epic runs** — fan-out start not run (each child is an Author-Tests/Find-Bugs run → inherits
   Issue #1's risk).
+
+### 3. Find-Bugs run — deep-dive (2026-06-21)
+Exercising Find-Bugs on 171740 surfaced that the **analyst phase works** (Analyzing → AwaitingActual,
+~3 min, like the test analyst), but the `/run` (code-verify + bug-writer) phase had bugs **before** it
+ever reaches the bug-writer LLM. Two are fixed; one remains:
+- ✅ **FIXED — serialization** (commit `c6a8b48`): `SearchCodeAsync` → `SendDocAsync` → `body.ToJsonString(RawJson)`
+  threw "must specify a TypeInfoResolver" because `RawJson` had no resolver and the body held a POCO-backed
+  `JsonValue`. Added `DefaultJsonTypeInfoResolver`. Verified in-situ: discovery now gets past code search.
+- ✅ **FIXED — cancellation misclassification** (commit `5877fab`): a non-registry `OperationCanceledException`
+  (e.g. the ADO `HttpClient` 30s timeout = `TaskCanceledException`) was caught by bare
+  `catch (OperationCanceledException)` and mislabelled "Cancelled by user", hiding the real error. Guarded
+  all 8 catches in both orchestrators with `when (ct.IsCancellationRequested)`. Unit-tested (94 pass);
+  **in-situ effect not re-confirmed** (re-running `/run` on a terminal session is a no-op — needs a fresh session).
+- ⛔ **REMAINING — discovery doesn't "degrade-never-raise"**: the original run cancelled ~31s into
+  `DiscoverAnchoredContextAsync` (during seed-file reads after code search returned 8 files). The per-call
+  catches there only catch `AdoApiError` (e.g. line ~479 `catch (AdoApiError) { continue; }`), NOT an ADO
+  HTTP timeout (`OperationCanceledException`/`TaskCanceledException`), so a slow file read aborts the whole
+  run. Spec says discovery must degrade and never raise. **Fix:** broaden those per-call catches to
+  `catch (Exception) when (!ct.IsCancellationRequested) { continue; }` so timeouts skip the file but a
+  genuine user-cancel still propagates. Until then, Find-Bugs `/run` won't complete on tickets whose
+  discovery hits a slow ADO call. The bug-writer LLM (the actual Issue #1-class large generation) is **not
+  yet reached**, so whether it also hits the CLI ceiling is still unknown.
+- Note: re-running `/run` on a Cancelled/terminal session is a no-op; always start a fresh session to test.
 
 ---
 
