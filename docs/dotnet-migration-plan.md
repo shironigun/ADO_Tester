@@ -1,5 +1,7 @@
 # QA Automation — Migration Plan: Python → .NET backend + target-crm-aligned frontend
 
+> **Status — migration executed (as of 2026-06-22).** This plan has been carried out: the .NET backend scaffolded under `dotnet/` now lives in **`backend/`** and is the sole backend; the Python FastAPI app was **retired 2026-06-21** (recover from git history for a parity reference). The frontend re-architecture (F0–F5) is done. References below to "the live Python wins / source of truth" are now historical — the contract is preserved by the golden-file tests and ported frozen literals. The execution spec [`dotnet-migration-spec.md`](dotnet-migration-spec.md) supersedes this plan; runtime status + open issues are in [`manual-verification-and-open-issues.md`](manual-verification-and-open-issues.md).
+
 **Goal.** Re-platform the QA Automation app (`ADO_Tester`) so it conforms to the YourOrg / *Your Project* org stack and can be hosted as its **own Azure DevOps project**:
 
 - **Backend:** rewrite the Python FastAPI/agent backend in **.NET**, following the CRM monorepo's .NET conventions.
