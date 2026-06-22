@@ -1,5 +1,7 @@
 # QA Automation — Python→.NET + Frontend-Realign Migration Spec (single source)
 
+> **Status — migration executed (as of 2026-06-22).** This spec has been carried out: the .NET solution scaffolded under `dotnet/` now lives in **`backend/`** and is the sole backend; the Python FastAPI app was **retired 2026-06-21** (recover from git history for a parity reference). References below to "the live Python is the source of truth" are now historical — the contract they protect is preserved by the golden-file tests captured from Python and the frozen literals already ported. Live runtime status + open issues: [`manual-verification-and-open-issues.md`](manual-verification-and-open-issues.md).
+
 > **This is a self-contained execution spec.** Hand it to an implementing agent as the authoritative brief. It merges the migration strategy and a divide-and-conquer parity audit (367 contract items: 29 covered / 258 under-specified / 80 missing), and was then **adversarially re-verified against the live code** (a second pass; ~47 corrections folded in). It supersedes `docs/dotnet-migration-plan.md` and `docs/dotnet-migration-parity-checklist.md` (kept only as provenance).
 >
 > **Deep rendering/HTML literals** (report-deck slide headings, modal markup, CSS, etc.) are intentionally summarized, not transcribed in full — Ground Rule #1 governs them: **copy them verbatim from the live Python and golden-diff (§8), never from prose.**

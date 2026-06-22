@@ -1,5 +1,7 @@
 # QA Automation — Migration Parity Checklist ("nothing breaks, nothing missed")
 
+> **Status — migration executed (as of 2026-06-22).** The phases this checklist gates have all landed: the .NET backend (scaffolded under `dotnet/`) now lives in **`backend/`** and is the sole backend; the Python FastAPI app was **retired 2026-06-21** (recover from git history for a parity reference). References to "the Python backend is the authoritative source of truth" are now historical — the contract is preserved by the golden-file tests captured from Python and the frozen literals already ported. Runtime status + open issues: [`manual-verification-and-open-issues.md`](manual-verification-and-open-issues.md).
+
 Companion to `docs/dotnet-migration-plan.md`. Produced by a divide-and-conquer audit: every feature/endpoint/contract/behavior of the live Python app was inventoried across 9 subsystems and gap-checked against the plan.
 
 **Audit result:** 367 items checked → **29 covered, 258 partial (under-specified), 80 missing**. The plan's *strategy* is sound; this checklist closes the *contract* gaps so a porter cannot silently drift behavior. The **Python backend is the authoritative source of truth** — not the recovered .NET at commit `7b16806` (it predates today's house style and features; diff against Python, never trust it).

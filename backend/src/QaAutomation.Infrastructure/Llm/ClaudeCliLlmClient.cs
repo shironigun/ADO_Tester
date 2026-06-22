@@ -99,6 +99,8 @@ public sealed class ClaudeCliLlmClient : ILlmClient
         }, CancellationToken.None);
 
         string? finalText = null;
+        string? resultSubtype = null;
+        bool resultIsError = false;
         long chars = 0;
         var overall = Stopwatch.StartNew();
 
@@ -155,6 +157,10 @@ public sealed class ClaudeCliLlmClient : ILlmClient
                 {
                     if (root.TryGetProperty("result", out var r) && r.ValueKind == JsonValueKind.String)
                         finalText = r.GetString();
+                    // `claude -p` reports failures (usage limits, auth, model errors) in the result event
+                    // itself — capture is_error/subtype so a non-zero exit isn't an opaque "(no stderr)".
+                    resultSubtype = StrOf(root, "subtype");
+                    resultIsError = root.TryGetProperty("is_error", out var ie) && ie.ValueKind == JsonValueKind.True;
                     continue;
                 }
 
@@ -196,8 +202,18 @@ public sealed class ClaudeCliLlmClient : ILlmClient
         var stderr = (await proc.StandardError.ReadToEndAsync(ct)).Trim();
         var rc = proc.ExitCode;
 
-        if (rc != 0)
-            throw new LlmException($"Claude CLI exited {rc}: {(stderr.Length > 0 ? Truncate(stderr, 500) : "(no stderr)")}");
+        if (rc != 0 || resultIsError)
+        {
+            // Prefer stderr; otherwise surface the CLI's own result-event error text/subtype (where
+            // `claude -p` actually puts usage-limit / auth / model failures); only then fall back to "(no stderr)".
+            var subtypeTag = resultSubtype is { Length: > 0 } ? $"[{resultSubtype}] " : "";
+            var reason =
+                stderr.Length > 0 ? Truncate(stderr, 500)
+                : !string.IsNullOrEmpty(finalText) ? $"{subtypeTag}{Truncate(finalText!, 500)}"
+                : subtypeTag.Length > 0 ? subtypeTag.TrimEnd()
+                : "(no stderr)";
+            throw new LlmException($"Claude CLI exited {rc}: {reason}");
+        }
         if (string.IsNullOrEmpty(finalText))
             throw new LlmException("Claude CLI stream ended without a result." + (stderr.Length > 0 ? $" stderr: {Truncate(stderr, 300)}" : ""));
         return finalText;

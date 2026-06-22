@@ -1,6 +1,6 @@
 # Manual Verification & Open Issues
 
-Living doc for the .NET backend (`dotnet/`) migration. Tracks what has been verified working,
+Living doc for the .NET backend (`backend/`, formerly `dotnet/`). Tracks what has been verified working,
 what still needs **manual** verification, and known issues to work on. Update as items are
 confirmed or fixed.
 
@@ -120,9 +120,11 @@ Otherwise clean: zero failed network requests, zero console errors across the ap
 - **Candidate fixes (if reproducible everywhere):** chunk the Tester generation (fewer test cases per
   CLI call / batch the 44 ACs) so no single generation is huge; or switch this agent to the Anthropic
   API with a raised `max_tokens`.
-- **Diagnostic note:** the app discards the CLI's stream-json `result` event's `subtype`/`is_error`,
-  so "exited 1: (no stderr)" hides *why* the CLI ended. Surfacing the result `subtype` would make this
-  class of failure self-explaining — consider as a follow-up improvement.
+- **Diagnostic note (FIXED 2026-06-22):** previously the app discarded the CLI's stream-json `result`
+  event's `subtype`/`is_error`, so "exited 1: (no stderr)" hid *why* the CLI ended. `ClaudeCliLlmClient`
+  now captures `is_error`/`subtype` and, on a non-zero exit (or `is_error`), surfaces the result-event
+  error text + `[subtype]` in the `LlmException` (stderr still wins when present). A failing LLM ping /
+  agent run will now report the real reason (e.g. usage-limit / auth / model error) instead of "(no stderr)".
 
 ### 2. Flows — partially verified (2026-06-21)
 Verified this session (read/wiring surfaces, no large LLM generation):
