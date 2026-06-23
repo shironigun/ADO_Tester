@@ -77,6 +77,13 @@ export async function pushSession(
   await api.post(`/api/author-tests/sessions/${sessionId}/push`, body)
 }
 
+// Push a single draft to ADO (synchronous — backs the per-row "Push" button).
+export async function pushDraft(
+  draftId: number, body: { testPlanId: number; testSuiteId: number },
+): Promise<void> {
+  await api.post(`/api/author-tests/drafts/${draftId}/push`, body)
+}
+
 export async function saveAnalysis(sessionId: number, analysis: unknown): Promise<void> {
   await api.patch(`/api/author-tests/sessions/${sessionId}/analysis`, analysis)
 }

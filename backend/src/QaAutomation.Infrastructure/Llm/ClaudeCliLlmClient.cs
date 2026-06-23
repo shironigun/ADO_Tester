@@ -75,6 +75,15 @@ public sealed class ClaudeCliLlmClient : ILlmClient
         foreach (var a in args)
             psi.ArgumentList.Add(a);
 
+        // The ClaudeCli provider authenticates via the local subscription login (Pro/Max), NEVER an API
+        // key. Any ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN in the environment — e.g. set in .env for the
+        // Anthropic provider, even the unfilled "your-anthropic-key-here" placeholder — would push the CLI
+        // into external-API-key mode and fail with "Invalid API key". Strip them from the child so it
+        // always uses the subscription login. (A top-level CLI honors the key; only a nested Claude Code
+        // child session ignores it, which is why this never reproduces from inside Claude Code.)
+        psi.Environment.Remove("ANTHROPIC_API_KEY");
+        psi.Environment.Remove("ANTHROPIC_AUTH_TOKEN");
+
         using var proc = new Process { StartInfo = psi };
         try
         {

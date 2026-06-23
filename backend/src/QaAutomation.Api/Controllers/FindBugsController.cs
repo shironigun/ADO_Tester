@@ -199,9 +199,10 @@ public sealed class FindBugsController : ControllerBase
         skip = Math.Max(0, skip);
         try
         {
-            var total = await _db.BugSessions.CountAsync(s => s.ProjectId == projectId, cancellationToken);
+            // Standalone sessions only — epic-run children (BatchId set) live under the Epic runs tab.
+            var total = await _db.BugSessions.CountAsync(s => s.ProjectId == projectId && s.BatchId == null, cancellationToken);
             var items = await _db.BugSessions
-                .Where(s => s.ProjectId == projectId)
+                .Where(s => s.ProjectId == projectId && s.BatchId == null)
                 .OrderByDescending(s => s.CreatedAt)
                 .Skip(skip).Take(take)
                 .ToListAsync(cancellationToken);

@@ -121,6 +121,21 @@ public sealed class SettingsController : ControllerBase
         }
     }
 
+    [HttpGet("ado/branches")]
+    public async Task<IActionResult> AdoBranches([FromQuery] string? repository, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var branches = await _ado.DiscoverBranchesAsync(repository, cancellationToken);
+            return Ok(new { branches });
+        }
+        catch (Exception e)
+        {
+            _log.LogWarning("ADO discover branches failed: {Error}", e.Message);
+            return StatusCode(502, new { detail = e.Message });
+        }
+    }
+
     private async Task<ProviderInfo> BuildProviderInfoAsync(CancellationToken cancellationToken) => new()
     {
         Current = (await _providerState.CurrentAsync(cancellationToken)).ToString(),

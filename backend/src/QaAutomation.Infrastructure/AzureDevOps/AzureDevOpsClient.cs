@@ -679,6 +679,21 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
         return rid;
     }
 
+    public async Task<IReadOnlyList<string>> DiscoverBranchesAsync(string? repository = null, CancellationToken ct = default)
+    {
+        var rid = await ResolveRepositoryIdAsync(repository, ct);
+        using var doc = await GetDocAsync(
+            $"{Opts.BaseUrl}/_apis/git/repositories/{rid}/refs?filter=heads/&api-version={Opts.ApiVersion}",
+            "List branches", ct);
+        return Array(doc.RootElement, "value")
+            .Select(e => GetStr(e, "name") ?? "")               // "refs/heads/feature/x"
+            .Where(n => n.StartsWith("refs/heads/", StringComparison.Ordinal))
+            .Select(n => n["refs/heads/".Length..])
+            .Where(n => n.Length > 0)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     public async Task<GitRefs> GetWorkItemGitRefsAsync(int workItemId, CancellationToken ct = default)
     {
         var url = $"{Opts.BaseUrl}/_apis/wit/workitems/{workItemId}?$expand=relations&api-version={Opts.ApiVersion}";

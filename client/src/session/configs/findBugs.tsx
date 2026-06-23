@@ -42,6 +42,7 @@ import {
   bugFromVerdict, saveAnalysis, sessionStreamUrl,
   type AttachedTestCase, type LinkedChange,
 } from '../../api/findBugs'
+import { getConfig, saveConfig, getAdoBranches } from '../../api/settings'
 
 // ADO work-item deep-links are built from the configured org/project via useAdoWorkItemUrl().
 
@@ -563,8 +564,17 @@ function BugDetailBody({ session, refetch, onError }: DetailBodyProps) {
   const [cases, setCases] = useState<AttachedTestCase[]>([])
   const [casesLoaded, setCasesLoaded] = useState(false)
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
+  // Branch the code-verification reads from — defaults to the Settings ado.default_branch, editable here.
+  const [branch, setBranch] = useState('')
+  const [branches, setBranches] = useState<string[]>([])
+  const [branchesLoading, setBranchesLoading] = useState(false)
 
   useEffect(() => { setActualText(session.actualBehavior ?? '') }, [session.actualBehavior])
+  useEffect(() => {
+    getConfig().then(cfg => setBranch(String(cfg['ado.default_branch'] ?? ''))).catch(() => {})
+    setBranchesLoading(true)
+    getAdoBranches().then(setBranches).catch(() => setBranches([])).finally(() => setBranchesLoading(false))
+  }, [])
   useEffect(() => {
     let cancelled = false
     getLinkedRefs(session.id)
@@ -595,6 +605,8 @@ function BugDetailBody({ session, refetch, onError }: DetailBodyProps) {
   const splitIds = (t: string) => t.split(/[\s,]+/).map(x => x.trim()).filter(Boolean)
   const runBugWriter = async () => {
     try {
+      // Persist the chosen branch first so code-verification reads from it (live-applies to the ADO client).
+      if (branch) await saveConfig({ 'ado.default_branch': branch })
       // Code verification is always on (anchored on the ticket's change). actualBehavior is optional.
       await apiRunBugWriter(session.id, { actualBehavior: actualText, verifyCode: true, prIds: splitIds(prIdsText), commitIds: splitIds(commitIdsText), selectedTestCases: selectedCaseKeys })
       refetch()
@@ -751,6 +763,20 @@ function BugDetailBody({ session, refetch, onError }: DetailBodyProps) {
                     No linked PRs/commits — Bug Writer will anchor on the closest matching code.
                   </Typography>
                 )}
+
+                <Box sx={{ mt: 2, maxWidth: 380 }}>
+                  <Autocomplete
+                    freeSolo size="small" options={branches} value={branch}
+                    onChange={(_, v) => setBranch(v || '')}
+                    onInputChange={(_, v) => setBranch(v)}
+                    loading={branchesLoading}
+                    renderInput={p => (
+                      <TextField {...p} label="Branch to test against" placeholder="main"
+                        helperText={branchesLoading ? 'Loading branches…'
+                          : 'Agent reads code from this branch. Saved to Settings on run.'} />
+                    )}
+                  />
+                </Box>
 
                 <Box sx={{ mt: 1.5 }}>
                   <Button size="small" color="inherit" sx={{ px: 0.5, color: 'text.secondary' }}

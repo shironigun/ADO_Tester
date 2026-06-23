@@ -53,4 +53,12 @@ export async function getAdoAreaPaths(organization?: string, project?: string): 
   return data.areaPaths ?? []
 }
 
+// Optional repository arg: when omitted the backend falls back to the saved ado.repository.
+export async function getAdoBranches(repository?: string): Promise<string[]> {
+  const params: Record<string, string> = {}
+  if (repository) params.repository = repository
+  const { data } = await api.get<{ branches: string[] }>('/api/settings/ado/branches', { params })
+  return data.branches ?? []
+}
+
 export type { AdoProject }
