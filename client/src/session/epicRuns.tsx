@@ -4,7 +4,8 @@
  * roll-up. Reuses the per-story session pipeline + detail unchanged — this is just the grouping UI.
  * Config-driven, so Author Tests and Find Bugs share it.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   Alert, AppBar, Autocomplete, Box, Button, Card, CardContent, Checkbox, Chip, CircularProgress,
@@ -16,30 +17,19 @@ import CloseIcon from '@mui/icons-material/Close'
 import StopIcon from '@mui/icons-material/Stop'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
-import axios from 'axios'
 import StatTile from '../components/StatTile'
 import StatusChip from '../components/StatusChip'
 import EmptyState from '../components/EmptyState'
 import { ThinkingShimmer } from '../components/LoadingSkeleton'
-import { axiosMessage } from './shared'
+import { axiosMessage } from '../common/errors'
+import { PROJECT_ID } from '../config/env'
+import { searchWorkItems } from '../api/authorTests'
+import {
+  expandChildren, startBatch, listBatches, getBatchDetail, cancelBatch,
+  type BatchChild,
+} from '../api/batches'
+import { paths } from '../routes/paths'
 import type { SessionModuleConfig, WorkItemOption } from './types'
-
-const PROJECT_ID = 1
-
-export interface BatchChild { id: number; title: string; workItemType: string; state?: string | null }
-interface ChildrenExpand { parentWorkItemId: number; parentTitle: string; children: BatchChild[]; truncated: boolean }
-export interface BatchChildSummary {
-  sessionId: number; workItemId: number; workItemTitle: string; status: string
-  currentActivity?: string | null; errorMessage?: string | null; count: number
-}
-export interface BatchSummary {
-  id: number; module: string; parentWorkItemId?: number | null; title: string; mode?: string | null
-  createdAt: string; childCount: number; doneCount: number; failedCount: number; runningCount: number; derivedStatus: string
-}
-export interface BatchDetail {
-  id: number; module: string; parentWorkItemId?: number | null; title: string; mode?: string | null
-  createdAt: string; updatedAt: string; derivedStatus: string; children: BatchChildSummary[]
-}
 
 const unitOf = (config: SessionModuleConfig) => (config.key === 'find-bugs' ? 'bug' : 'test')
 
@@ -63,8 +53,7 @@ export function EpicRunDialog({ config, onClose, onStarted, onError }: {
   useEffect(() => {
     if (wiQuery.length < 2) { setWiOptions([]); return }
     const t = setTimeout(() => {
-      axios.get<WorkItemOption[]>('/api/author-tests/search', { params: { q: wiQuery } })
-        .then(r => setWiOptions(r.data)).catch(() => setWiOptions([]))
+      searchWorkItems(wiQuery).then(setWiOptions).catch(() => setWiOptions([]))
     }, 400)
     return () => clearTimeout(t)
   }, [wiQuery])
@@ -86,8 +75,7 @@ export function EpicRunDialog({ config, onClose, onStarted, onError }: {
     // "epics" are typed User Story — so we don't gate on the work-item type.)
     setExpanding(true)
     try {
-      const { data } = await axios.get<ChildrenExpand>('/api/batches/children-expand',
-        { params: { parentWorkItemId: o.id, recursive: true } })
+      const data = await expandChildren(o.id, true)
       if (data.children.length > 0) {
         if (parentId == null) setParentId(o.id)
         addItems(data.children)
@@ -111,10 +99,10 @@ export function EpicRunDialog({ config, onClose, onStarted, onError }: {
     if (selectedIds.length === 0) return
     setStarting(true)
     try {
-      const body: Record<string, unknown> = { parentWorkItemId: parentId, workItemIds: selectedIds }
-      if (config.key === 'find-bugs') body.mode = mode
-      const { data } = await axios.post<{ batchId: number; sessionIds?: number[]; skipped?: number[] }>(
-        `/api/batches/${config.key}/${PROJECT_ID}/start`, body)
+      const data = await startBatch(config.key, PROJECT_ID, {
+        parentWorkItemId: parentId, workItemIds: selectedIds,
+        ...(config.key === 'find-bugs' ? { mode } : {}),
+      })
       if (!data.sessionIds || data.sessionIds.length === 0) {
         // Every child failed to start (e.g. ADO unreachable) — don't navigate to an empty roll-up.
         onError(new Error('No stories could be started — Azure DevOps may be unreachable. Nothing was queued.'),
@@ -204,23 +192,18 @@ const borderColor = (s: string): string =>
 
 export function EpicRunsTab({ config }: { config: SessionModuleConfig }) {
   const navigate = useNavigate()
-  const [batches, setBatches] = useState<BatchSummary[]>([])
-  const [loaded, setLoaded] = useState(false)
 
-  const load = useCallback(async () => {
-    try {
-      const { data } = await axios.get<{ total: number; items: BatchSummary[] }>(`/api/batches/${PROJECT_ID}`, { params: { take: 100 } })
-      setBatches((data.items ?? []).filter(b => b.module === config.key))
-    } catch { /* ignore */ } finally { setLoaded(true) }
-  }, [config.key])
-
-  useEffect(() => { load() }, [load])
-  const anyRunning = batches.some(b => RUNNING(b.derivedStatus))
-  useEffect(() => {
-    if (!anyRunning) return
-    const t = setInterval(load, 3000)
-    return () => clearInterval(t)
-  }, [anyRunning, load])
+  // Batches for this module, kept live via React Query (F2). Polls every 3s only while one is
+  // Running. The endpoint returns all modules' batches; we filter to this module client-side.
+  const batchesQuery = useQuery({
+    queryKey: ['batches', config.key],
+    queryFn: () => listBatches(PROJECT_ID, 100),
+    refetchInterval: (q) =>
+      (q.state.data?.items ?? []).some(b => b.module === config.key && RUNNING(b.derivedStatus))
+        ? 3000 : false,
+  })
+  const batches = (batchesQuery.data?.items ?? []).filter(b => b.module === config.key)
+  const loaded = !batchesQuery.isLoading
 
   if (loaded && batches.length === 0) {
     return <EmptyState icon={<AccountTreeIcon />} title="No epic runs yet"
@@ -229,7 +212,7 @@ export function EpicRunsTab({ config }: { config: SessionModuleConfig }) {
   return (
     <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(3, 1fr)' } }}>
       {batches.map(b => (
-        <Card key={b.id} variant="outlined" onClick={() => navigate(`${config.route}/epic/${b.id}`)}
+        <Card key={b.id} variant="outlined" onClick={() => navigate(paths.epic(config.route, b.id))}
           sx={{ cursor: 'pointer', borderLeft: '4px solid', borderLeftColor: borderColor(b.derivedStatus),
                 transition: 'transform .15s, box-shadow .15s', '&:hover': { transform: 'translateY(-2px)', boxShadow: 3 } }}>
           <CardContent sx={{ p: 1.75, '&:last-child': { pb: 1.75 } }}>
@@ -253,25 +236,21 @@ export default function EpicRunDetailFullScreen({ config }: { config: SessionMod
   const { batchId } = useParams()
   const navigate = useNavigate()
   const bid = batchId ? Number(batchId) : null
-  const [detail, setDetail] = useState<BatchDetail | null>(null)
   const [actionError, setActionError] = useState('')
   const unit = unitOf(config)
 
-  const load = useCallback(async () => {
-    if (bid == null) return
-    try { const { data } = await axios.get<BatchDetail>(`/api/batches/detail/${bid}`); setDetail(data) } catch { /* ignore */ }
-  }, [bid])
-
-  useEffect(() => { load() }, [load])
-  const running = detail?.derivedStatus === 'Running'
-  useEffect(() => {
-    if (!running) return
-    const t = setInterval(load, 2500)
-    return () => clearInterval(t)
-  }, [running, load])
+  // Roll-up detail, kept live via React Query (F2). Polls every 2.5s only while Running.
+  const detailQuery = useQuery({
+    queryKey: ['batch-detail', bid],
+    queryFn: () => getBatchDetail(bid as number),
+    enabled: bid != null,
+    refetchInterval: (q) => (q.state.data?.derivedStatus === 'Running' ? 2500 : false),
+  })
+  const detail = detailQuery.data ?? null
 
   const cancel = async () => {
-    try { await axios.post(`/api/batches/${bid}/cancel`); load() }
+    if (bid == null) return
+    try { await cancelBatch(bid); void detailQuery.refetch() }
     catch (e) { setActionError(`Cancel failed: ${axiosMessage(e)}`) }
   }
 
@@ -331,7 +310,7 @@ export default function EpicRunDetailFullScreen({ config }: { config: SessionMod
                       {c.count > 0 && <Chip size="small" variant="outlined" label={`${c.count} ${unit}${c.count === 1 ? '' : 's'}`} />}
                       <Tooltip title="Open this story">
                         <Button size="small" variant="outlined" endIcon={<OpenInNewIcon />}
-                          onClick={() => navigate(`${config.route}/${c.sessionId}`)}>Open</Button>
+                          onClick={() => navigate(paths.session(config.route, c.sessionId))}>Open</Button>
                       </Tooltip>
                     </Stack>
                     {c.errorMessage && <Typography variant="caption" color="error.main" sx={{ display: 'block', mt: 0.5 }}>{c.errorMessage}</Typography>}

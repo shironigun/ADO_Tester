@@ -23,7 +23,6 @@ import RuleIcon from '@mui/icons-material/Rule'
 import SearchIcon from '@mui/icons-material/Search'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
 import PsychologyIcon from '@mui/icons-material/Psychology'
-import axios from 'axios'
 import AgentPipeline, { type PipelineStep } from '../../components/AgentPipeline'
 import AgentConsole from '../../components/AgentConsole'
 import AnalysisPanel from '../../components/AnalysisPanel'
@@ -33,15 +32,19 @@ import StatusChip from '../../components/StatusChip'
 import TesterProgress from '../../components/TesterProgress'
 import type {
   AnalyticsColumn, DetailBodyProps, SessionDetail, SessionModuleConfig,
-  SessionSummary, StartFormProps, WorkItemOption,
+  StartFormProps, WorkItemOption,
 } from '../types'
-import { axiosMessage, parseEventLog } from '../shared'
+import { parseEventLog } from '../shared'
+import { axiosMessage } from '../../common/errors'
+import { useAdoWorkItemUrl } from '../../common/adoLinks'
+import { PROJECT_ID } from '../../config/env'
+import {
+  getPlans, getSuites, searchWorkItems, startSession, listSessionsPage, getSessionDetail,
+  patchDraft, approveAllDrafts, runTester as apiRunTester, cancelSession, pushSession, saveAnalysis,
+  sessionStreamUrl, type TestPlan, type TestSuite,
+} from '../../api/authorTests'
 
-const ADO_WI_URL = (id: number) => `https://dev.azure.com/${encodeURIComponent(ADO_ORG)}/${encodeURIComponent(ADO_PROJECT)}/_workitems/edit/${id}`
-
-const PROJECT_ID = 1
-const ADO_ORG = 'YourOrg'
-const ADO_PROJECT = 'Your Project'
+// ADO work-item deep-links are built from the configured org/project via useAdoWorkItemUrl().
 
 interface Step { action: string; expected: string }
 interface Draft {
@@ -50,8 +53,6 @@ interface Draft {
   adoTestCaseId: number | null
 }
 interface DraftPatch { title?: string; preconditions?: string; steps?: Step[] }
-interface TestPlan { id: number; name: string }
-interface TestSuite { id: number; name: string }
 
 const PIPELINE_STEPS: PipelineStep[] = [
   { key: 'fetch',    label: 'Fetch ticket',  icon: <SearchIcon /> },
@@ -209,11 +210,11 @@ function TestDraftCard({ draft, onApprove, onReject, onSave }: {
 function TestPushResults({ session, context }: {
   session: SessionDetail; context: { plan: TestPlan; suite: TestSuite } | undefined
 }) {
+  const wiUrl = useAdoWorkItemUrl()
   const drafts = session.drafts as unknown as Draft[]
   const pushed = drafts.filter(d => d.status === 'Pushed' && d.adoTestCaseId)
   if (pushed.length === 0) return null
   if (!['Done', 'Cancelled', 'Failed'].includes(session.status)) return null
-  const wiUrl = (id: number) => `https://dev.azure.com/${encodeURIComponent(ADO_ORG)}/${encodeURIComponent(ADO_PROJECT)}/_workitems/edit/${id}`
 
   function downloadCsv() {
     const header = ['SessionId','StoryId','StoryTitle','TestCaseId','TestCaseTitle','PlanId','PlanName','SuiteId','SuiteName','AdoUrl']
@@ -256,6 +257,7 @@ function TestPushResults({ session, context }: {
 
 // ── Detail body (pipeline + gate + tiles→popup + push) ───────────────────────
 function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
+  const wiUrl = useAdoWorkItemUrl()
   const drafts = session.drafts as unknown as Draft[]
   const [plans, setPlans] = useState<TestPlan[]>([])
   const [suites, setSuites] = useState<TestSuite[]>([])
@@ -267,32 +269,32 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
   const [tcOpen, setTcOpen] = useState(false)
   const [tcFilter, setTcFilter] = useState<'all' | 'Draft' | 'Approved' | 'Pushed' | 'Rejected'>('all')
 
-  useEffect(() => { axios.get<TestPlan[]>('/api/author-tests/plans').then(r => setPlans(r.data)).catch(() => {}) }, [])
+  useEffect(() => { getPlans().then(setPlans).catch(() => {}) }, [])
   useEffect(() => {
     if (!selectedPlan) { setSuites([]); return }
-    axios.get<TestSuite[]>(`/api/author-tests/plans/${selectedPlan}/suites`).then(r => setSuites(r.data)).catch(() => {})
+    getSuites(selectedPlan).then(setSuites).catch(() => {})
   }, [selectedPlan])
 
   const inFlight = ['Analyzing', 'Drafting', 'Pushing'].includes(session.status)
   const approvedCount = drafts.filter(d => d.status === 'Approved').length
   const canPush = approvedCount > 0 && !!selectedPlan && !!selectedSuite
 
-  const approveDraft = async (id: number) => { try { await axios.patch(`/api/author-tests/drafts/${id}`, { status: 'Approved' }); refetch() } catch (e) { onError(e, 'Approve failed') } }
-  const rejectDraft = async (id: number) => { try { await axios.patch(`/api/author-tests/drafts/${id}`, { status: 'Rejected' }); refetch() } catch (e) { onError(e, 'Reject failed') } }
-  const approveAll = async () => { try { await axios.post(`/api/author-tests/sessions/${session.id}/approve-all`); refetch() } catch (e) { onError(e, 'Approve all failed') } }
+  const approveDraft = async (id: number) => { try { await patchDraft(id, { status: 'Approved' }); refetch() } catch (e) { onError(e, 'Approve failed') } }
+  const rejectDraft = async (id: number) => { try { await patchDraft(id, { status: 'Rejected' }); refetch() } catch (e) { onError(e, 'Reject failed') } }
+  const approveAll = async () => { try { await approveAllDrafts(session.id); refetch() } catch (e) { onError(e, 'Approve all failed') } }
   const saveDraft = async (id: number, patch: DraftPatch) => {
     const body: { title?: string; stepsJson?: string } = {}
     if (patch.title !== undefined) body.title = patch.title
     if (patch.steps !== undefined) body.stepsJson = JSON.stringify(patch.steps)
-    try { await axios.patch(`/api/author-tests/drafts/${id}`, body); refetch() } catch (e) { onError(e, 'Save failed') }
+    try { await patchDraft(id, body); refetch() } catch (e) { onError(e, 'Save failed') }
   }
-  const runTester = async () => { try { await axios.post(`/api/author-tests/sessions/${session.id}/run-tester`); refetch() } catch (e) { onError(e, 'Run Tester failed') } }
-  const cancel = async () => { try { await axios.post(`/api/author-tests/sessions/${session.id}/cancel`); refetch() } catch (e) { onError(e, 'Cancel failed') } }
+  const runTester = async () => { try { await apiRunTester(session.id); refetch() } catch (e) { onError(e, 'Run Tester failed') } }
+  const cancel = async () => { try { await cancelSession(session.id); refetch() } catch (e) { onError(e, 'Cancel failed') } }
   const push = async () => {
     if (!selectedPlan || !selectedSuite) return
     setPushing(true); setPushError('')
     try {
-      await axios.post(`/api/author-tests/sessions/${session.id}/push`, { testPlanId: selectedPlan, testSuiteId: selectedSuite })
+      await pushSession(session.id, { testPlanId: selectedPlan, testSuiteId: selectedSuite })
       const plan = plans.find(p => p.id === selectedPlan); const suite = suites.find(s => s.id === selectedSuite)
       if (plan && suite) setPushedContext({ plan, suite })
       refetch()
@@ -323,7 +325,7 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
   const [picked, setPicked] = useState<number | null>(null)
   const sel = Math.min(picked ?? activeIdx, PIPELINE_STEPS.length - 1)
   const [view, setView] = useState<'findings' | 'activity'>('findings')
-  const streamUrl = `/api/author-tests/sessions/${session.id}/stream`
+  const streamUrl = sessionStreamUrl(session.id)
 
   const phaseLabel = PIPELINE_STEPS[sel]?.label ?? ''
 
@@ -378,7 +380,7 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
             <Chip size="small" label={`#${session.workItemId}`} />
             {wiType && <Chip size="small" variant="outlined" label={wiType} />}
             <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }}>{session.workItemTitle}</Typography>
-            <Link href={ADO_WI_URL(session.workItemId)} target="_blank" rel="noreferrer" variant="body2">Open in Azure DevOps</Link>
+            <Link href={wiUrl(session.workItemId)} target="_blank" rel="noreferrer" variant="body2">Open in Azure DevOps</Link>
           </Stack>
         </CardContent></Card>
       )}
@@ -402,7 +404,7 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
         <>
           {session.status === 'Analyzing' && !session.analysisJson && <AnalystProgress streamUrl={streamUrl} />}
           <AnalysisPanel analysisJson={session.analysisJson}
-            onSave={async (a) => { await axios.patch(`/api/author-tests/sessions/${session.id}/analysis`, a); refetch() }} />
+            onSave={async (a) => { await saveAnalysis(session.id, a); refetch() }} />
           {session.status !== 'Analyzing' && !session.analysisJson && (
             <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: 'center' }}>No analysis available.</Typography>
           )}
@@ -499,8 +501,7 @@ function AuthorStartForm({ onStarted, onError, onClose }: StartFormProps) {
   useEffect(() => {
     if (wiQuery.length < 2) { setWiOptions([]); return }
     const t = setTimeout(() => {
-      axios.get<WorkItemOption[]>('/api/author-tests/search', { params: { q: wiQuery } })
-        .then(r => setWiOptions(r.data)).catch(() => setWiOptions([]))
+      searchWorkItems(wiQuery).then(setWiOptions).catch(() => setWiOptions([]))
     }, 400)
     return () => clearTimeout(t)
   }, [wiQuery])
@@ -511,8 +512,8 @@ function AuthorStartForm({ onStarted, onError, onClose }: StartFormProps) {
     try {
       // Auto + pause-at-review reuses the manual stop: don't auto-trigger Tester.
       const auto = autoHandoff && !pauseAtReview
-      const { data } = await axios.post<{ sessionId: number }>(`/api/author-tests/${PROJECT_ID}/start`, { workItemId: selectedWi.id, autoHandoff: auto })
-      onClose(); onStarted(data.sessionId)
+      const { sessionId } = await startSession(PROJECT_ID, { workItemId: selectedWi.id, autoHandoff: auto })
+      onClose(); onStarted(sessionId)
     } catch (e) { onError(e, 'Start failed') } finally { setStarting(false) }
   }
 
@@ -567,12 +568,9 @@ export const authorTestsConfig: SessionModuleConfig = {
   pipelineSteps: PIPELINE_STEPS,
   activeStepIndex,
   analyticsColumns,
-  listSessions: async (take, skip) => {
-    const { data } = await axios.get<{ total: number; items: SessionSummary[] }>(`/api/author-tests/sessions/${PROJECT_ID}`, { params: { take, skip } })
-    return data
-  },
-  getDetail: async (id) => { const { data } = await axios.get<SessionDetail>(`/api/author-tests/sessions/detail/${id}`); return data },
-  streamUrl: (id) => `/api/author-tests/sessions/${id}/stream`,
+  listSessions: (take, skip) => listSessionsPage(PROJECT_ID, take, skip),
+  getDetail: (id) => getSessionDetail(id),
+  streamUrl: sessionStreamUrl,
   StartForm: AuthorStartForm,
   DetailBody: AuthorDetailBody,
 }

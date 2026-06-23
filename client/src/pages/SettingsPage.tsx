@@ -28,11 +28,18 @@ import AssessmentOutlinedIcon from '@mui/icons-material/AssessmentOutlined'
 import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined'
 import HealthAndSafetyOutlinedIcon from '@mui/icons-material/HealthAndSafetyOutlined'
 import RadioButtonCheckedIcon from '@mui/icons-material/RadioButtonChecked'
-import axios from 'axios'
 import PageHeader from '../components/PageHeader'
 import Section from '../components/Section'
 import { FadeIn, Stagger, StaggerItem } from '../motion/primitives'
 import { MONO_FONT } from '../theme/tokens'
+import { apiUrl } from '../config/env'
+import { axiosMessage } from '../common/errors'
+import {
+  getConfig, saveConfig, getClaudeCliModels, getAdoOrgs, getAdoProjects, getAdoAreaPaths,
+  type Config, type AdoProject,
+} from '../api/settings'
+import { getEnvStatus, getWorkItem, pingLlm, type EnvStatus, type WorkItem } from '../api/diagnostics'
+import { getPlans, getSuites, type TestPlan, type TestSuite } from '../api/authorTests'
 
 // ── Type system + setting keys ─────────────────────────────────────────────
 const K = {
@@ -66,30 +73,8 @@ const K = {
 
 const REPORT_TYPE_OPTIONS = ['User Story', 'Bug', 'Defect', 'Task', 'Issue', 'Feature']
 
-type Config = Record<string, string | boolean>
-
-interface EnvStatus {
-  activeProvider: string
-  adoPatPresent: boolean
-  anthropicKeyPresent: boolean
-  azureOpenAiConfigured: boolean
-  claudeCliAvailable: boolean
-  claudeCliVersion: string | null
-}
-interface WorkItem {
-  id: number; title: string; workItemType: string; state: string; assignedTo?: string
-}
-interface TestPlan { id: number; name: string }
-interface TestSuite { id: number; name: string }
-interface AdoProject { id: string; name: string }
-
-function axiosMessage(e: unknown): string {
-  if (!axios.isAxiosError(e)) return String(e)
-  const d = e.response?.data as unknown
-  if (typeof d === 'string') return d
-  if (d && typeof d === 'object' && 'detail' in d) return String((d as { detail: string }).detail)
-  return e.message
-}
+// Config / EnvStatus / WorkItem / TestPlan / TestSuite / AdoProject and axiosMessage are imported
+// from the api/* feature modules + common/errors (F1).
 
 // ── Reusable parts ─────────────────────────────────────────────────────────
 
@@ -319,7 +304,7 @@ export default function SettingsPage() {
   const loadConfig = useCallback(async () => {
     setLoading(true)
     try {
-      const { data } = await axios.get<Config>('/api/settings/config')
+      const data = await getConfig()
       setConfig(data)
       setAdoOrg(String(data[K.ADO_ORG] ?? ''))
       setAdoProject(String(data[K.ADO_PROJECT] ?? ''))
@@ -351,28 +336,23 @@ export default function SettingsPage() {
   useEffect(() => { loadConfig() }, [loadConfig])
 
   useEffect(() => {
-    axios.get<{ suggestions: string[] }>('/api/settings/claude-cli/models')
-      .then(r => setClaudeCliModels(r.data.suggestions ?? []))
-      .catch(() => setClaudeCliModels([]))
+    getClaudeCliModels().then(setClaudeCliModels).catch(() => setClaudeCliModels([]))
   }, [])
 
   // Auto-fetch env so the status strip + overview cards render without clicking "Check".
   useEffect(() => {
-    axios.get<EnvStatus>('/api/diagnostics').then(r => setEnv(r.data)).catch(() => {})
+    getEnvStatus().then(setEnv).catch(() => {})
   }, [config[`${K.ADO_PAT}.set`], config[`${K.ANTHROPIC_KEY}.set`]])
 
   useEffect(() => {
-    axios.get<{ organizations: string[] }>('/api/settings/ado/orgs')
-      .then(r => setOrgs(r.data.organizations ?? []))
-      .catch(() => setOrgs([]))
+    getAdoOrgs().then(setOrgs).catch(() => setOrgs([]))
   }, [config[`${K.ADO_PAT}.set`]])
 
   useEffect(() => {
     if (!adoOrg) { setProjects([]); return }
     setProjectsLoading(true)
-    axios.get<{ projects: AdoProject[] }>('/api/settings/ado/projects',
-      { params: { organization: adoOrg } })
-      .then(r => setProjects(r.data.projects ?? []))
+    getAdoProjects(adoOrg)
+      .then(setProjects)
       .catch(() => setProjects([]))
       .finally(() => setProjectsLoading(false))
   }, [adoOrg, config[`${K.ADO_PAT}.set`]])
@@ -380,29 +360,24 @@ export default function SettingsPage() {
   useEffect(() => {
     if (!adoOrg || !adoProject) { setAreaPaths([]); return }
     setAreasLoading(true)
-    axios.get<{ areaPaths: string[] }>('/api/settings/ado/area-paths',
-      { params: { organization: adoOrg, project: adoProject } })
-      .then(r => setAreaPaths(r.data.areaPaths ?? []))
+    getAdoAreaPaths(adoOrg, adoProject)
+      .then(setAreaPaths)
       .catch(() => setAreaPaths([]))
       .finally(() => setAreasLoading(false))
   }, [adoOrg, adoProject, config[`${K.ADO_PAT}.set`]])
 
   useEffect(() => {
-    axios.get<TestPlan[]>('/api/author-tests/plans')
-      .then(r => setPlans(r.data))
-      .catch(() => setPlans([]))
+    getPlans().then(setPlans).catch(() => setPlans([]))
   }, [config[`${K.ADO_PAT}.set`]])
 
   useEffect(() => {
     if (!defaultPlan) { setSuites([]); return }
-    axios.get<TestSuite[]>(`/api/author-tests/plans/${defaultPlan}/suites`)
-      .then(r => setSuites(r.data))
-      .catch(() => setSuites([]))
+    getSuites(defaultPlan).then(setSuites).catch(() => setSuites([]))
   }, [defaultPlan])
 
   async function save(values: Record<string, string>) {
     try {
-      const { data } = await axios.put<Config>('/api/settings/config', { values })
+      const data = await saveConfig(values)
       setConfig(data)
       setToast('Saved')
       ;([
@@ -417,23 +392,21 @@ export default function SettingsPage() {
   async function checkEnv() {
     setEnvLoading(true)
     try {
-      const { data } = await axios.get<EnvStatus>('/api/diagnostics')
-      setEnv(data)
+      setEnv(await getEnvStatus())
     } catch (e) { setError(axiosMessage(e)) }
     finally { setEnvLoading(false) }
   }
   async function readWorkItem() {
     setWiError(''); setWorkItem(null); setWiLoading(true)
     try {
-      const { data } = await axios.get<WorkItem>(`/api/diagnostics/workitem/${wiId}`)
-      setWorkItem(data)
+      setWorkItem(await getWorkItem(wiId))
     } catch (e) { setWiError(axiosMessage(e)) }
     finally { setWiLoading(false) }
   }
-  async function pingLlm() {
+  async function runLlmPing() {
     setLlmError(''); setLlmReply(''); setLlmLoading(true)
     try {
-      const { data } = await axios.get<{ provider: string; reply: string }>('/api/diagnostics/llm')
+      const data = await pingLlm()
       setLlmReply(`[${data.provider}] ${data.reply}`)
     } catch (e) { setLlmError(axiosMessage(e)) }
     finally { setLlmLoading(false) }
@@ -909,9 +882,9 @@ export default function SettingsPage() {
                           </Select>
                         </FormControl>
                         <Button variant="outlined" startIcon={<VisibilityIcon />}
-                          onClick={() => window.open(
+                          onClick={() => window.open(apiUrl(
                             `/api/reports/preview?theme=${encodeURIComponent(previewTheme)}`
-                            + `&team=${encodeURIComponent(teamName)}`, '_blank')}>
+                            + `&team=${encodeURIComponent(teamName)}`), '_blank')}>
                           Preview report format
                         </Button>
                         <Typography variant="caption" color="text.secondary">
@@ -1047,7 +1020,7 @@ export default function SettingsPage() {
                       <StaggerItem>
                         <Panel title="LLM ping" hint="Pings whichever provider is currently active.">
                           <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                            <Button variant="outlined" onClick={pingLlm} disabled={llmLoading}>
+                            <Button variant="outlined" onClick={runLlmPing} disabled={llmLoading}>
                               {llmLoading ? <CircularProgress size={18} /> : 'Ping'}
                             </Button>
                             {llmReply && (
