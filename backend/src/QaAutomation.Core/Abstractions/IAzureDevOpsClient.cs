@@ -9,10 +9,13 @@ namespace QaAutomation.Core.Abstractions;
 /// </summary>
 public interface IAzureDevOpsClient
 {
-    // ── Discovery (PAT → orgs / projects / area paths) ──────────────────────
+    // ── Discovery (PAT → orgs / projects / area paths / branches) ───────────
     Task<IReadOnlyList<string>> DiscoverOrganizationsAsync(CancellationToken ct = default);
     Task<IReadOnlyList<AdoNamedRef>> DiscoverProjectsAsync(string organization, CancellationToken ct = default);
     Task<IReadOnlyList<string>> DiscoverAreaPathsAsync(string organization, string project, CancellationToken ct = default);
+
+    /// <summary>List branch (head) names for the given repository, or the configured ado.repository when null.</summary>
+    Task<IReadOnlyList<string>> DiscoverBranchesAsync(string? repository = null, CancellationToken ct = default);
 
     // ── Reads ───────────────────────────────────────────────────────────────
     Task<AdoWorkItem> GetWorkItemAsync(int workItemId, bool forceRefresh = false, CancellationToken ct = default);
