@@ -65,6 +65,71 @@ export async function generateSpec(projectId: number, req: GenerateSpecRequest):
   return data
 }
 
+// ── Module analysis (POST /api/modules/{projectId}/analyze) ──────────────────
+// Analyze a whole module: read its source + a plan/suite's existing test cases, discover every flow,
+// and map coverage (covered vs gap). Specs are then generated per flow on demand (generateFlowSpec).
+export interface ModuleAnalyzeRequest {
+  module: string
+  repository?: string
+  branch?: string
+  sourceRoot?: string
+  planId: number
+  suiteId: number
+  recurse?: boolean
+  maxFileChars?: number
+  maxBundleChars?: number
+}
+export interface ModuleFlow {
+  name: string
+  summary: string
+  covered: boolean
+  coveringTestCaseIds: number[]
+  coveringTestCaseTitles: string[]
+}
+export interface ModuleAnalyzeResult {
+  module: string
+  existingTestCaseCount: number
+  filesRead: number
+  flowCount: number
+  coveredCount: number
+  gapCount: number
+  kbDocFileName: string
+  flows: ModuleFlow[]
+}
+export async function analyzeModule(projectId: number, req: ModuleAnalyzeRequest): Promise<ModuleAnalyzeResult> {
+  const { data } = await api.post<ModuleAnalyzeResult>(`/api/modules/${projectId}/analyze`, req)
+  return data
+}
+
+// ── On-demand flow spec (POST /api/modules/{projectId}/flow-spec) ────────────
+// Generate a Playwright spec for one analyzed flow: build its detailed KB, then emit the spec.
+// Covered flow → tags its existing test case id; gap → creates + tags a new ADO Test Case.
+export interface ModuleFlowSpecRequest {
+  module: string
+  repository?: string
+  branch?: string
+  sourceRoot?: string
+  planId: number
+  suiteId: number
+  flowName: string
+  flowSummary?: string
+  coveringTestCaseIds: number[]
+  coveringTestCaseTitles?: string[]
+  storyId?: number
+  smoke?: boolean
+  outputRoot?: string
+}
+export interface ModuleFlowSpecResult {
+  flowName: string
+  wasGap: boolean
+  kbDocFileName: string
+  spec: GenerateSpecResult
+}
+export async function generateFlowSpec(projectId: number, req: ModuleFlowSpecRequest): Promise<ModuleFlowSpecResult> {
+  const { data } = await api.post<ModuleFlowSpecResult>(`/api/modules/${projectId}/flow-spec`, req)
+  return data
+}
+
 // ── Results ingest + triage (POST /api/results/{projectId}/ingest) ───────────
 export interface IngestResultsRequest {
   junitXml?: string

@@ -41,4 +41,31 @@ public sealed class ModulesController : ControllerBase
             return StatusCode(500, new { detail = e.Message });
         }
     }
+
+    /// <summary>Generate a Playwright spec for ONE analyzed flow on demand: build its detailed KB, then emit
+    /// the spec (covered flow tags its existing test case; a gap creates + tags a new ADO Test Case).</summary>
+    [HttpPost("{projectId:int}/flow-spec")]
+    public async Task<IActionResult> GenerateFlowSpec(
+        int projectId, [FromBody] ModuleFlowSpecRequest request, CancellationToken cancellationToken)
+    {
+        if (request is null)
+            return StatusCode(400, new { detail = "Request body is required." });
+        try
+        {
+            return Ok(await _analysis.GenerateFlowSpecAsync(projectId, request, cancellationToken));
+        }
+        catch (ArgumentException e)
+        {
+            return StatusCode(400, new { detail = e.Message });
+        }
+        catch (FileNotFoundException e)
+        {
+            return StatusCode(404, new { detail = e.Message });
+        }
+        catch (Exception e)
+        {
+            _log.LogError(e, "Module flow spec generation failed");
+            return StatusCode(500, new { detail = e.Message });
+        }
+    }
 }
