@@ -219,7 +219,7 @@ public sealed class BugOrchestratorTests
         public Task<IReadOnlyList<LinkedTestCase>> GetLinkedTestCasesAsync(int storyId, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<LinkedTestCase>>([]);
 
-        public Task<int> CreateBugAsync(string title, string severity, string preconditions, IReadOnlyList<string> reproSteps, string expected, string actual, string suggestedFix, string systemInfo = "", CancellationToken ct = default)
+        public Task<int> CreateBugAsync(string title, string severity, string preconditions, IReadOnlyList<string> reproSteps, string expected, string actual, string suggestedFix, string systemInfo = "", string reproHtml = "", string foundWith = "Manual Test", CancellationToken ct = default)
         {
             CreatedBugs.Add((title, severity));
             return Task.FromResult(_nextBugId++);
