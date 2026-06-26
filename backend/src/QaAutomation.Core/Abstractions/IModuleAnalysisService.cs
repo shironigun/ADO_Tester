@@ -1,0 +1,13 @@
+using QaAutomation.Core.Contracts;
+
+namespace QaAutomation.Core.Abstractions;
+
+/// <summary>
+/// Analyzes a whole module (Track A module run): reads its source and the existing test cases of a
+/// plan/suite, discovers every flow, maps coverage (covered vs gap), stores a whole-module KB doc, and
+/// returns the coverage map. Specs are generated on demand per flow afterwards.
+/// </summary>
+public interface IModuleAnalysisService
+{
+    Task<ModuleAnalyzeResult> AnalyzeAsync(int projectId, ModuleAnalyzeRequest request, CancellationToken ct = default);
+}

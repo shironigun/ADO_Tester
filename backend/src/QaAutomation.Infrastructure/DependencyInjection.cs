@@ -12,6 +12,7 @@ using QaAutomation.Infrastructure.Data;
 using QaAutomation.Infrastructure.Events;
 using QaAutomation.Infrastructure.Generation;
 using QaAutomation.Infrastructure.Knowledgebase;
+using QaAutomation.Infrastructure.Modules;
 using QaAutomation.Infrastructure.Results;
 using QaAutomation.Infrastructure.Llm;
 using QaAutomation.Infrastructure.Logging;
@@ -122,6 +123,8 @@ public static class DependencyInjection
         services.AddScoped<IGenerationService, GenerationService>();
         // Track A triage loop: JUnit run → triage failures → file house-style Bug on real bugs. Scoped.
         services.AddScoped<IResultsIngestService, ResultsIngestService>();
+        // Track A module run: source + existing cases → discover flows + coverage map. Scoped (reads KB).
+        services.AddScoped<IModuleAnalysisService, ModuleAnalysisService>();
         return services;
     }
 

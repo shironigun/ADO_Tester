@@ -30,6 +30,9 @@ internal static class AgentPrompts
     /// <summary>Failure-triage prompt — authored for Track A: a failed test → classification + bug (JSON).</summary>
     public static string FailureTriageSystem { get; } = Load("failure_triage_system.txt");
 
+    /// <summary>Module-analyzer prompt — authored for Track A: code + existing cases → flows + coverage (JSON).</summary>
+    public static string ModuleAnalyzerSystem { get; } = Load("module_analyzer_system.txt");
+
     private static string Load(string fileName)
     {
         var asm = typeof(AgentPrompts).Assembly;
