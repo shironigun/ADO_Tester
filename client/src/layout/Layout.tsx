@@ -10,6 +10,7 @@ import BugReportIcon from '@mui/icons-material/BugReportOutlined'
 import AssessmentIcon from '@mui/icons-material/AssessmentOutlined'
 import SettingsIcon from '@mui/icons-material/SettingsOutlined'
 import ScienceIcon from '@mui/icons-material/ScienceOutlined'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesomeOutlined'
 import type { ReactNode } from 'react'
 
 import ProviderSwitcher from '../components/ProviderSwitcher'
@@ -24,6 +25,7 @@ import AuthorTestsPage from '../pages/AuthorTestsPage'
 import ReportsPage from '../pages/ReportsPage'
 import ProjectsPage from '../pages/ProjectsPage'
 import FindBugsPage from '../pages/FindBugsPage'
+import QaLoopPage from '../pages/QaLoopPage'
 
 const DRAWER_WIDTH = 244
 
@@ -31,6 +33,7 @@ interface NavItem { label: string; path: string; icon: ReactNode }
 const navItems: NavItem[] = [
   { label: 'Dashboard', path: paths.dashboard, icon: <DashboardIcon /> },
   { label: 'Knowledgebase', path: paths.knowledgebase, icon: <MenuBookIcon /> },
+  { label: 'QA Loop', path: paths.qaLoop, icon: <AutoAwesomeIcon /> },
   { label: 'Author Tests', path: paths.authorTests, icon: <RuleIcon /> },
   { label: 'Find Bugs', path: paths.findBugs, icon: <BugReportIcon /> },
   { label: 'Reports', path: paths.reports, icon: <AssessmentIcon /> },
@@ -138,6 +141,7 @@ export default function Layout() {
               <Route path="/diagnostics" element={<SettingsPage />} />
               <Route path={paths.dashboard} element={<ProjectsPage />} />
               <Route path={paths.knowledgebase} element={<KnowledgebasePage />} />
+              <Route path={paths.qaLoop} element={<QaLoopPage />} />
               <Route path={paths.authorTests} element={<AuthorTestsPage />} />
               <Route path={paths.findBugs} element={<FindBugsPage />} />
               <Route path={paths.reports} element={<ReportsPage />} />
