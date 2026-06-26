@@ -1,4 +1,8 @@
+using System.Text.Json.Nodes;
+using QaAutomation.Core;
 using QaAutomation.Core.Abstractions;
+using QaAutomation.Core.Agents;
+using QaAutomation.Core.Models;
 
 namespace QaAutomation.Infrastructure.Agents;
 
@@ -24,6 +28,57 @@ public sealed class GeneratorAgent
         var prompt = BuildPrompt(module, testTitle, scenarioIntent, kbFlowMarkdown, styleReference);
         var raw = await _llm.CompleteAsync(AgentPrompts.GeneratorE2eSystem, prompt, null, progress, emit, cancellationToken);
         return CleanCode(raw);
+    }
+
+    /// <summary>Author ONE ADO Test Case (title + preconditions + steps) from a scenario and its KB flow,
+    /// so the deterministic ADO client can create it and we can tag the spec with the real id. Returns the
+    /// existing <see cref="GeneratedTestCase"/> shape (same as the Tester) for a uniform ADO write path.</summary>
+    public async Task<GeneratedTestCase> AuthorAdoTestCaseAsync(
+        string module, string scenarioTitle, string scenarioIntent, string kbFlowMarkdown,
+        StreamProgress? progress = null, Action<LlmEmit>? emit = null, CancellationToken cancellationToken = default)
+    {
+        var prompt = BuildAuthorPrompt(module, scenarioTitle, scenarioIntent, kbFlowMarkdown);
+        var data = await JsonUtils.CompleteJsonAsync(
+            _llm, AgentPrompts.TestCaseAuthorSystem, prompt, '{', progress, emit,
+            label: "TestCaseAuthor", cancellationToken: cancellationToken);
+        if (data is not JsonObject o)
+            throw new AgentException("Test-case author returned non-object JSON.");
+
+        var steps = new List<TestCaseStep>();
+        if ((o["steps"] ?? o["Steps"]) is JsonArray arr)
+            foreach (var s in arr)
+                if (s is JsonObject so)
+                    steps.Add(new TestCaseStep
+                    {
+                        Action = JsonUtils.StrOr(so, "action", "Action"),
+                        Expected = JsonUtils.StrOr(so, "expected", "Expected"),
+                    });
+
+        var title = JsonUtils.StrOr(o, "title", "Title");
+        return new GeneratedTestCase
+        {
+            Title = string.IsNullOrWhiteSpace(title) ? scenarioTitle : title,
+            Preconditions = JsonUtils.StrOr(o, "preconditions", "Preconditions"),
+            Steps = steps,
+        };
+    }
+
+    internal static string BuildAuthorPrompt(string module, string scenarioTitle, string scenarioIntent, string kbFlowMarkdown)
+    {
+        var lines = new List<string>
+        {
+            $"## Author ONE ADO Test Case for the **{module}** module.",
+            "",
+            $"**Scenario:** {scenarioTitle}",
+        };
+        if (!string.IsNullOrWhiteSpace(scenarioIntent))
+            lines.Add($"**Intent:** {scenarioIntent}");
+        lines.Add("");
+        lines.Add("## KB flow — ground the steps, preconditions, and expected results in this:");
+        lines.Add(kbFlowMarkdown);
+        lines.Add("");
+        lines.Add("Output the Test Case JSON now.");
+        return string.Join("\n", lines);
     }
 
     internal static string BuildPrompt(

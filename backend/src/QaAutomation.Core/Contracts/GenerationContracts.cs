@@ -21,8 +21,20 @@ public sealed record GenerateSpecRequest
     /// <summary>Or pass KB flow markdown directly — takes precedence over <see cref="KbFileName"/>.</summary>
     public string? KbFlowMarkdown { get; init; }
 
-    /// <summary>ADO Test Case id to embed as <c>[id]</c> in the title. Null → a <c>[TC-TODO]</c> placeholder.</summary>
+    /// <summary>ADO Test Case id to embed as <c>[id]</c> in the title. Null → either created (see
+    /// <see cref="CreateAdoTestCase"/>) or a <c>[TC-TODO]</c> placeholder.</summary>
     public int? AdoTestCaseId { get; init; }
+
+    /// <summary>When true and <see cref="AdoTestCaseId"/> is null: author a Test Case from the KB flow,
+    /// create it in ADO (deterministic client), capture its id, and tag the spec with it.</summary>
+    public bool CreateAdoTestCase { get; init; }
+
+    /// <summary>Add the created Test Case to this plan/suite (both required for the suite add). Optional.</summary>
+    public int? TestPlanId { get; init; }
+    public int? TestSuiteId { get; init; }
+
+    /// <summary>Link the created Test Case to this story via the Tested-By relation. Optional.</summary>
+    public int? StoryId { get; init; }
 
     /// <summary>Append the <c>@smoke</c> tag to the title.</summary>
     public bool Smoke { get; init; } = true;
@@ -40,7 +52,7 @@ public sealed record GenerateSpecRequest
     public bool Write { get; init; } = true;
 }
 
-/// <summary>Result of a spec generation — the code, and where it was written.</summary>
+/// <summary>Result of a spec generation — the code, where it was written, and any ADO Test Case created.</summary>
 public sealed record GenerateSpecResult
 {
     public string TestTitle { get; init; } = "";
@@ -49,4 +61,10 @@ public sealed record GenerateSpecResult
     public bool Written { get; init; }
     public int CharCount { get; init; }
     public string Code { get; init; } = "";
+
+    /// <summary>The ADO Test Case id embedded in the title (created this run, supplied, or null for TC-TODO).</summary>
+    public int? AdoTestCaseId { get; init; }
+
+    /// <summary>True when this run created the Test Case in ADO (vs. a supplied/absent id).</summary>
+    public bool AdoTestCaseCreated { get; init; }
 }
