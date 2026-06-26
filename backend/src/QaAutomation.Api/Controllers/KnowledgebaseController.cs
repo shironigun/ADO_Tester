@@ -1,6 +1,7 @@
 using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using QaAutomation.Core.Abstractions;
+using QaAutomation.Core.Contracts;
 
 namespace QaAutomation.Api.Controllers;
 
@@ -18,11 +19,14 @@ public sealed class KnowledgebaseController : ControllerBase
     private const int MaxK = 50;
 
     private readonly IKnowledgebaseService _kb;
+    private readonly IKbExtractionService _kbExtraction;
     private readonly ILogger<KnowledgebaseController> _log;
 
-    public KnowledgebaseController(IKnowledgebaseService kb, ILogger<KnowledgebaseController> log)
+    public KnowledgebaseController(
+        IKnowledgebaseService kb, IKbExtractionService kbExtraction, ILogger<KnowledgebaseController> log)
     {
         _kb = kb;
+        _kbExtraction = kbExtraction;
         _log = log;
     }
 
@@ -103,6 +107,34 @@ public sealed class KnowledgebaseController : ControllerBase
         catch (Exception e)
         {
             _log.LogError(e, "KB search failed");
+            return StatusCode(500, new { detail = e.Message });
+        }
+    }
+
+    /// <summary>Extract a module's knowledgebase from product source (Track A): reads the module's code +
+    /// existing tests from <c>SourceRoot</c>, runs the KB-extractor agent once per flow (+ rules.md), and
+    /// stores + indexes each produced doc. Long-running (one LLM call per flow); awaited.</summary>
+    [HttpPost("{projectId:int}/extract")]
+    public async Task<IActionResult> Extract(
+        int projectId, [FromBody] KbExtractionRequest request, CancellationToken cancellationToken)
+    {
+        if (request is null)
+            return StatusCode(400, new { detail = "Request body is required." });
+        try
+        {
+            return Ok(await _kbExtraction.ExtractAsync(projectId, request, cancellationToken));
+        }
+        catch (ArgumentException e)
+        {
+            return StatusCode(400, new { detail = e.Message });
+        }
+        catch (DirectoryNotFoundException e)
+        {
+            return StatusCode(400, new { detail = e.Message });
+        }
+        catch (Exception e)
+        {
+            _log.LogError(e, "KB extraction failed");
             return StatusCode(500, new { detail = e.Message });
         }
     }

@@ -18,6 +18,9 @@ internal static class AgentPrompts
     public static string ActualRuleFull { get; } = Load("actual_rule_full.txt");
     public static string ActualRuleLite { get; } = Load("actual_rule_lite.txt");
 
+    /// <summary>KB-extractor prompt — authored for Track A (NOT a Python port; safe to edit/iterate).</summary>
+    public static string KbExtractorSystem { get; } = Load("kb_extractor_system.txt");
+
     private static string Load(string fileName)
     {
         var asm = typeof(AgentPrompts).Assembly;
