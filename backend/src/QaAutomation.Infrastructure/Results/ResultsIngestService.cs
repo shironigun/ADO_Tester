@@ -71,17 +71,25 @@ public sealed class ResultsIngestService : IResultsIngestService
                 var bug = triage.Bug;
                 var artifacts = ExistingArtifacts(f.Attachments);
 
-                // Repro field: UI steps + multi-bullet observations. Evidence goes to the Attachments tab,
-                // NOT embedded here.
-                var reproHtml = BuildReproHtml(bug, triage.Observations);
+                // Backed by an existing ADO Test Case (the [id] in the title)? Then the expected result is
+                // authoritative, so use the Expected/Actual format. With no backing test case, we only have
+                // what we observed, so use the Observation format.
+                var hasTestCase = f.AdoTestCaseId is not null;
+
+                // Repro field: UI steps + (Expected/Actual when backed by a test case, else Observation).
+                // Evidence goes to the Attachments tab, NOT embedded here.
+                var reproHtml = BuildReproHtml(bug, triage.Observations, hasTestCase);
                 var systemInfo = BuildSystemInfo(f, triage);
                 _log.LogDebug("Composed auto-bug repro HTML:\n{Repro}", reproHtml);
                 _log.LogDebug("Composed auto-bug system info:\n{Sys}", systemInfo);
 
                 // NB: keep foundWith at its default. 'Custom.FoundWith' is a fixed picklist and rejects
                 // arbitrary values like "Automated Test"; the automation provenance is in System Info instead.
+                // Acceptance Criteria ("resolved when") only when there is no test case backing the expected
+                // result in the repro (the Expected/Actual route already states it, so avoid duplicating).
                 bugId = await _ado.CreateBugAsync(
-                    bug.Title, bug.Severity, preconditions: "", reproSteps: [], expected: bug.Expected,
+                    bug.Title, bug.Severity, preconditions: "", reproSteps: [],
+                    expected: hasTestCase ? "" : bug.Expected,
                     actual: "", suggestedFix: "",
                     systemInfo: systemInfo, reproHtml: reproHtml, ct: ct);
 
@@ -199,9 +207,11 @@ public sealed class ResultsIngestService : IResultsIngestService
     }
 
     /// <summary>Compose the bug's Repro Steps HTML for an auto-filed E2E bug: preconditions, a blank line,
-    /// numbered UI steps, then multi-bullet observations. Evidence is NOT embedded here (it lives on the
-    /// bug's Attachments tab).</summary>
-    private static string BuildReproHtml(GeneratedBug bug, List<string> observations)
+    /// numbered UI steps, then the result section. When the failure is backed by an existing ADO Test Case
+    /// (<paramref name="hasTestCase"/>) the expected result is authoritative, so render Expected Result +
+    /// Actual Result; otherwise render an Observation list (we only have what we saw). Evidence is NOT
+    /// embedded here (it lives on the bug's Attachments tab).</summary>
+    private static string BuildReproHtml(GeneratedBug bug, List<string> observations, bool hasTestCase)
     {
         var sb = new StringBuilder();
         if (!string.IsNullOrWhiteSpace(bug.Preconditions))
@@ -215,10 +225,23 @@ public sealed class ResultsIngestService : IResultsIngestService
             sb.Append($"<li>{Esc(s)}</li>");
         sb.Append("</ol>");
 
-        sb.Append("<div><b>OBSERVATION:</b></div><ul>");
-        foreach (var o in observations)
-            sb.Append($"<li>{Esc(o)}</li>");
-        sb.Append("</ul>");
+        if (hasTestCase && !string.IsNullOrWhiteSpace(bug.Expected))
+        {
+            sb.Append("<br/><div><b>Expected Result:</b></div><ul>");
+            sb.Append($"<li>{Esc(bug.Expected)}</li>");
+            sb.Append("</ul>");
+            sb.Append("<div><b>Actual Result:</b></div><ul>");
+            foreach (var o in observations)
+                sb.Append($"<li>{Esc(o)}</li>");
+            sb.Append("</ul>");
+        }
+        else
+        {
+            sb.Append("<div><b>OBSERVATION:</b></div><ul>");
+            foreach (var o in observations)
+                sb.Append($"<li>{Esc(o)}</li>");
+            sb.Append("</ul>");
+        }
 
         return sb.ToString();
     }
