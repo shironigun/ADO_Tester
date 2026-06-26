@@ -46,8 +46,14 @@ public interface IAzureDevOpsClient
     Task LinkTestedByAsync(int storyId, int testCaseId, CancellationToken ct = default);
     Task<int> CreateBugAsync(
         string title, string severity, string preconditions, IReadOnlyList<string> reproSteps,
-        string expected, string actual, string suggestedFix, CancellationToken ct = default);
+        string expected, string actual, string suggestedFix, string systemInfo = "", CancellationToken ct = default);
     Task LinkRelatedAsync(int fromId, int toId, CancellationToken ct = default);
+
+    /// <summary>Upload a binary as an ADO attachment; returns the attachment reference URL to link onto a WI.</summary>
+    Task<string> UploadAttachmentAsync(string fileName, byte[] content, CancellationToken ct = default);
+
+    /// <summary>Link an already-uploaded attachment onto a work item as an AttachedFile relation.</summary>
+    Task AddWorkItemAttachmentLinkAsync(int workItemId, string attachmentUrl, string? comment = null, CancellationToken ct = default);
 
     // ── Git repo reads + Code Search (code-analysis phase) ──────────────────
     Task<IReadOnlyList<AdoNamedRef>> ListRepositoriesAsync(CancellationToken ct = default);

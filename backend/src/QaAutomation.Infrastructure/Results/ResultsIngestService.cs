@@ -68,9 +68,14 @@ public sealed class ResultsIngestService : IResultsIngestService
             if (request.FileBugs && triage.Classification == "real_bug")
             {
                 var bug = triage.Bug;
-                var actual = AppendArtifacts(bug.Actual, f);
+                // Which artifacts actually exist on disk and fit the size cap (so System Info is honest).
+                var artifacts = ExistingArtifacts(f.Attachments);
+                // Machine/test traceability goes in System Info — NOT in the human-facing repro/actual.
+                var systemInfo = BuildSystemInfo(f, triage, artifacts);
+
                 bugId = await _ado.CreateBugAsync(
-                    bug.Title, bug.Severity, bug.Preconditions, bug.ReproSteps, bug.Expected, actual, bug.SuggestedFix, ct);
+                    bug.Title, bug.Severity, bug.Preconditions, bug.ReproSteps, bug.Expected, bug.Actual, bug.SuggestedFix,
+                    systemInfo: systemInfo, ct: ct);
 
                 // Link to the failing Test Case (preferred) and optionally the story. Best-effort.
                 if (f.AdoTestCaseId is int tcId)
@@ -78,9 +83,13 @@ public sealed class ResultsIngestService : IResultsIngestService
                 if (request.StoryId is int story)
                     await TryLinkAsync(bugId.Value, story, "story");
 
+                // Upload the real evidence files as ADO attachments on the bug.
+                await AttachArtifactsAsync(bugId.Value, artifacts, ct);
+
                 didFile = true;
                 filed++;
-                _log.LogInformation("Filed Bug #{Bug} for '{Test}' [{Sev}]", bugId, f.Name, bug.Severity);
+                _log.LogInformation("Filed Bug #{Bug} for '{Test}' [{Sev}] with {N} attachment(s)",
+                    bugId, f.Name, bug.Severity, artifacts.Count);
             }
 
             outcomes.Add(new FailureOutcome
@@ -94,6 +103,10 @@ public sealed class ResultsIngestService : IResultsIngestService
                 BugId = bugId,
                 BugTitle = triage.Bug.Title,
                 Severity = triage.Bug.Severity,
+                Preconditions = triage.Bug.Preconditions,
+                ReproSteps = triage.Bug.ReproSteps,
+                Expected = triage.Bug.Expected,
+                Actual = triage.Bug.Actual,
                 Artifacts = f.Attachments,
             });
         }
@@ -133,16 +146,67 @@ public sealed class ResultsIngestService : IResultsIngestService
         }
     }
 
-    /// <summary>Append the run's failure artifacts (screenshot/video/trace paths) to the bug's actual text.
-    /// NOTE: binary upload into the ADO Bug is a follow-up — the client has no attachment API yet.</summary>
-    private static string AppendArtifacts(string actual, FailedTest f)
+    private const long MaxAttachmentBytes = 25_000_000;   // 25 MB — skip larger artifacts (e.g. long videos)
+
+    /// <summary>Filter the parsed attachment paths to files that exist on disk and fit the size cap.</summary>
+    private List<(string Path, string Name)> ExistingArtifacts(IReadOnlyList<string> paths)
     {
-        if (f.Attachments.Count == 0)
-            return actual;
-        var sb = new StringBuilder(actual);
-        sb.Append("\n\nEvidence captured by the test run (attach to this bug):");
-        foreach (var a in f.Attachments)
-            sb.Append("\n- ").Append(a);
+        var result = new List<(string, string)>();
+        foreach (var p in paths)
+        {
+            try
+            {
+                var fi = new FileInfo(p);
+                if (!fi.Exists) { _log.LogWarning("Artifact not found on disk, skipping: {Path}", p); continue; }
+                if (fi.Length > MaxAttachmentBytes) { _log.LogWarning("Artifact too large ({MB} MB), skipping: {Path}", fi.Length / 1_000_000, p); continue; }
+                result.Add((p, Path.GetFileName(p)));
+            }
+            catch (Exception e) { _log.LogWarning(e, "Could not stat artifact {Path}", p); }
+        }
+        return result;
+    }
+
+    /// <summary>Upload each evidence file as an ADO attachment and link it onto the bug. Best-effort per file.</summary>
+    private async Task AttachArtifactsAsync(int bugId, List<(string Path, string Name)> artifacts, CancellationToken ct)
+    {
+        foreach (var (path, name) in artifacts)
+        {
+            try
+            {
+                var bytes = await File.ReadAllBytesAsync(path, ct);
+                var url = await _ado.UploadAttachmentAsync(name, bytes, ct);
+                if (!string.IsNullOrEmpty(url))
+                    await _ado.AddWorkItemAttachmentLinkAsync(bugId, url, "E2E run artifact", ct);
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                _log.LogWarning(e, "Could not attach artifact {Name} to bug #{Bug}", name, bugId);
+            }
+        }
+    }
+
+    /// <summary>Build the bug's System Info HTML — the machine/test traceability that does NOT belong in the
+    /// human-facing repro: which automated test failed, its ADO Test Case, the triage verdict, the raw
+    /// failure, and the attached evidence.</summary>
+    private static string BuildSystemInfo(
+        FailedTest f, Agents.FailureTriageResult triage, List<(string Path, string Name)> artifacts)
+    {
+        var sb = new StringBuilder();
+        sb.Append("<div><b>Found by:</b> automated E2E test (Playwright)</div>");
+        sb.Append($"<div><b>Automated test:</b> {Esc(f.Name)}</div>");
+        if (f.AdoTestCaseId is int id)
+            sb.Append($"<div><b>ADO Test Case:</b> #{id}</div>");
+        sb.Append($"<div><b>Triage:</b> {Esc(triage.Classification)} ({Esc(triage.Confidence)} confidence)</div>");
+        if (!string.IsNullOrWhiteSpace(triage.Reason))
+            sb.Append($"<div><b>Triage reasoning:</b> {Esc(triage.Reason)}</div>");
+        if (!string.IsNullOrWhiteSpace(f.Message))
+            sb.Append($"<div><b>Test failure:</b> {Esc(f.Message)}</div>");
+        sb.Append(artifacts.Count > 0
+            ? $"<div><b>Evidence:</b> {Esc(string.Join(", ", artifacts.Select(a => a.Name)))} — attached to this bug</div>"
+            : "<div><b>Evidence:</b> none captured by the run</div>");
         return sb.ToString();
     }
+
+    private static string Esc(string s) => s
+        .Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;").Replace("'", "&#x27;");
 }

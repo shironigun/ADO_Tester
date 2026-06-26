@@ -219,7 +219,7 @@ public sealed class BugOrchestratorTests
         public Task<IReadOnlyList<LinkedTestCase>> GetLinkedTestCasesAsync(int storyId, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<LinkedTestCase>>([]);
 
-        public Task<int> CreateBugAsync(string title, string severity, string preconditions, IReadOnlyList<string> reproSteps, string expected, string actual, string suggestedFix, CancellationToken ct = default)
+        public Task<int> CreateBugAsync(string title, string severity, string preconditions, IReadOnlyList<string> reproSteps, string expected, string actual, string suggestedFix, string systemInfo = "", CancellationToken ct = default)
         {
             CreatedBugs.Add((title, severity));
             return Task.FromResult(_nextBugId++);
@@ -230,6 +230,9 @@ public sealed class BugOrchestratorTests
             RelatedLinks.Add((fromId, toId));
             return Task.CompletedTask;
         }
+
+        public Task<string> UploadAttachmentAsync(string fileName, byte[] content, CancellationToken ct = default) => Task.FromResult($"https://attachments/{fileName}");
+        public Task AddWorkItemAttachmentLinkAsync(int workItemId, string attachmentUrl, string? comment = null, CancellationToken ct = default) => Task.CompletedTask;
 
         // ── unused ────────────────────────────────────────────────────────────
         public Task<IReadOnlyList<string>> DiscoverOrganizationsAsync(CancellationToken ct = default) => throw new NotImplementedException();
