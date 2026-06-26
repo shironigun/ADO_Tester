@@ -224,6 +224,9 @@ public sealed class ResultsIngestService : IResultsIngestService
         if (!string.IsNullOrWhiteSpace(bug.Preconditions))
             sb.Append($"<div><b>Preconditions:</b> {Esc(bug.Preconditions)}</div>");
 
+        // Blank line before the steps (separates them from the preconditions).
+        if (sb.Length > 0)
+            sb.Append("<br/>");
         sb.Append("<div><b>Steps to reproduce:</b></div><ol>");
         foreach (var s in bug.ReproSteps)
             sb.Append($"<li>{Esc(s)}</li>");
