@@ -46,5 +46,12 @@ public sealed record FailureOutcome
     public int? BugId { get; init; }
     public string BugTitle { get; init; } = "";
     public string Severity { get; init; } = "";
+
+    // The composed bug content (always populated — a dry run is a true preview of what would be filed).
+    public string Preconditions { get; init; } = "";
+    public List<string> ReproSteps { get; init; } = [];
+    public string Expected { get; init; } = "";
+    public string Actual { get; init; } = "";
+
     public List<string> Artifacts { get; init; } = [];
 }

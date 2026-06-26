@@ -388,7 +388,7 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
 
     public async Task<int> CreateBugAsync(
         string title, string severity, string preconditions, IReadOnlyList<string> reproSteps,
-        string expected, string actual, string suggestedFix, CancellationToken ct = default)
+        string expected, string actual, string suggestedFix, string systemInfo = "", CancellationToken ct = default)
     {
         // Repro in the house anatomy: optional preconditions, env-first <ul> steps, bold OBSERVATION,
         // then a screenshot placeholder (spec §5.5 — frozen order).
@@ -412,6 +412,10 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
         var sysInfo = "";
         if (!string.IsNullOrWhiteSpace(suggestedFix))
             sysInfo = $"<div><b>Suggested fix:</b> {HtmlEscape(suggestedFix)}</div>";
+        // Optional pre-built HTML block (e.g. automation/triage traceability) — the caller escapes it.
+        // Empty for manual bugs, so their SystemInfo stays byte-identical (golden parity preserved).
+        if (!string.IsNullOrWhiteSpace(systemInfo))
+            sysInfo += systemInfo;
 
         var sevValue = severity switch
         {
@@ -458,6 +462,32 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
         };
         var url = $"{Opts.BaseUrl}/_apis/wit/workitems/{fromId}?api-version={Opts.ApiVersion}";
         using var _ = await SendDocAsync(HttpMethod.Patch, url, body, "application/json-patch+json", $"Link {fromId} <-> {toId} as Related", ct);
+    }
+
+    public async Task<string> UploadAttachmentAsync(string fileName, byte[] content, CancellationToken ct = default)
+    {
+        var safeName = Uri.EscapeDataString(string.IsNullOrWhiteSpace(fileName) ? "attachment" : fileName);
+        var url = $"{Opts.BaseUrl}/_apis/wit/attachments?fileName={safeName}&api-version={Opts.ApiVersion}";
+        using var req = new HttpRequestMessage(HttpMethod.Post, url) { Content = new ByteArrayContent(content) };
+        req.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+        using var r = await _http.SendAsync(req, ct);
+        await EnsureOkAsync(r, $"Upload attachment {fileName}", ct);
+        using var doc = JsonDocument.Parse(await r.Content.ReadAsStringAsync(ct) is { Length: > 0 } s ? s : "{}");
+        return doc.RootElement.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
+    }
+
+    public async Task AddWorkItemAttachmentLinkAsync(
+        int workItemId, string attachmentUrl, string? comment = null, CancellationToken ct = default)
+    {
+        var rel = new JsonObject { ["rel"] = "AttachedFile", ["url"] = attachmentUrl };
+        if (!string.IsNullOrWhiteSpace(comment))
+            rel["attributes"] = new JsonObject { ["comment"] = comment };
+        var body = new JsonArray
+        {
+            new JsonObject { ["op"] = "add", ["path"] = "/relations/-", ["value"] = rel },
+        };
+        var url = $"{Opts.BaseUrl}/_apis/wit/workitems/{workItemId}?api-version={Opts.ApiVersion}";
+        using var _ = await SendDocAsync(HttpMethod.Patch, url, body, "application/json-patch+json", $"Attach file to WI {workItemId}", ct);
     }
 
     // ── Reports query + enrichment ──────────────────────────────────────────
