@@ -905,6 +905,29 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
         catch (JsonException) { return raw; }  // some responses return raw text
     }
 
+    public async Task<IReadOnlyList<string>> ListRepoFilePathsAsync(
+        string scopePath, string? branch = null, string? repoId = null, CancellationToken ct = default)
+    {
+        var rid = repoId ?? await ResolveRepositoryIdAsync(null, ct);
+        var version = string.IsNullOrWhiteSpace(branch) ? Opts.DefaultBranch : branch!;
+        var scope = string.IsNullOrWhiteSpace(scopePath) ? "/" : (scopePath.StartsWith('/') ? scopePath : "/" + scopePath);
+        var url = $"{Opts.BaseUrl}/_apis/git/repositories/{rid}/items" +
+                  $"?scopePath={Quote(scope)}&recursionLevel=Full" +
+                  $"&versionDescriptor.version={Quote(version)}&versionDescriptor.versionType=branch" +
+                  $"&api-version={Opts.ApiVersion}";
+        using var doc = await GetDocAsync(url, $"List items {scope}", ct);
+        var paths = new List<string>();
+        foreach (var item in Array(doc.RootElement, "value"))
+        {
+            if (item.TryGetProperty("isFolder", out var f) && f.ValueKind == JsonValueKind.True)
+                continue;
+            var p = GetStr(item, "path");
+            if (!string.IsNullOrEmpty(p))
+                paths.Add(p!.TrimStart('/'));
+        }
+        return paths;
+    }
+
     public async Task<IReadOnlyList<string>> SearchCodeAsync(string text, int top = 20, string? repoId = null, CancellationToken ct = default)
     {
         var org = Opts.Organization.Trim('/');

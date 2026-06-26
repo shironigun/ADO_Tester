@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Alert, Box, Button, Chip, CircularProgress, Collapse, Divider, FormControlLabel,
   Link, Snackbar, Stack, Switch, TextField, Typography,
@@ -17,9 +17,10 @@ import {
   extractKb, generateSpec, ingestResults, adoWorkItemUrl,
   type KbExtractionResult, type GenerateSpecResult, type IngestResultsResult, type FailureOutcome,
 } from '../api/qaLoop'
+import { getConfig } from '../api/settings'
 
-const DEFAULT_SOURCE_ROOT = 'C:\\Users\\temp\\Downloads\\Projects\\TCRN\\Your Repo'
-const AUTOMATION_SUFFIX = '\\web-app\\src\\target-crm\\automation'
+// Local write target for generated specs (the /automation folder in a local clone). Editable per run.
+const DEFAULT_OUTPUT_ROOT = 'C:\\Users\\temp\\Downloads\\Projects\\TCRN\\Your Repo\\web-app\\src\\target-crm\\automation'
 
 const classColor = (c: string): 'error' | 'warning' | 'info' | 'default' =>
   c === 'real_bug' ? 'error' : c === 'flaky' ? 'warning' : c === 'test_issue' ? 'info' : 'default'
@@ -27,10 +28,25 @@ const classLabel = (c: string) =>
   ({ real_bug: 'Real bug', flaky: 'Flaky', test_issue: 'Test issue', stale_test: 'Stale test' } as Record<string, string>)[c] ?? c
 
 export default function QaLoopPage() {
-  // Shared context
+  // Shared context — source = which ADO repo + branch (defaults from Settings, overridable here)
   const [module, setModule] = useState('deals')
-  const [sourceRoot, setSourceRoot] = useState(DEFAULT_SOURCE_ROOT)
+  const [repository, setRepository] = useState('')
+  const [branch, setBranch] = useState('')
+  const [settingsHint, setSettingsHint] = useState('')
   const [toast, setToast] = useState('')
+
+  // Prefill repo + branch from Settings (ado.repository / ado.default_branch).
+  useEffect(() => {
+    getConfig()
+      .then(cfg => {
+        const repo = String(cfg['ado.repository'] ?? '')
+        const br = String(cfg['ado.default_branch'] ?? '')
+        setRepository(repo)
+        setBranch(br)
+        setSettingsHint(repo ? `Defaulted from Settings: ${repo}${br ? ` @ ${br}` : ''}` : 'Set a default repository in Settings, or enter one here.')
+      })
+      .catch(() => setSettingsHint('Could not load Settings — enter a repository + branch.'))
+  }, [])
 
   // 1 — Extract
   const [flows, setFlows] = useState('Create Deal')
@@ -43,6 +59,7 @@ export default function QaLoopPage() {
   const [kbFileName, setKbFileName] = useState('deals-create-deal.md')
   const [createAdo, setCreateAdo] = useState(true)
   const [genStoryId, setGenStoryId] = useState('')
+  const [outputRoot, setOutputRoot] = useState(DEFAULT_OUTPUT_ROOT)
   const [generating, setGenerating] = useState(false)
   const [genResult, setGenResult] = useState<GenerateSpecResult | null>(null)
   const [genError, setGenError] = useState('')
@@ -61,7 +78,12 @@ export default function QaLoopPage() {
     setKbError(''); setExtracting(true); setKbResult(null)
     try {
       const flowList = flows.split(',').map(s => s.trim()).filter(Boolean)
-      const res = await extractKb(PROJECT_ID, { module, sourceRoot, flows: flowList })
+      const res = await extractKb(PROJECT_ID, {
+        module,
+        repository: repository.trim() || undefined,
+        branch: branch.trim() || undefined,
+        flows: flowList,
+      })
       setKbResult(res)
       setToast(`Extracted ${res.docs.length} KB doc(s) from ${res.filesRead} file(s)`)
     } catch (e) { setKbError(axiosMessage(e)) }
@@ -77,9 +99,7 @@ export default function QaLoopPage() {
         kbFileName,
         createAdoTestCase: createAdo,
         storyId: genStoryId.trim() ? Number(genStoryId) : undefined,
-        sourceRoot,
-        outputRoot: sourceRoot + AUTOMATION_SUFFIX,
-        styleReferencePath: `web-app/src/target-crm/tests-e2e/${module}`,
+        outputRoot,
         smoke: true,
       })
       setGenResult(res)
@@ -112,12 +132,16 @@ export default function QaLoopPage() {
 
       <Stack spacing={3} sx={{ maxWidth: 980 }}>
 
-        {/* Shared context */}
+        {/* Shared context — the source: which repo + which branch (from Settings, overridable) */}
         <Section title="Context">
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
-            <TextField size="small" label="Module" value={module} onChange={e => setModule(e.target.value)} sx={{ width: { sm: 160 } }} />
-            <TextField size="small" fullWidth label="Source repo root (local clone)" value={sourceRoot} onChange={e => setSourceRoot(e.target.value)} />
+            <TextField size="small" label="Module" value={module} onChange={e => setModule(e.target.value)} sx={{ width: { sm: 140 } }} />
+            <TextField size="small" fullWidth label="Source repository (Azure Repos)" value={repository} onChange={e => setRepository(e.target.value)} />
+            <TextField size="small" label="Branch" value={branch} onChange={e => setBranch(e.target.value)} sx={{ width: { sm: 200 } }} placeholder="main" />
           </Stack>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.75, display: 'block' }}>
+            {settingsHint} · Source code is read from this repo + branch (override per run here).
+          </Typography>
         </Section>
 
         {/* 1 — Extract KB */}
@@ -127,7 +151,7 @@ export default function QaLoopPage() {
               helperText="One KB doc per flow, plus a module rules.md." />
             <Box>
               <Button variant="contained" startIcon={<MenuBookIcon />} onClick={onExtract}
-                disabled={extracting || !module.trim() || !sourceRoot.trim() || !flows.trim()}>
+                disabled={extracting || !module.trim() || !flows.trim()}>
                 {extracting ? <CircularProgress size={18} sx={{ color: 'white' }} /> : 'Extract KB'}
               </Button>
             </Box>
@@ -161,9 +185,9 @@ export default function QaLoopPage() {
                 label="Create ADO Test Case" />
               <TextField size="small" label="Link to story id (optional)" value={genStoryId} onChange={e => setGenStoryId(e.target.value)} sx={{ width: 200 }} />
             </Stack>
-            <Typography variant="caption" color="text.secondary">
-              Writes to <code>{sourceRoot}{AUTOMATION_SUFFIX}\e2e\{module}\</code>
-            </Typography>
+            <TextField size="small" fullWidth label="Output /automation root (local write target)" value={outputRoot}
+              onChange={e => setOutputRoot(e.target.value)}
+              helperText={`Spec is written to …\\e2e\\${module}\\`} />
             <Box>
               <Button variant="contained" startIcon={<CodeIcon />} onClick={onGenerate}
                 disabled={generating || !module.trim() || !scenarioTitle.trim() || !kbFileName.trim()}>

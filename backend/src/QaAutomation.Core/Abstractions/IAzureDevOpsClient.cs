@@ -67,5 +67,9 @@ public interface IAzureDevOpsClient
     Task<IReadOnlyList<ChangedFile>> GetCommitDiffAsync(string sha, string? repoId = null, CancellationToken ct = default);
     Task<IReadOnlyList<string>> GetCommitsForPathAsync(string path, int top = 5, string? repoId = null, CancellationToken ct = default);
     Task<string> GetFileContentAsync(string path, string? @ref = null, string? repoId = null, string versionType = "branch", CancellationToken ct = default);
+
+    /// <summary>List the (non-folder) file paths under a repo scope path, recursively, at a branch.
+    /// Repo-relative paths (no leading slash). Used to read a module's source straight from Azure Repos.</summary>
+    Task<IReadOnlyList<string>> ListRepoFilePathsAsync(string scopePath, string? branch = null, string? repoId = null, CancellationToken ct = default);
     Task<IReadOnlyList<string>> SearchCodeAsync(string text, int top = 20, string? repoId = null, CancellationToken ct = default);
 }
