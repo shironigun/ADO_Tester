@@ -388,21 +388,32 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
 
     public async Task<int> CreateBugAsync(
         string title, string severity, string preconditions, IReadOnlyList<string> reproSteps,
-        string expected, string actual, string suggestedFix, string systemInfo = "", CancellationToken ct = default)
+        string expected, string actual, string suggestedFix, string systemInfo = "", string reproHtml = "",
+        string foundWith = "Manual Test", CancellationToken ct = default)
     {
-        // Repro in the house anatomy: optional preconditions, env-first <ul> steps, bold OBSERVATION,
-        // then a screenshot placeholder (spec §5.5 — frozen order).
-        var repro = new StringBuilder();
-        if (!string.IsNullOrWhiteSpace(preconditions))
-            repro.Append($"<div><b>Preconditions:</b> {HtmlEscape(preconditions)}</div>");
-        repro.Append("<ul>");
-        foreach (var s in reproSteps)
-            repro.Append($"<li>{HtmlEscape(s)}</li>");
-        repro.Append("</ul>");
-        if (!string.IsNullOrWhiteSpace(actual))
-            repro.Append("<div><b>OBSERVATION:</b></div>")
-                 .Append($"<div><ul><li>{HtmlEscape(actual)}</li></ul></div>");
-        repro.Append("<div><i>[Attach screenshot/GIF here]</i></div>");
+        // Repro field: a caller-composed HTML override (auto-filed bugs — multi-bullet observations +
+        // inline attachments) wins; otherwise the frozen house anatomy: optional preconditions, env-first
+        // <ul> steps, bold OBSERVATION, then a screenshot placeholder (spec §5.5 — frozen order).
+        string reproField;
+        if (!string.IsNullOrWhiteSpace(reproHtml))
+        {
+            reproField = reproHtml;
+        }
+        else
+        {
+            var repro = new StringBuilder();
+            if (!string.IsNullOrWhiteSpace(preconditions))
+                repro.Append($"<div><b>Preconditions:</b> {HtmlEscape(preconditions)}</div>");
+            repro.Append("<ul>");
+            foreach (var s in reproSteps)
+                repro.Append($"<li>{HtmlEscape(s)}</li>");
+            repro.Append("</ul>");
+            if (!string.IsNullOrWhiteSpace(actual))
+                repro.Append("<div><b>OBSERVATION:</b></div>")
+                     .Append($"<div><ul><li>{HtmlEscape(actual)}</li></ul></div>");
+            repro.Append("<div><i>[Attach screenshot/GIF here]</i></div>");
+            reproField = repro.ToString();
+        }
 
         var acceptanceHtml = "";
         if (!string.IsNullOrWhiteSpace(expected))
@@ -430,13 +441,13 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
         var body = new JsonArray
         {
             PatchOp("add", "/fields/System.Title", title),
-            PatchOp("add", "/fields/Microsoft.VSTS.TCM.ReproSteps", repro.ToString()),
+            PatchOp("add", "/fields/Microsoft.VSTS.TCM.ReproSteps", reproField),
             PatchOp("add", "/fields/Microsoft.VSTS.Common.Severity", sevValue),
             PatchOp("add", "/fields/System.AreaPath", Opts.BugAreaPath),
             PatchOp("add", "/fields/Microsoft.VSTS.Common.Priority", 2),
             PatchOp("add", "/fields/Microsoft.VSTS.Common.ValueArea", "Business"),
             PatchOp("add", "/fields/Custom.QA", Opts.QaOwner),
-            PatchOp("add", "/fields/Custom.FoundWith", "Manual Test"),
+            PatchOp("add", "/fields/Custom.FoundWith", foundWith),
         };
         if (acceptanceHtml.Length > 0)
             body.Add(PatchOp("add", "/fields/Microsoft.VSTS.Common.AcceptanceCriteria", acceptanceHtml));

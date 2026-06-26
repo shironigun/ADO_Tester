@@ -10,10 +10,10 @@ Output ONLY a JSON object — no prose, no markdown fences:
   "bug": {
     "title": "<concise, specific, user-facing bug title>",
     "severity": "Critical" | "High" | "Medium" | "Low",
-    "preconditions": "<at most ONE short user-facing line, or empty>",
-    "reproSteps": ["<UI step 1>", "<UI step 2>", "..."],
+    "preconditions": "<ONE short user-facing line: the required starting state>",
+    "reproSteps": ["<first action AFTER the preconditions hold>", "..."],
     "expected": "<user-facing correct outcome>",
-    "actual": "<user-facing symptom; one concise technical signal allowed>",
+    "actual": ["<observation 1>", "<observation 2>"],
     "suggestedFix": "<brief hypothesis, or '' if unknown>"
   }
 }
@@ -24,24 +24,25 @@ Classification guide:
 - test_issue: the test or its selector is wrong — it targeted a control that legitimately changed, or made a bad assumption. The product is fine.
 - stale_test: the requirement changed and the test now encodes outdated expected behavior.
 
-THIS IS AN E2E UI BUG — write it the way a manual QA would, so a human can reproduce it in a browser top to bottom:
-- reproSteps: a NUMBERED list of concrete UI actions a tester performs in the browser. START by logging in to the environment, and INCLUDE any data/environment setup as explicit steps (e.g. "Create a pipeline with at least one stage"). Navigate using visible menu/button/field labels. The LAST step is the action that triggers the defect.
-- Do NOT put implementation detail anywhere in reproSteps or preconditions — no Redux/store state, no internal ids (e.g. dmsDealerIdCrm, crmUserId), no component flags. Those are invisible to a tester.
-- preconditions: at most ONE short user-facing line (environment + role), or "". Prefer turning setup into reproSteps over listing abstract preconditions.
-- expected: the user-facing correct outcome.
-- actual: the user-facing symptom. You MAY add ONE concise technical signal if it strengthens the report — e.g. "...and a POST /lead/deal/addNewDeal/ request is issued, creating a deal with no customer". Keep it to a clause, not a stack trace.
-- Ground step labels and navigation in the KB flow (Entry, nav path, button/field text). If a setup step's exact navigation is not in the KB, write your best-effort UI step and append "(confirm exact navigation)" — never substitute internal detail.
+THIS IS AN E2E UI BUG — write it the way a manual QA would, so a human can reproduce it in a browser:
 
-Example of the reproSteps style (format, not content):
+- preconditions: ONE short user-facing line stating the required STARTING STATE — e.g. "Logged in to the QA environment with access to the Deals module; at least one pipeline with a stage exists." This is the state before step 1.
+- reproSteps: a NUMBERED list of the UI actions a tester takes FROM that starting state. The FIRST step is the first real navigation/action. Do NOT include a "log in" step and do NOT restate anything already in preconditions — they are assumed true. Navigate using visible menu/button/field labels; the LAST step triggers the defect.
+- Never put implementation detail in preconditions or reproSteps — no Redux/store state, no internal ids (e.g. dmsDealerIdCrm, crmUserId), no component flags. They are invisible to a tester.
+- expected: the user-facing correct outcome.
+- actual: an ARRAY of DISTINCT observations, each ONE fact (it renders as a separate bullet). Put any technical signal as its OWN bullet — e.g. ["No 'Customer Required' validation appears and the drawer closes", "A POST /lead/deal/addNewDeal/ request is issued, creating a deal with no customer"].
+- Ground step labels/navigation in the KB flow (Entry, nav path, button/field text). If a step's exact navigation is not in the KB, write your best-effort UI step and append "(confirm exact navigation)".
+
+Example reproSteps (note: NO login step — preconditions already covers being logged in):
 [
-  "Log in to YourProduct (QA environment)",
-  "Go to Settings -> Deals and create a new pipeline with at least one stage",
-  "Open the Deals module and switch to the newly created pipeline",
-  "Click \"New\" to open the Add Deal drawer",
-  "Leave the Customer field empty, fill the other required fields, and click \"Save\""
+  "Open the Deals module — the Kanban board loads",
+  "Click \"New\" in the board toolbar to open the Add New Deal drawer",
+  "Leave the Customer field ('Type a customer name') empty",
+  "Fill the other required fields (Deal Type, Pipeline, Stage)",
+  "Click \"Save\""
 ]
 
 Rules:
 - Describe only what the failure supports — do not invent unrelated defects.
 - Always fill the "bug" object faithfully (it is consumed only when classification is real_bug).
-- Severity: weigh user impact — a blocked core action or data integrity issue is High/Critical; a cosmetic or edge issue is Low/Medium.
+- Severity: weigh user impact — a blocked core action or data-integrity issue is High/Critical; a cosmetic or edge issue is Low/Medium.

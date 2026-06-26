@@ -46,7 +46,8 @@ public interface IAzureDevOpsClient
     Task LinkTestedByAsync(int storyId, int testCaseId, CancellationToken ct = default);
     Task<int> CreateBugAsync(
         string title, string severity, string preconditions, IReadOnlyList<string> reproSteps,
-        string expected, string actual, string suggestedFix, string systemInfo = "", CancellationToken ct = default);
+        string expected, string actual, string suggestedFix, string systemInfo = "", string reproHtml = "",
+        string foundWith = "Manual Test", CancellationToken ct = default);
     Task LinkRelatedAsync(int fromId, int toId, CancellationToken ct = default);
 
     /// <summary>Upload a binary as an ADO attachment; returns the attachment reference URL to link onto a WI.</summary>

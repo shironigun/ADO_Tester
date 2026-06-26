@@ -51,7 +51,7 @@ public sealed record FailureOutcome
     public string Preconditions { get; init; } = "";
     public List<string> ReproSteps { get; init; } = [];
     public string Expected { get; init; } = "";
-    public string Actual { get; init; } = "";
+    public List<string> Observations { get; init; } = [];   // actual behavior, one fact per bullet
 
     public List<string> Artifacts { get; init; } = [];
 }

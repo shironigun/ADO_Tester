@@ -7,8 +7,10 @@ using QaAutomation.Core.Models;
 namespace QaAutomation.Infrastructure.Agents;
 
 /// <summary>The triage verdict for one failed test: a classification + an authored house-style bug
-/// (the bug is only filed when <see cref="Classification"/> is <c>real_bug</c>).</summary>
-public sealed record FailureTriageResult(string Classification, string Confidence, string Reason, GeneratedBug Bug);
+/// (the bug is only filed when <see cref="Classification"/> is <c>real_bug</c>). <see cref="Observations"/>
+/// is the actual behavior as distinct bullets (each renders as its own list item).</summary>
+public sealed record FailureTriageResult(
+    string Classification, string Confidence, string Reason, GeneratedBug Bug, List<string> Observations);
 
 /// <summary>
 /// Failure-triage agent (Track A) — given a failed Playwright test (title + failure message/stack) and,
@@ -47,6 +49,8 @@ public sealed class FailureTriageAgent
             confidence = "medium";
 
         var bugObj = o["bug"] as JsonObject ?? new JsonObject();
+        // "actual" may be an array (preferred — one observation per bullet) or a single string.
+        var observations = JsonUtils.CoerceStringList(bugObj["actual"] ?? bugObj["Actual"]);
         var bug = new GeneratedBug
         {
             Title = JsonUtils.StrOr(bugObj, "title"),
@@ -54,11 +58,11 @@ public sealed class FailureTriageAgent
             Preconditions = JsonUtils.StrOr(bugObj, "preconditions"),
             ReproSteps = JsonUtils.CoerceStringList(bugObj["reproSteps"] ?? bugObj["ReproSteps"]),
             Expected = JsonUtils.StrOr(bugObj, "expected"),
-            Actual = JsonUtils.StrOr(bugObj, "actual"),
+            Actual = string.Join(" ", observations),   // joined form for any string consumer
             SuggestedFix = JsonUtils.StrOr(bugObj, "suggestedFix"),
         };
 
-        return new FailureTriageResult(classification, confidence, JsonUtils.StrOr(o, "reason"), bug);
+        return new FailureTriageResult(classification, confidence, JsonUtils.StrOr(o, "reason"), bug, observations);
     }
 
     /// <summary>Normalize to the four ADO severities (mirrors the Bug Writer's coercion).</summary>
