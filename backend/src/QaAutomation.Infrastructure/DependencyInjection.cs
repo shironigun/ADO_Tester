@@ -10,6 +10,7 @@ using QaAutomation.Infrastructure.AzureDevOps;
 using QaAutomation.Infrastructure.Batches;
 using QaAutomation.Infrastructure.Data;
 using QaAutomation.Infrastructure.Events;
+using QaAutomation.Infrastructure.Generation;
 using QaAutomation.Infrastructure.Knowledgebase;
 using QaAutomation.Infrastructure.Llm;
 using QaAutomation.Infrastructure.Logging;
@@ -116,6 +117,8 @@ public static class DependencyInjection
         // Track A KB foundation: reads module source → LLM → per-flow KB docs + rules.md, stored+indexed
         // through the KnowledgebaseService above (so scoped to match it).
         services.AddScoped<IKbExtractionService, KbExtractionService>();
+        // Track A Generator: KB flow → LLM → Playwright spec, written into /automation. Scoped (reads KB).
+        services.AddScoped<IGenerationService, GenerationService>();
         return services;
     }
 

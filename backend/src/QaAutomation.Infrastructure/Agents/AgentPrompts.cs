@@ -21,6 +21,9 @@ internal static class AgentPrompts
     /// <summary>KB-extractor prompt — authored for Track A (NOT a Python port; safe to edit/iterate).</summary>
     public static string KbExtractorSystem { get; } = Load("kb_extractor_system.txt");
 
+    /// <summary>E2E Generator prompt — authored for Track A (NOT a Python port; safe to edit/iterate).</summary>
+    public static string GeneratorE2eSystem { get; } = Load("generator_e2e_system.txt");
+
     private static string Load(string fileName)
     {
         var asm = typeof(AgentPrompts).Assembly;
