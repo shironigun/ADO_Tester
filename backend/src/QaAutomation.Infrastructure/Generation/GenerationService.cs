@@ -17,12 +17,15 @@ public sealed class GenerationService : IGenerationService
 
     private readonly ILlmClientFactory _llmFactory;
     private readonly IKnowledgebaseService _kb;
+    private readonly IAzureDevOpsClient _ado;
     private readonly ILogger<GenerationService> _log;
 
-    public GenerationService(ILlmClientFactory llmFactory, IKnowledgebaseService kb, ILogger<GenerationService> log)
+    public GenerationService(
+        ILlmClientFactory llmFactory, IKnowledgebaseService kb, IAzureDevOpsClient ado, ILogger<GenerationService> log)
     {
         _llmFactory = llmFactory;
         _kb = kb;
+        _ado = ado;
         _log = log;
     }
 
@@ -55,16 +58,36 @@ public sealed class GenerationService : IGenerationService
             }
         }
 
-        // 3) Build the exact tagged title the generated test must carry.
-        var idTag = request.AdoTestCaseId is int id ? $"[{id}]" : "[TC-TODO]";
+        var llm = await _llmFactory.CreateAsync(ct);
+        var agent = new GeneratorAgent(llm);
+
+        // 3) Resolve the ADO Test Case id: supplied wins; else optionally author + create it now so the
+        //    spec carries a real [id] (the hook results-publishing maps on). Deterministic ADO writes.
+        var adoId = request.AdoTestCaseId;
+        var adoCreated = false;
+        if (request.CreateAdoTestCase && adoId is null)
+        {
+            var tc = await agent.AuthorAdoTestCaseAsync(
+                request.Module, request.ScenarioTitle, request.ScenarioIntent, kbMarkdown!, cancellationToken: ct);
+            _log.LogInformation("Authored ADO Test Case '{Title}' ({Steps} steps) — creating in ADO", tc.Title, tc.Steps.Count);
+            var newId = await _ado.CreateTestCaseAsync(tc.Title, tc.Preconditions, tc.Steps, ct);
+            if (request.TestPlanId is int plan && request.TestSuiteId is int suite)
+                await _ado.AddTestCaseToSuiteAsync(plan, suite, newId, ct);
+            if (request.StoryId is int story)
+                await _ado.LinkTestedByAsync(story, newId, ct);
+            adoId = newId;
+            adoCreated = true;
+            _log.LogInformation("Created ADO Test Case #{Id} (suite-add={Suite}, story-link={Story})",
+                newId, request.TestPlanId is not null && request.TestSuiteId is not null, request.StoryId is not null);
+        }
+
+        // 4) Build the exact tagged title the generated spec must carry, then generate.
+        var idTag = adoId is int id ? $"[{id}]" : "[TC-TODO]";
         var smokeTag = request.Smoke ? " @smoke" : "";
         var testTitle = $"{idTag} {request.ScenarioTitle.Trim()}{smokeTag}";
 
-        // 4) Generate.
-        var llm = await _llmFactory.CreateAsync(ct);
         _log.LogInformation("Generating E2E spec '{Title}' (module {Module}) using {Provider}",
             testTitle, request.Module, llm.ProviderName);
-        var agent = new GeneratorAgent(llm);
         var code = await agent.GenerateE2eSpecAsync(
             request.Module, testTitle, request.ScenarioIntent, kbMarkdown!, style, cancellationToken: ct);
 
@@ -91,6 +114,8 @@ public sealed class GenerationService : IGenerationService
             Written = written,
             CharCount = code.Length,
             Code = code,
+            AdoTestCaseId = adoId,
+            AdoTestCaseCreated = adoCreated,
         };
     }
 
