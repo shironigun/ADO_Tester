@@ -132,6 +132,11 @@ public static class JsonUtils
         }
     }
 
+    /// <summary>Replace em/en dashes (and the horizontal bar) with a plain hyphen. House style: the
+    /// generated artifacts must never contain "—"/"–" (LLMs emit them constantly).</summary>
+    public static string StripEmDashes(string? s)
+        => string.IsNullOrEmpty(s) ? (s ?? "") : s.Replace('—', '-').Replace('–', '-').Replace('―', '-');
+
     /// <summary>Flatten any JSON value into a single readable string (Python <c>coerce_string</c>).</summary>
     public static string CoerceString(JsonNode? value)
     {

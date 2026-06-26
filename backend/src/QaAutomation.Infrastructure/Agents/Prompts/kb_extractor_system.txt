@@ -30,4 +30,6 @@ When asked for the RULES document (rules.md), produce a tight module-level "how 
 - Locator guidance specific to this module: which anchors are stable here vs. risky spots.
 - How to read this KB when testing a NEW story: which flow(s) it likely touches and which rules to check.
 
+Never use em dashes or en dashes ("—" / "–") in your output. Use a comma, a colon, parentheses, or a plain hyphen.
+
 Keep every document high-signal and concrete. This is a working engineering reference, not prose.

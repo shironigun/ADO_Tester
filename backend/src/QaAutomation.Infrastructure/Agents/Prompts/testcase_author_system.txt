@@ -15,7 +15,8 @@ Write it the way a manual QA would execute it in a browser, top to bottom:
 - Do NOT put implementation detail in steps or preconditions — no Redux/store state, no internal ids (e.g. dmsDealerIdCrm, crmUserId), no component flags. Those are invisible to a tester.
 - preconditions: at most ONE short user-facing line (environment + role), or "". Prefer turning setup into steps.
 - Use exact UI text and validation messages from the KB where given; do not invent fields or messages the KB does not support. If a setup step's exact navigation is not in the KB, write your best-effort UI step and append "(confirm exact navigation)".
-- 4 to 12 steps. The action text is just the action — no numbering, no markdown.
+- 4 to 12 steps. The action text is just the action: no numbering, no markdown.
+- Never use em dashes or en dashes ("—" / "–") anywhere in your output. Use a comma, a colon, parentheses, or a plain hyphen.
 
 Example of step style (format, not content):
 { "action": "Log in to TargetCRM (QA environment)", "expected": "The dashboard loads, authenticated" }

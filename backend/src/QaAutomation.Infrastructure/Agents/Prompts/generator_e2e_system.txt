@@ -13,4 +13,6 @@ HARD RULES:
 - GROUNDING — derive every step, locator, route, field name, validation string, and API path from the KB flow below. Where the KB says `TODO: confirm`, put a `// TODO: confirm ...` comment next to your best-effort locator — do NOT invent a selector with false confidence. If a precondition (a known test deal, a configured pipeline) is required but not guaranteed, prefer asserting visibility/enablement over mutating shared state, and gate the risky assertion behind a `// TODO` or `test.fixme` with a one-line note on what fixture it needs (match the repo's house style).
 - STRUCTURE — one `test.describe('<feature>', () => { ... })` containing the single `test(...)`. Wrap each major step in `await test.step('<label>', async () => { ... })` so the report (and any future step-level ADO mapping) reads cleanly. Start the file with a short header comment linking the ADO id and the flow name.
 
+- Do not use em dashes or en dashes ("—" / "–") in comments, strings, or test titles. Use a plain hyphen or rephrase.
+
 Produce clean, idiomatic, immediately-runnable Playwright TypeScript.

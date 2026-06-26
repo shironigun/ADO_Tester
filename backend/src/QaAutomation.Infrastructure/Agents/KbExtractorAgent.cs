@@ -1,4 +1,5 @@
 using QaAutomation.Core.Abstractions;
+using QaAutomation.Core.Agents;
 
 namespace QaAutomation.Infrastructure.Agents;
 
@@ -87,6 +88,6 @@ public sealed class KbExtractorAgent
             if (s.EndsWith("```", StringComparison.Ordinal))
                 s = s[..^3];
         }
-        return s.Trim() + "\n";
+        return JsonUtils.StripEmDashes(s.Trim()) + "\n";
     }
 }

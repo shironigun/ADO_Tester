@@ -69,20 +69,17 @@ public sealed class ResultsIngestService : IResultsIngestService
             if (request.FileBugs && triage.Classification == "real_bug")
             {
                 var bug = triage.Bug;
-                // Upload evidence FIRST (images first) so we can embed them inline in the repro field.
                 var artifacts = ExistingArtifacts(f.Attachments);
-                var uploaded = await UploadArtifactsAsync(artifacts, ct);
 
-                // Repro field: UI steps + multi-bullet observations + inline "Attachment #N" images/links.
-                var reproHtml = BuildReproHtml(bug, triage.Observations, uploaded);
-                // System Info: a scannable "how this was found" block (owns the suggested fix so its order
-                // is controlled — hence suggestedFix:"" below, to avoid CreateBugAsync prepending it).
-                var systemInfo = BuildSystemInfo(f, triage, bug.SuggestedFix);
+                // Repro field: UI steps + multi-bullet observations. Evidence goes to the Attachments tab,
+                // NOT embedded here.
+                var reproHtml = BuildReproHtml(bug, triage.Observations);
+                var systemInfo = BuildSystemInfo(f, triage);
                 _log.LogDebug("Composed auto-bug repro HTML:\n{Repro}", reproHtml);
                 _log.LogDebug("Composed auto-bug system info:\n{Sys}", systemInfo);
 
-                // NB: keep foundWith at its default — 'Custom.FoundWith' is a fixed picklist and rejects
-                // arbitrary values like "Automated Test". The automation provenance is in System Info instead.
+                // NB: keep foundWith at its default. 'Custom.FoundWith' is a fixed picklist and rejects
+                // arbitrary values like "Automated Test"; the automation provenance is in System Info instead.
                 bugId = await _ado.CreateBugAsync(
                     bug.Title, bug.Severity, preconditions: "", reproSteps: [], expected: bug.Expected,
                     actual: "", suggestedFix: "",
@@ -94,13 +91,13 @@ public sealed class ResultsIngestService : IResultsIngestService
                 if (request.StoryId is int story)
                     await TryLinkAsync(bugId.Value, story, "story");
 
-                // Also list every artifact in the WI Attachments tab (images are additionally inline above).
-                await LinkAttachmentsAsync(bugId.Value, uploaded, ct);
+                // Upload the evidence files and link them to the bug's Attachments tab.
+                var attached = await AttachArtifactsAsync(bugId.Value, artifacts, ct);
 
                 didFile = true;
                 filed++;
                 _log.LogInformation("Filed Bug #{Bug} for '{Test}' [{Sev}] with {N} attachment(s)",
-                    bugId, f.Name, bug.Severity, uploaded.Count);
+                    bugId, f.Name, bug.Severity, attached);
             }
 
             outcomes.Add(new FailureOutcome
@@ -177,50 +174,34 @@ public sealed class ResultsIngestService : IResultsIngestService
         return result;
     }
 
-    private static readonly string[] ImageExts = { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp" };
-
-    private sealed record UploadedArtifact(string Name, string Url, bool IsImage);
-
-    /// <summary>Upload each evidence file as an ADO attachment; return the references (images first, so the
-    /// screenshot is Attachment #1). Best-effort per file — a failed upload is skipped, not fatal.</summary>
-    private async Task<List<UploadedArtifact>> UploadArtifactsAsync(List<(string Path, string Name)> artifacts, CancellationToken ct)
+    /// <summary>Upload each existing evidence file as an ADO attachment and link it to the bug's Attachments
+    /// tab. Best-effort per file (a failed upload is skipped, not fatal). Returns the number attached.</summary>
+    private async Task<int> AttachArtifactsAsync(int bugId, List<(string Path, string Name)> artifacts, CancellationToken ct)
     {
-        var uploaded = new List<UploadedArtifact>();
+        var attached = 0;
         foreach (var (path, name) in artifacts)
         {
             try
             {
                 var bytes = await File.ReadAllBytesAsync(path, ct);
                 var url = await _ado.UploadAttachmentAsync(name, bytes, ct);
-                if (!string.IsNullOrEmpty(url))
-                    uploaded.Add(new UploadedArtifact(name, url, IsImage(name)));
+                if (string.IsNullOrEmpty(url))
+                    continue;
+                await _ado.AddWorkItemAttachmentLinkAsync(bugId, url, "E2E run artifact", ct);
+                attached++;
             }
             catch (Exception e) when (e is not OperationCanceledException)
             {
-                _log.LogWarning(e, "Could not upload artifact {Name}", name);
+                _log.LogWarning(e, "Could not attach artifact {Name} to bug #{Bug}", name, bugId);
             }
         }
-        // Images first so the screenshot is "Attachment #1" (what the cross-reference points at).
-        return uploaded.OrderByDescending(a => a.IsImage).ToList();
+        return attached;
     }
 
-    /// <summary>Add each uploaded attachment to the bug's Attachments tab (images are also inline in repro).</summary>
-    private async Task LinkAttachmentsAsync(int bugId, List<UploadedArtifact> uploaded, CancellationToken ct)
-    {
-        foreach (var a in uploaded)
-        {
-            try { await _ado.AddWorkItemAttachmentLinkAsync(bugId, a.Url, "E2E run artifact", ct); }
-            catch (Exception e) when (e is not OperationCanceledException)
-            {
-                _log.LogWarning(e, "Could not link attachment {Name} to bug #{Bug}", a.Name, bugId);
-            }
-        }
-    }
-
-    /// <summary>Compose the bug's Repro Steps HTML for an auto-filed E2E bug: preconditions, numbered UI
-    /// steps, multi-bullet observations (with a cross-reference to the screenshot), then an Attachments
-    /// section with "Attachment #N" headings — images embedded inline, other files as links.</summary>
-    private static string BuildReproHtml(GeneratedBug bug, List<string> observations, List<UploadedArtifact> uploaded)
+    /// <summary>Compose the bug's Repro Steps HTML for an auto-filed E2E bug: preconditions, a blank line,
+    /// numbered UI steps, then multi-bullet observations. Evidence is NOT embedded here (it lives on the
+    /// bug's Attachments tab).</summary>
+    private static string BuildReproHtml(GeneratedBug bug, List<string> observations)
     {
         var sb = new StringBuilder();
         if (!string.IsNullOrWhiteSpace(bug.Preconditions))
@@ -237,30 +218,15 @@ public sealed class ResultsIngestService : IResultsIngestService
         sb.Append("<div><b>OBSERVATION:</b></div><ul>");
         foreach (var o in observations)
             sb.Append($"<li>{Esc(o)}</li>");
-        // Cross-reference the screenshot if we have one (it's Attachment #1 after the images-first sort).
-        if (uploaded.Count > 0 && uploaded[0].IsImage)
-            sb.Append("<li>Screenshot at the point of failure — see Attachment #1 below.</li>");
         sb.Append("</ul>");
 
-        if (uploaded.Count > 0)
-        {
-            sb.Append("<div><b>Attachments:</b></div>");
-            for (var i = 0; i < uploaded.Count; i++)
-            {
-                var a = uploaded[i];
-                sb.Append($"<div><b>Attachment #{i + 1}: {Esc(a.Name)}</b></div>");
-                sb.Append(a.IsImage
-                    ? $"<div><img src=\"{a.Url}\" alt=\"{Esc(a.Name)}\" /></div>"
-                    : $"<div><a href=\"{a.Url}\">{Esc(a.Name)}</a></div>");
-            }
-        }
         return sb.ToString();
     }
 
-    /// <summary>Build the bug's System Info HTML — a scannable "how this was found" block: provenance, the
-    /// automated test + ADO Test Case, the AI triage verdict and its reasoning, the exact failing check, and
-    /// the suggested-fix hypothesis. Ordered and section-separated for readability (NOT in the human repro).</summary>
-    private static string BuildSystemInfo(FailedTest f, Agents.FailureTriageResult triage, string suggestedFix)
+    /// <summary>Build the bug's System Info HTML: a scannable "how this was found" block: provenance, the
+    /// automated test + ADO Test Case, the AI triage verdict and its reasoning, and the exact failing check.
+    /// Ordered and section-separated for readability (NOT in the human repro).</summary>
+    private static string BuildSystemInfo(FailedTest f, Agents.FailureTriageResult triage)
     {
         var verdict = triage.Classification switch
         {
@@ -279,20 +245,15 @@ public sealed class ResultsIngestService : IResultsIngestService
         if (f.AdoTestCaseId is int id)
             sb.Append($"<div><b>ADO Test Case:</b> #{id}</div>");
 
-        sb.Append($"<br/><div><b>AI triage verdict:</b> {Esc(verdict)} — {Esc(triage.Confidence)} confidence</div>");
+        sb.Append($"<br/><div><b>AI triage verdict:</b> {Esc(verdict)} ({Esc(triage.Confidence)} confidence)</div>");
         if (!string.IsNullOrWhiteSpace(triage.Reason))
             sb.Append($"<div><b>Why:</b> {Esc(triage.Reason)}</div>");
 
         if (!string.IsNullOrWhiteSpace(f.Message))
             sb.Append($"<br/><div><b>Automated check that failed:</b> {Esc(f.Message)}</div>");
 
-        if (!string.IsNullOrWhiteSpace(suggestedFix))
-            sb.Append($"<br/><div><b>Suggested fix (hypothesis):</b> {Esc(suggestedFix)}</div>");
-
         return sb.ToString();
     }
-
-    private static bool IsImage(string name) => ImageExts.Contains(Path.GetExtension(name).ToLowerInvariant());
 
     private static string Esc(string s) => s
         .Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;").Replace("'", "&#x27;");

@@ -50,15 +50,15 @@ public sealed class GeneratorAgent
                 if (s is JsonObject so)
                     steps.Add(new TestCaseStep
                     {
-                        Action = JsonUtils.StrOr(so, "action", "Action"),
-                        Expected = JsonUtils.StrOr(so, "expected", "Expected"),
+                        Action = JsonUtils.StripEmDashes(JsonUtils.StrOr(so, "action", "Action")),
+                        Expected = JsonUtils.StripEmDashes(JsonUtils.StrOr(so, "expected", "Expected")),
                     });
 
-        var title = JsonUtils.StrOr(o, "title", "Title");
+        var title = JsonUtils.StripEmDashes(JsonUtils.StrOr(o, "title", "Title"));
         return new GeneratedTestCase
         {
             Title = string.IsNullOrWhiteSpace(title) ? scenarioTitle : title,
-            Preconditions = JsonUtils.StrOr(o, "preconditions", "Preconditions"),
+            Preconditions = JsonUtils.StripEmDashes(JsonUtils.StrOr(o, "preconditions", "Preconditions")),
             Steps = steps,
         };
     }
@@ -124,6 +124,6 @@ public sealed class GeneratorAgent
             if (s.EndsWith("```", StringComparison.Ordinal))
                 s = s[..^3];
         }
-        return s.Trim() + "\n";
+        return JsonUtils.StripEmDashes(s.Trim()) + "\n";
     }
 }
