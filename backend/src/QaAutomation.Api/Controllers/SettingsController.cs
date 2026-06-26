@@ -136,6 +136,34 @@ public sealed class SettingsController : ControllerBase
         }
     }
 
+    [HttpGet("ado/test-plans")]
+    public async Task<IActionResult> AdoTestPlans(CancellationToken cancellationToken)
+    {
+        try { return Ok(new { plans = await _ado.GetTestPlansAsync(cancellationToken) }); }
+        catch (Exception e) { _log.LogWarning("ADO test plans failed: {Error}", e.Message); return StatusCode(502, new { detail = e.Message }); }
+    }
+
+    [HttpGet("ado/test-suites")]
+    public async Task<IActionResult> AdoTestSuites([FromQuery] int planId, CancellationToken cancellationToken)
+    {
+        if (planId <= 0) return StatusCode(400, new { detail = "planId is required." });
+        try { return Ok(new { suites = await _ado.GetTestSuitesAsync(planId, cancellationToken) }); }
+        catch (Exception e) { _log.LogWarning("ADO test suites failed: {Error}", e.Message); return StatusCode(502, new { detail = e.Message }); }
+    }
+
+    [HttpGet("ado/test-cases")]
+    public async Task<IActionResult> AdoSuiteTestCases(
+        [FromQuery] int planId, [FromQuery] int suiteId, [FromQuery] bool recurse = true, CancellationToken cancellationToken = default)
+    {
+        if (planId <= 0 || suiteId <= 0) return StatusCode(400, new { detail = "planId and suiteId are required." });
+        try
+        {
+            var cases = await _ado.GetSuiteTestCasesAsync(planId, suiteId, recurse, cancellationToken);
+            return Ok(new { count = cases.Count, testCases = cases.Select(c => new { c.Id, c.Title, stepCount = c.Steps.Count }) });
+        }
+        catch (Exception e) { _log.LogWarning("ADO suite test cases failed: {Error}", e.Message); return StatusCode(502, new { detail = e.Message }); }
+    }
+
     [HttpGet("ado/branches")]
     public async Task<IActionResult> AdoBranches([FromQuery] string? repository, CancellationToken cancellationToken)
     {

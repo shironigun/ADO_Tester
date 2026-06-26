@@ -332,8 +332,75 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
             $"{Opts.BaseUrl}/_apis/testplan/plans/{planId}/suites?api-version={Opts.ApiVersion}",
             $"Get suites for plan {planId}", ct);
         return Array(doc.RootElement, "value")
-            .Select(e => new AdoTestSuite(e.GetProperty("id").GetInt32(), GetStr(e, "name") ?? ""))
+            .Select(e => new AdoTestSuite(
+                e.GetProperty("id").GetInt32(),
+                GetStr(e, "name") ?? "",
+                e.TryGetProperty("parentSuite", out var ps) && ps.ValueKind == JsonValueKind.Object
+                    && ps.TryGetProperty("id", out var pid) && pid.TryGetInt32(out var p) ? p : null))
             .ToList();
+    }
+
+    /// <summary>List the Test Cases in a suite (optionally recursing into sub-suites), as parsed
+    /// <see cref="LinkedTestCase"/>s. Used to read the existing coverage of a module's plan.</summary>
+    public async Task<IReadOnlyList<LinkedTestCase>> GetSuiteTestCasesAsync(
+        int planId, int suiteId, bool recurse = true, CancellationToken ct = default)
+    {
+        // Resolve the set of suites to read: the chosen one, plus all descendants when recursing.
+        var suiteIds = new List<int> { suiteId };
+        if (recurse)
+        {
+            var all = await GetTestSuitesAsync(planId, ct);
+            var childrenByParent = all.Where(s => s.ParentId is not null)
+                .GroupBy(s => s.ParentId!.Value).ToDictionary(g => g.Key, g => g.Select(s => s.Id).ToList());
+            var queue = new Queue<int>(new[] { suiteId });
+            var seen = new HashSet<int> { suiteId };
+            while (queue.Count > 0)
+            {
+                var cur = queue.Dequeue();
+                if (!childrenByParent.TryGetValue(cur, out var kids)) continue;
+                foreach (var k in kids)
+                    if (seen.Add(k)) { suiteIds.Add(k); queue.Enqueue(k); }
+            }
+        }
+
+        // Collect distinct test-case work-item ids across those suites.
+        var caseIds = new List<int>();
+        var seenCase = new HashSet<int>();
+        foreach (var sid in suiteIds)
+        {
+            using var doc = await GetDocAsync(
+                $"{Opts.BaseUrl}/_apis/testplan/Plans/{planId}/Suites/{sid}/TestCase?api-version={Opts.ApiVersion}",
+                $"Get test cases for suite {sid}", ct);
+            foreach (var e in Array(doc.RootElement, "value"))
+            {
+                // testplan shape: { workItem: { id }, testCase: { id } } — accept either.
+                int? id = null;
+                if (e.TryGetProperty("workItem", out var wi) && wi.TryGetProperty("id", out var wid) && wid.TryGetInt32(out var w)) id = w;
+                else if (e.TryGetProperty("testCase", out var tc) && tc.TryGetProperty("id", out var tcid) && tcid.TryGetInt32(out var t)) id = t;
+                if (id is int cid && seenCase.Add(cid)) caseIds.Add(cid);
+            }
+        }
+        if (caseIds.Count == 0)
+            return [];
+
+        // Batch-fetch titles + steps.
+        var outList = new List<LinkedTestCase>();
+        const string fieldsCsv = "System.Title,System.WorkItemType,Microsoft.VSTS.TCM.Steps";
+        foreach (var chunk in Chunk(caseIds, 200))
+        {
+            var batchUrl = $"{Opts.BaseUrl}/_apis/wit/workitems?ids={string.Join(",", chunk)}&fields={fieldsCsv}&api-version={Opts.ApiVersion}";
+            using var br = await GetDocAsync(batchUrl, "Suite test case batch fetch", ct);
+            foreach (var e in Array(br.RootElement, "value"))
+            {
+                var f = e.GetProperty("fields");
+                outList.Add(new LinkedTestCase(
+                    e.GetProperty("id").GetInt32(),
+                    GetStr(f, "System.Title") ?? "",
+                    "",
+                    ParseStepsXml(GetStr(f, "Microsoft.VSTS.TCM.Steps") ?? "")));
+            }
+        }
+        return outList;
     }
 
     // ── Test Case create + suite add + Tested-By link ───────────────────────

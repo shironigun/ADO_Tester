@@ -31,6 +31,9 @@ public interface IAzureDevOpsClient
     Task<IReadOnlyList<AdoTestPlan>> GetTestPlansAsync(CancellationToken ct = default);
     Task<IReadOnlyList<AdoTestSuite>> GetTestSuitesAsync(int planId, CancellationToken ct = default);
 
+    /// <summary>List the Test Cases in a suite (optionally recursing into sub-suites), with parsed steps.</summary>
+    Task<IReadOnlyList<LinkedTestCase>> GetSuiteTestCasesAsync(int planId, int suiteId, bool recurse = true, CancellationToken ct = default);
+
     // ── Reports query + enrichment ──────────────────────────────────────────
     Task<IReadOnlyList<ReportTicket>> GetTicketsInRangeAsync(
         DateTime fromUtc, DateTime toUtc, IReadOnlyList<string> boards,
