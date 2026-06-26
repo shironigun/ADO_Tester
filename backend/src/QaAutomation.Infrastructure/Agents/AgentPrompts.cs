@@ -27,6 +27,9 @@ internal static class AgentPrompts
     /// <summary>Test-case author prompt — authored for Track A: scenario+KB → one ADO Test Case (JSON).</summary>
     public static string TestCaseAuthorSystem { get; } = Load("testcase_author_system.txt");
 
+    /// <summary>Failure-triage prompt — authored for Track A: a failed test → classification + bug (JSON).</summary>
+    public static string FailureTriageSystem { get; } = Load("failure_triage_system.txt");
+
     private static string Load(string fileName)
     {
         var asm = typeof(AgentPrompts).Assembly;
