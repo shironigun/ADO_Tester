@@ -49,20 +49,24 @@ public sealed class FailureTriageAgent
             confidence = "medium";
 
         var bugObj = o["bug"] as JsonObject ?? new JsonObject();
-        // "actual" may be an array (preferred — one observation per bullet) or a single string.
-        var observations = JsonUtils.CoerceStringList(bugObj["actual"] ?? bugObj["Actual"]);
+        // "actual" may be an array (preferred, one observation per bullet) or a single string.
+        // Strip em/en dashes from every free-text field (house style: never "—"/"–").
+        var observations = JsonUtils.CoerceStringList(bugObj["actual"] ?? bugObj["Actual"])
+            .Select(JsonUtils.StripEmDashes).ToList();
         var bug = new GeneratedBug
         {
-            Title = JsonUtils.StrOr(bugObj, "title"),
+            Title = JsonUtils.StripEmDashes(JsonUtils.StrOr(bugObj, "title")),
             Severity = NormalizeSeverity(JsonUtils.StrOr(bugObj, "severity")),
-            Preconditions = JsonUtils.StrOr(bugObj, "preconditions"),
-            ReproSteps = JsonUtils.CoerceStringList(bugObj["reproSteps"] ?? bugObj["ReproSteps"]),
-            Expected = JsonUtils.StrOr(bugObj, "expected"),
+            Preconditions = JsonUtils.StripEmDashes(JsonUtils.StrOr(bugObj, "preconditions")),
+            ReproSteps = JsonUtils.CoerceStringList(bugObj["reproSteps"] ?? bugObj["ReproSteps"])
+                .Select(JsonUtils.StripEmDashes).ToList(),
+            Expected = JsonUtils.StripEmDashes(JsonUtils.StrOr(bugObj, "expected")),
             Actual = string.Join(" ", observations),   // joined form for any string consumer
-            SuggestedFix = JsonUtils.StrOr(bugObj, "suggestedFix"),
+            SuggestedFix = "",                          // not used for auto-filed bugs
         };
 
-        return new FailureTriageResult(classification, confidence, JsonUtils.StrOr(o, "reason"), bug, observations);
+        return new FailureTriageResult(
+            classification, confidence, JsonUtils.StripEmDashes(JsonUtils.StrOr(o, "reason")), bug, observations);
     }
 
     /// <summary>Normalize to the four ADO severities (mirrors the Bug Writer's coercion).</summary>

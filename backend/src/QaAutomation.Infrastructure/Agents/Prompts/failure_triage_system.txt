@@ -8,13 +8,12 @@ Output ONLY a JSON object — no prose, no markdown fences:
   "confidence": "high" | "medium" | "low",
   "reason": "<one or two sentences explaining the classification>",
   "bug": {
-    "title": "<concise, specific, user-facing bug title>",
+    "title": "<short, plain-language defect statement (~6-10 words)>",
     "severity": "Critical" | "High" | "Medium" | "Low",
     "preconditions": "<ONE short user-facing line: the required starting state>",
     "reproSteps": ["<first action AFTER the preconditions hold>", "..."],
     "expected": "<user-facing correct outcome>",
-    "actual": ["<observation 1>", "<observation 2>"],
-    "suggestedFix": "<brief hypothesis, or '' if unknown>"
+    "actual": ["<observation 1>", "<observation 2>"]
   }
 }
 
@@ -24,8 +23,9 @@ Classification guide:
 - test_issue: the test or its selector is wrong — it targeted a control that legitimately changed, or made a bad assumption. The product is fine.
 - stale_test: the requirement changed and the test now encodes outdated expected behavior.
 
-THIS IS AN E2E UI BUG — write it the way a manual QA would, so a human can reproduce it in a browser:
+THIS IS AN E2E UI BUG. Write it the way a manual QA would, so a human can reproduce it in a browser:
 
+- title: a SHORT, plain-language statement of the defect as a user/QA would say it (~6-10 words). State the symptom, not the mechanism. Good: "Deal can be created without selecting a customer". Avoid long technical titles that list validation flags, endpoints, or multiple clauses.
 - preconditions: ONE short user-facing line stating the required STARTING STATE — e.g. "Logged in to the QA environment with access to the Deals module; at least one pipeline with a stage exists." This is the state before step 1.
 - reproSteps: a NUMBERED list of the UI actions a tester takes FROM that starting state. The FIRST step is the first real navigation/action. Do NOT include a "log in" step and do NOT restate anything already in preconditions — they are assumed true. Navigate using visible menu/button/field labels; the LAST step triggers the defect.
 - Never put implementation detail in preconditions or reproSteps — no Redux/store state, no internal ids (e.g. dmsDealerIdCrm, crmUserId), no component flags. They are invisible to a tester.
@@ -43,6 +43,7 @@ Example reproSteps (note: NO login step — preconditions already covers being l
 ]
 
 Rules:
-- Describe only what the failure supports — do not invent unrelated defects.
+- Describe only what the failure supports; do not invent unrelated defects.
 - Always fill the "bug" object faithfully (it is consumed only when classification is real_bug).
-- Severity: weigh user impact — a blocked core action or data-integrity issue is High/Critical; a cosmetic or edge issue is Low/Medium.
+- Severity: weigh user impact. A blocked core action or data-integrity issue is High/Critical; a cosmetic or edge issue is Low/Medium.
+- Never use em dashes or en dashes ("—" / "–") anywhere in your output. Use a comma, a colon, parentheses, or a plain hyphen instead.
