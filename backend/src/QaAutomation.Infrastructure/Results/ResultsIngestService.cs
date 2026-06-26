@@ -75,15 +75,17 @@ public sealed class ResultsIngestService : IResultsIngestService
 
                 // Repro field: UI steps + multi-bullet observations + inline "Attachment #N" images/links.
                 var reproHtml = BuildReproHtml(bug, triage.Observations, uploaded);
-                // System Info: machine/test traceability only (NOT in the human repro).
-                var systemInfo = BuildSystemInfo(f, triage);
+                // System Info: a scannable "how this was found" block (owns the suggested fix so its order
+                // is controlled — hence suggestedFix:"" below, to avoid CreateBugAsync prepending it).
+                var systemInfo = BuildSystemInfo(f, triage, bug.SuggestedFix);
                 _log.LogDebug("Composed auto-bug repro HTML:\n{Repro}", reproHtml);
+                _log.LogDebug("Composed auto-bug system info:\n{Sys}", systemInfo);
 
                 // NB: keep foundWith at its default — 'Custom.FoundWith' is a fixed picklist and rejects
                 // arbitrary values like "Automated Test". The automation provenance is in System Info instead.
                 bugId = await _ado.CreateBugAsync(
                     bug.Title, bug.Severity, preconditions: "", reproSteps: [], expected: bug.Expected,
-                    actual: "", suggestedFix: bug.SuggestedFix,
+                    actual: "", suggestedFix: "",
                     systemInfo: systemInfo, reproHtml: reproHtml, ct: ct);
 
                 // Link to the failing Test Case (preferred) and optionally the story. Best-effort.
@@ -255,20 +257,38 @@ public sealed class ResultsIngestService : IResultsIngestService
         return sb.ToString();
     }
 
-    /// <summary>Build the bug's System Info HTML — machine/test traceability that does NOT belong in the
-    /// human-facing repro: which automated test failed, its ADO Test Case, the triage verdict, the raw failure.</summary>
-    private static string BuildSystemInfo(FailedTest f, Agents.FailureTriageResult triage)
+    /// <summary>Build the bug's System Info HTML — a scannable "how this was found" block: provenance, the
+    /// automated test + ADO Test Case, the AI triage verdict and its reasoning, the exact failing check, and
+    /// the suggested-fix hypothesis. Ordered and section-separated for readability (NOT in the human repro).</summary>
+    private static string BuildSystemInfo(FailedTest f, Agents.FailureTriageResult triage, string suggestedFix)
     {
+        var verdict = triage.Classification switch
+        {
+            "real_bug" => "Real bug",
+            "flaky" => "Flaky test",
+            "test_issue" => "Test / selector issue",
+            "stale_test" => "Stale test (requirement changed)",
+            _ => triage.Classification,
+        };
+
         var sb = new StringBuilder();
-        sb.Append("<div><b>Found by:</b> automated E2E test (Playwright)</div>");
-        sb.Append($"<div><b>Automated test:</b> {Esc(f.Name)}</div>");
+        sb.Append("<div><b>How this bug was found</b></div>");
+        sb.Append("<div>Filed automatically from a failed end-to-end (Playwright) test.</div>");
+
+        sb.Append("<br/><div><b>Automated test:</b> ").Append(Esc(f.Name)).Append("</div>");
         if (f.AdoTestCaseId is int id)
             sb.Append($"<div><b>ADO Test Case:</b> #{id}</div>");
-        sb.Append($"<div><b>Triage:</b> {Esc(triage.Classification)} ({Esc(triage.Confidence)} confidence)</div>");
+
+        sb.Append($"<br/><div><b>AI triage verdict:</b> {Esc(verdict)} — {Esc(triage.Confidence)} confidence</div>");
         if (!string.IsNullOrWhiteSpace(triage.Reason))
-            sb.Append($"<div><b>Triage reasoning:</b> {Esc(triage.Reason)}</div>");
+            sb.Append($"<div><b>Why:</b> {Esc(triage.Reason)}</div>");
+
         if (!string.IsNullOrWhiteSpace(f.Message))
-            sb.Append($"<div><b>Test failure:</b> {Esc(f.Message)}</div>");
+            sb.Append($"<br/><div><b>Automated check that failed:</b> {Esc(f.Message)}</div>");
+
+        if (!string.IsNullOrWhiteSpace(suggestedFix))
+            sb.Append($"<br/><div><b>Suggested fix (hypothesis):</b> {Esc(suggestedFix)}</div>");
+
         return sb.ToString();
     }
 
