@@ -10,7 +10,15 @@ public sealed record KbExtractionRequest
     /// <summary>Module key, e.g. "deals". Drives output file names and the prompts.</summary>
     public string Module { get; init; } = "";
 
-    /// <summary>Absolute path to the product repo root to read source from (the local clone).</summary>
+    /// <summary>Azure Repos repository to read source from. Null/empty → the configured ado.repository.
+    /// This is the "which repo" of the source. Ignored when <see cref="SourceRoot"/> is set.</summary>
+    public string? Repository { get; init; }
+
+    /// <summary>Branch to read source at. Null/empty → the configured ado.default_branch.
+    /// This is the "which branch" of the source. Ignored when <see cref="SourceRoot"/> is set.</summary>
+    public string? Branch { get; init; }
+
+    /// <summary>Optional local clone path. When set, source is read from disk instead of Azure Repos.</summary>
     public string SourceRoot { get; init; } = "";
 
     /// <summary>Flow names to extract — one KB doc each, e.g. ["Create Deal", "Mark Deal as Lost"].</summary>

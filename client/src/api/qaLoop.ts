@@ -6,7 +6,9 @@ import { api } from './client'
 // ── KB extraction (POST /api/knowledgebase/{projectId}/extract) ──────────────
 export interface KbExtractionRequest {
   module: string
-  sourceRoot: string
+  repository?: string // Azure Repos repo (which repo); null → configured ado.repository
+  branch?: string // branch (which branch); null → configured ado.default_branch
+  sourceRoot?: string // optional local clone path; when set, reads from disk instead of ADO
   flows: string[]
   sourceDirs?: string[]
   extensions?: string[]

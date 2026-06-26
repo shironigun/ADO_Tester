@@ -8,25 +8,29 @@ using QaAutomation.Infrastructure.Agents;
 namespace QaAutomation.Infrastructure.Knowledgebase;
 
 /// <summary>
-/// Track A — hackathon KB foundation. Gathers a module's source (component code + existing tests) from a
-/// local repo clone, runs the <see cref="KbExtractorAgent"/> once per flow (and once for <c>rules.md</c>),
-/// and stores + indexes each produced markdown via <see cref="IKnowledgebaseService"/> so the
-/// Analyst/Generator can retrieve it. Per-flow generation keeps each LLM call small — the mitigation for
-/// the Claude-CLI large-output failure. Scoped: it depends on the scoped <see cref="IKnowledgebaseService"/>.
+/// Track A KB foundation. Gathers a module's source (component code + existing tests) — by default from the
+/// configured Azure Repos repository + branch, or from a local clone when a SourceRoot is supplied — runs the
+/// <see cref="KbExtractorAgent"/> once per flow (and once for <c>rules.md</c>), and stores + indexes each
+/// produced markdown via <see cref="IKnowledgebaseService"/> so the Analyst/Generator can retrieve it.
+/// Per-flow generation keeps each LLM call small (mitigates the Claude-CLI large-output failure). Scoped.
 /// </summary>
 public sealed class KbExtractionService : IKbExtractionService
 {
     private static readonly string[] SkipDirs = { "node_modules", "bin", "obj", ".git", "dist", "build", "coverage" };
+    private const int MaxAdoFiles = 80;       // cap how many repo files we pull per extraction
+    private const int AdoFetchConcurrency = 8; // parallel file reads — keeps ADO source-read fast
 
     private readonly ILlmClientFactory _llmFactory;
     private readonly IKnowledgebaseService _kb;
+    private readonly IAzureDevOpsClient _ado;
     private readonly ILogger<KbExtractionService> _log;
 
     public KbExtractionService(
-        ILlmClientFactory llmFactory, IKnowledgebaseService kb, ILogger<KbExtractionService> log)
+        ILlmClientFactory llmFactory, IKnowledgebaseService kb, IAzureDevOpsClient ado, ILogger<KbExtractionService> log)
     {
         _llmFactory = llmFactory;
         _kb = kb;
+        _ado = ado;
         _log = log;
     }
 
@@ -35,17 +39,16 @@ public sealed class KbExtractionService : IKbExtractionService
     {
         if (string.IsNullOrWhiteSpace(request.Module))
             throw new ArgumentException("Module is required.");
-        if (string.IsNullOrWhiteSpace(request.SourceRoot))
-            throw new ArgumentException("SourceRoot is required.");
-        if (!Directory.Exists(request.SourceRoot))
-            throw new DirectoryNotFoundException($"SourceRoot not found: {request.SourceRoot}");
         if (request.Flows.Count == 0)
             throw new ArgumentException("At least one flow is required.");
 
-        var (bundle, filesRead) = GatherSource(request);
+        // Source = a local clone when SourceRoot is given, else the configured/overridden ADO repo + branch.
+        var (bundle, filesRead) = string.IsNullOrWhiteSpace(request.SourceRoot)
+            ? await GatherFromAdoAsync(request, ct)
+            : GatherFromLocal(request);
         if (filesRead == 0)
             throw new InvalidOperationException(
-                "No source files were read — check SourceRoot and SourceDirs (none of the module dirs matched).");
+                "No source files were read. Check the repository/branch (or SourceRoot) and that the module dirs exist.");
 
         var llm = await _llmFactory.CreateAsync(ct);
         _log.LogInformation(
@@ -92,10 +95,74 @@ public sealed class KbExtractionService : IKbExtractionService
 
     // ── source gathering ───────────────────────────────────────────────────────
 
-    /// <summary>Read the module's source files into one bounded bundle string (path-headed code blocks),
-    /// skipping build/vendor dirs, truncating large files, and capping the total size.</summary>
-    private (string Bundle, int FilesRead) GatherSource(KbExtractionRequest req)
+    /// <summary>Read the module's source straight from Azure Repos (repo + branch from the request, or the
+    /// configured defaults), into one bounded bundle. File contents are fetched in parallel so this stays
+    /// fast despite per-file API calls. The repo + branch are "which repo, which branch is the source".</summary>
+    private async Task<(string Bundle, int FilesRead)> GatherFromAdoAsync(KbExtractionRequest req, CancellationToken ct)
     {
+        var repoId = await _ado.ResolveRepositoryIdAsync(
+            string.IsNullOrWhiteSpace(req.Repository) ? null : req.Repository, ct);
+        var branch = string.IsNullOrWhiteSpace(req.Branch) ? null : req.Branch;
+        var dirs = req.SourceDirs is { Count: > 0 } ? req.SourceDirs : DefaultDirs(req.Module);
+        var exts = req.Extensions is { Count: > 0 } ? req.Extensions : new List<string> { ".ts", ".tsx" };
+
+        // 1) list candidate file paths across the module dirs
+        var paths = new List<string>();
+        foreach (var dir in dirs)
+        {
+            try
+            {
+                foreach (var p in await _ado.ListRepoFilePathsAsync(dir, branch, repoId, ct))
+                    if (exts.Contains(Path.GetExtension(p), StringComparer.OrdinalIgnoreCase))
+                        paths.Add(p);
+            }
+            catch (Exception e) { _log.LogWarning(e, "KB: could not list repo dir {Dir}", dir); }
+        }
+        paths = paths.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(p => p, StringComparer.Ordinal).Take(MaxAdoFiles).ToList();
+
+        // 2) fetch contents in parallel (bounded), so the network round-trips overlap
+        using var gate = new SemaphoreSlim(AdoFetchConcurrency);
+        var fetches = paths.Select(async p =>
+        {
+            await gate.WaitAsync(ct);
+            try { return (Path: p, Content: await _ado.GetFileContentAsync(p, branch, repoId, "branch", ct)); }
+            catch (Exception e) { _log.LogWarning(e, "KB: could not read {Path}", p); return (Path: p, Content: ""); }
+            finally { gate.Release(); }
+        });
+        var fetched = (await Task.WhenAll(fetches)).Where(r => !string.IsNullOrEmpty(r.Content))
+            .ToDictionary(r => r.Path, r => r.Content);
+
+        // 3) assemble within the bundle cap, preserving path order
+        var sb = new StringBuilder();
+        var filesRead = 0;
+        foreach (var p in paths)
+        {
+            if (sb.Length >= req.MaxBundleChars)
+                break;
+            if (!fetched.TryGetValue(p, out var content))
+                continue;
+            if (content.Length > req.MaxFileChars)
+                content = content[..req.MaxFileChars] + "\n/* …truncated… */";
+            sb.Append("\n### ").Append(p).Append('\n');
+            sb.Append("```").Append(LangFor(p)).Append('\n');
+            sb.Append(content).Append("\n```\n");
+            filesRead++;
+        }
+
+        var bundle = sb.ToString();
+        if (bundle.Length > req.MaxBundleChars)
+            bundle = bundle[..req.MaxBundleChars];
+        _log.LogInformation("KB: read {Files} file(s) from ADO repo (branch {Branch})", filesRead, branch ?? "(default)");
+        return (bundle, filesRead);
+    }
+
+    /// <summary>Read the module's source files from a local clone into one bounded bundle string (path-headed
+    /// code blocks), skipping build/vendor dirs, truncating large files, and capping the total size.</summary>
+    private (string Bundle, int FilesRead) GatherFromLocal(KbExtractionRequest req)
+    {
+        if (!Directory.Exists(req.SourceRoot))
+            throw new DirectoryNotFoundException($"SourceRoot not found: {req.SourceRoot}");
+
         var dirs = req.SourceDirs is { Count: > 0 } ? req.SourceDirs : DefaultDirs(req.Module);
         var exts = req.Extensions is { Count: > 0 } ? req.Extensions : new List<string> { ".ts", ".tsx" };
 
