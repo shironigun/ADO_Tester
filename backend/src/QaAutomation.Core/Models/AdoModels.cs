@@ -22,7 +22,7 @@ public sealed record TicketComment(string Author, string? Date, string Html);
 public sealed record TimelineEvent(string? Date, string Actor, string Kind, string Detail);
 
 public sealed record AdoTestPlan(int Id, string Name);
-public sealed record AdoTestSuite(int Id, string Name);
+public sealed record AdoTestSuite(int Id, string Name, int? ParentId = null);
 
 /// <summary>An id/name pair (discover projects, list repositories).</summary>
 public sealed record AdoNamedRef(string Id, string Name);
