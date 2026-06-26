@@ -4,6 +4,7 @@
 export const paths = {
   dashboard: '/projects',
   knowledgebase: '/knowledgebase',
+  qaLoop: '/qa-loop',
   authorTests: '/author-tests',
   findBugs: '/find-bugs',
   reports: '/reports',
