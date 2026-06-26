@@ -53,6 +53,11 @@ export async function getAdoAreaPaths(organization?: string, project?: string): 
   return data.areaPaths ?? []
 }
 
+export async function getAdoRepositories(): Promise<string[]> {
+  const { data } = await api.get<{ repositories: string[] }>('/api/settings/ado/repositories')
+  return data.repositories ?? []
+}
+
 // Optional repository arg: when omitted the backend falls back to the saved ado.repository.
 export async function getAdoBranches(repository?: string): Promise<string[]> {
   const params: Record<string, string> = {}

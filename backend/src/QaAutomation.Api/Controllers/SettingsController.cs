@@ -121,6 +121,21 @@ public sealed class SettingsController : ControllerBase
         }
     }
 
+    [HttpGet("ado/repositories")]
+    public async Task<IActionResult> AdoRepositories(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var repos = await _ado.ListRepositoriesAsync(cancellationToken);
+            return Ok(new { repositories = repos.Select(r => r.Name) });
+        }
+        catch (Exception e)
+        {
+            _log.LogWarning("ADO discover repositories failed: {Error}", e.Message);
+            return StatusCode(502, new { detail = e.Message });
+        }
+    }
+
     [HttpGet("ado/branches")]
     public async Task<IActionResult> AdoBranches([FromQuery] string? repository, CancellationToken cancellationToken)
     {

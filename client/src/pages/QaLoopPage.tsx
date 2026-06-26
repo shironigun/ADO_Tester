@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import {
-  Alert, Box, Button, Chip, CircularProgress, Collapse, Divider, FormControlLabel,
+  Alert, Autocomplete, Box, Button, Chip, CircularProgress, Collapse, Divider, FormControlLabel,
   Link, Snackbar, Stack, Switch, TextField, Typography,
 } from '@mui/material'
 import { alpha } from '@mui/material/styles'
@@ -17,7 +17,7 @@ import {
   extractKb, generateSpec, ingestResults, adoWorkItemUrl,
   type KbExtractionResult, type GenerateSpecResult, type IngestResultsResult, type FailureOutcome,
 } from '../api/qaLoop'
-import { getConfig } from '../api/settings'
+import { getConfig, getAdoRepositories, getAdoBranches } from '../api/settings'
 
 // Local write target for generated specs (the /automation folder in a local clone). Editable per run.
 const DEFAULT_OUTPUT_ROOT = 'C:\\Users\\temp\\Downloads\\Projects\\TCRN\\CRM Project\\web-app\\src\\target-crm\\automation'
@@ -32,21 +32,34 @@ export default function QaLoopPage() {
   const [module, setModule] = useState('deals')
   const [repository, setRepository] = useState('')
   const [branch, setBranch] = useState('')
-  const [settingsHint, setSettingsHint] = useState('')
+  const [repoOptions, setRepoOptions] = useState<string[]>([])
+  const [branchOptions, setBranchOptions] = useState<string[]>([])
+  const [branchesLoading, setBranchesLoading] = useState(false)
   const [toast, setToast] = useState('')
 
-  // Prefill repo + branch from Settings (ado.repository / ado.default_branch).
+  // Prefill repo + branch from Settings (ado.repository / ado.default_branch), and load the repo list.
   useEffect(() => {
     getConfig()
       .then(cfg => {
-        const repo = String(cfg['ado.repository'] ?? '')
-        const br = String(cfg['ado.default_branch'] ?? '')
-        setRepository(repo)
-        setBranch(br)
-        setSettingsHint(repo ? `Defaulted from Settings: ${repo}${br ? ` @ ${br}` : ''}` : 'Set a default repository in Settings, or enter one here.')
+        setRepository(String(cfg['ado.repository'] ?? ''))
+        setBranch(String(cfg['ado.default_branch'] ?? ''))
       })
-      .catch(() => setSettingsHint('Could not load Settings — enter a repository + branch.'))
+      .catch(() => {})
+    getAdoRepositories().then(setRepoOptions).catch(() => setRepoOptions([]))
   }, [])
+
+  // Load branches for the selected repository (debounced so typing doesn't spam ADO).
+  useEffect(() => {
+    if (!repository.trim()) { setBranchOptions([]); return }
+    setBranchesLoading(true)
+    const h = setTimeout(() => {
+      getAdoBranches(repository)
+        .then(setBranchOptions)
+        .catch(() => setBranchOptions([]))
+        .finally(() => setBranchesLoading(false))
+    }, 400)
+    return () => clearTimeout(h)
+  }, [repository])
 
   // 1 — Extract
   const [flows, setFlows] = useState('Create Deal')
@@ -136,11 +149,24 @@ export default function QaLoopPage() {
         <Section title="Context">
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
             <TextField size="small" label="Module" value={module} onChange={e => setModule(e.target.value)} sx={{ width: { sm: 140 } }} />
-            <TextField size="small" fullWidth label="Source repository (Azure Repos)" value={repository} onChange={e => setRepository(e.target.value)} />
-            <TextField size="small" label="Branch" value={branch} onChange={e => setBranch(e.target.value)} sx={{ width: { sm: 200 } }} placeholder="main" />
+            <Autocomplete freeSolo fullWidth options={repoOptions} value={repository}
+              onChange={(_, v) => setRepository(v || '')}
+              onInputChange={(_, v) => setRepository(v)}
+              renderInput={p => (
+                <TextField {...p} size="small" label="Source repository (Azure Repos)"
+                  helperText={repoOptions.length ? `${repoOptions.length} repo(s) — default from Settings` : 'Type a repository'} />
+              )} />
+            <Autocomplete freeSolo options={branchOptions} value={branch} sx={{ width: { sm: 220 } }}
+              onChange={(_, v) => setBranch(v || '')}
+              onInputChange={(_, v) => setBranch(v)}
+              loading={branchesLoading}
+              renderInput={p => (
+                <TextField {...p} size="small" label="Branch" placeholder="main"
+                  helperText={branchesLoading ? 'Loading branches…' : branchOptions.length ? `${branchOptions.length} branch(es)` : ' '} />
+              )} />
           </Stack>
-          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.75, display: 'block' }}>
-            {settingsHint} · Source code is read from this repo + branch (override per run here).
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.25, display: 'block' }}>
+            Source code is read from this repo + branch. Defaults come from Settings; override per run here.
           </Typography>
         </Section>
 
