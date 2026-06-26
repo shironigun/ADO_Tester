@@ -113,6 +113,9 @@ public static class DependencyInjection
         services.AddOptions<StorageOptions>().Bind(config.GetSection(StorageOptions.SectionName));
         // Scoped: shares the request/background DbContext scope (FTS writes + BM25 reads go through it).
         services.AddScoped<IKnowledgebaseService, KnowledgebaseService>();
+        // Track A KB foundation: reads module source → LLM → per-flow KB docs + rules.md, stored+indexed
+        // through the KnowledgebaseService above (so scoped to match it).
+        services.AddScoped<IKbExtractionService, KbExtractionService>();
         return services;
     }
 

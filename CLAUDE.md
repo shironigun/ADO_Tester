@@ -1,0 +1,127 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+Locally-hosted QA-automation tool ("ADO_Tester"): turns Azure DevOps stories into **test cases**
+and **bug reports** in a specific QA author's house style, plus a weekly HTML board-activity report.
+Backend is the "brain" that reads ADO work items, runs LLM agents, and writes artifacts back to ADO.
+
+**Stack:** .NET 8 (ASP.NET Core) + EF Core 8 + SQLite (FTS5 for KB retrieval) backend in `backend/`
+(port **5250**); React 19 + Vite + MUI + Redux Toolkit + React Query frontend in `client/` (port **5173**).
+You open one URL — `http://localhost:5173` — and Vite proxies `/api/*` to `:5250`.
+
+> Re-platformed from a Python FastAPI app (retired 2026-06-21). The .NET backend is now the sole
+> backend. Recover the old Python source from git history if a parity reference is ever needed.
+
+## Commands
+
+All backend commands run from `backend/` (or pass `--project backend\src\QaAutomation.Api` from root).
+
+```powershell
+# Backend
+dotnet run --project src\QaAutomation.Api    # serve on http://localhost:5250 (Swagger at /swagger)
+dotnet build                                  # or: dotnet build QaAutomation.sln
+dotnet test                                   # all xUnit tests
+dotnet test --filter "FullyQualifiedName~AgentOrchestratorTests"   # one class
+dotnet test --filter "DisplayName~adopts existing"                 # one test
+
+# EF migrations (auto-APPLY on next backend start — you only generate them)
+dotnet ef migrations add DescribeTheChange `
+  --project src\QaAutomation.Infrastructure --startup-project src\QaAutomation.Api
+
+# Frontend (from client/)
+npm install
+npm run dev        # Vite dev server on :5173, proxies /api → :5250
+npm run build      # tsc -b && vite build
+npm run lint       # eslint .
+npm run preview    # serve the built bundle on :4173
+
+# Wipe local data (DB + KB uploads + reports; rebuilt on next start). Keeps .env.
+Remove-Item -Recurse -Force backend\data
+```
+
+There is **no separate DB migration/seed step** for running — on first start `DatabaseInitializer`
+creates/adopts the SQLite DB, bootstraps the FTS5 index, and seeds Project id=1.
+
+> On this machine the `dotnet` SDK is not on PATH — see the `dotnet-build-environment` memory for the
+> wrapper/invocation to use before running the commands above.
+
+## Architecture (the parts that span files)
+
+**Four projects, clean layering** (`backend/QaAutomation.sln`):
+- `QaAutomation.Core` — abstractions (`Abstractions/I*.cs`), options (`Configuration/`), entities + DTOs
+  (`Models/`), request/response contracts (`Contracts/`), `Agents/JsonUtils`. No implementation deps.
+- `QaAutomation.Infrastructure` — implements everything: EF `Data/`, ADO client, LLM providers, agents,
+  orchestrators, events, KB, reports, batches, settings, logging. **DI composition root is
+  `Infrastructure/DependencyInjection.cs` (`AddInfrastructure`)** — start there to see how it's wired.
+- `QaAutomation.Api` — thin host. `Program.cs` is deliberately just `AddCustom*`/`Configure*` one-liners
+  (house style; real wiring lives in `Api/Configurations/ConfigurationExtensions.cs` + the Infra root).
+  Flat `/api` controllers, `Middlewares/`, SSE in `Streaming/`.
+- `QaAutomation.Tests` — xUnit (golden-file + parity + unit tests).
+
+**Two agent pipelines, driven by singleton orchestrators:**
+- `AgentOrchestrator` (test authoring): `Analyst` → `Tester` → `TestCaseDraft`s → human review → push
+  to an ADO Test Plan/Suite (creates Test Case, adds to suite, links Tested-By to the story).
+- `BugOrchestrator` (bug finding): `Analyst` → `BugWriter` → reviewed Bug work items.
+- Agents (`Infrastructure/Agents/`: `AnalystAgent`, `TesterAgent`, `BugWriterAgent`, `CodeVerifierAgent`)
+  each wrap an `ILlmClient` and stream output. System prompts are **embedded resources extracted
+  byte-exact** from the Python original (`AgentPrompts`; regenerate via `write_prompts.py`).
+
+**Background-work pattern (important):** orchestrators are singletons; an HTTP call seeds a `TestSession`/
+`BugSession` synchronously, returns its id, then runs the pipeline on a **background `Task` with its OWN
+DI scope** — never the request scope (which disposes when the handler returns). Live progress is pumped
+to `IEventBus` (in-memory pub/sub) and streamed to the browser via **SSE**; the durable narrative is
+persisted to the session's `EventLogJson`. Cancellation flows through `CancellationRegistry`; a global
+concurrency cap lives in `PipelineConcurrency`.
+
+**LLM layer (runtime-switchable):** `ILlmClientFactory` builds a **fresh client per call** (no caching).
+The active provider is persisted in SQLite (`LlmProviderState`) and switched live from the AppBar.
+Providers in `Infrastructure/Llm/`: **`ClaudeCli` (default** — spawns the local `claude` process and
+streams stdout; no API key/cost), `Anthropic` (raw `HttpClient`), `AzureOpenAi`, `OpenAiCompatible`
+(GitHub Models = free). Known limitation: the Claude CLI subscription hits usage limits and fails on
+very large generations (`manual-verification-and-open-issues.md`, Open Issue #1) — for big tickets prefer
+a paid API provider or chunk the work.
+
+**ADO client:** `AzureDevOps/AzureDevOpsClient.cs` (singleton; PAT Basic auth via `AdoAuthHandler`;
+60s work-item cache). `IAzureDevOpsClient` is the full surface: reads (work items, children/epics, test
+plans/suites, comments/updates, Git refs/diffs/commits, code search), and **writes** (create Test Case,
+add to suite, link Tested-By, create Bug, link Related). It already has the Git/code-read methods
+(`GetLinkedChangesAsync`, `GetPullRequestDiffAsync`, `SearchCodeAsync`, `GetFileContentAsync`, …) used
+for code-aware analysis.
+
+**Settings (two layers):** `.env` (flat Python-style names like `ADOACCESS_PAT`) bridges into strongly-typed
+`Options` via `PostConfigure` in `DependencyInjection.cs`; then a **`RuntimeSettings` overlay**
+(DB-persisted, UI-edited) `PostConfigure`s *after* it, so a saved DB value wins over `.env`.
+`AppSettingsService.ApplyAsync()` applies overrides at startup. Add a new setting in both places.
+
+**Data:** `QaDbContext` (EF Core 8 / SQLite). `DatabaseInitializer` migrates or **adopts an existing
+Python-era `qa.db`** via a baseline-history insert (no data loss), bootstraps the FTS5 `doc_chunks`
+table, and seeds Project id=1. Migrations apply on startup. The git-ignored `backend/data/` holds the
+DB, KB `.md` uploads, and generated report HTML.
+
+**Frontend:** `client/src` → `api/` (axios client per controller, shared `client.ts`), `app/` (Redux
+`store`, `colorModeSlice`, React Query `queryClient`, typed `hooks`), `pages/`, `routes/` (`AppRoutes` +
+central `paths.ts`), `session/configs`, `theme/`. Pages map 1:1 to controllers: Settings, Knowledgebase,
+Author Tests, Find Bugs, Reports, Diagnostics.
+
+## Conventions & gotchas
+
+- **Byte-exact parity is load-bearing.** ADO write bodies (Steps XML, Bug ReproSteps/AC/SystemInfo HTML,
+  json-patch op order, integer Priority), per-provider LLM error prefixes, and agent prompts were verified
+  byte-for-byte against the retired Python via golden-file diffs (`AdoGoldenTests`, `tests/golden/`) and
+  adversarial audits. **Don't casually edit these** — run the golden tests. Intentional, documented
+  deviations are listed in `backend/README.md` (B2–B4 sections).
+- `ExceptionHandlingMiddleware` is registered **first** so it wraps everything; errors return ProblemDetails.
+- Keep `Program.cs` as one-liners; put real setup in `ConfigurationExtensions` / the Infra DI root.
+- Secrets load from the repo-root `.env` (DotNetEnv walks up the tree). Never commit `.env`, `qa.db`,
+  or personal data. CORS allows only `:5173`/`:5174`.
+- For manual ADO checks, work item **171740** is the standing test ticket.
+
+## Docs
+
+- `README.md` (root) — full setup/run guide, provider switching, troubleshooting.
+- `backend/README.md` — backend internals, migration phase log (B0–B5+), and accepted parity deviations.
+- `docs/dotnet-migration-spec.md` — authoritative brief + locked decisions (referenced as "spec §N" in code).
+- `docs/manual-verification-and-open-issues.md` — living verification log + known open issues.
