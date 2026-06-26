@@ -66,4 +66,19 @@ export async function getAdoBranches(repository?: string): Promise<string[]> {
   return data.branches ?? []
 }
 
+// Test plans / suites — for the QA Loop module-analysis searchable dropdowns.
+export interface AdoTestPlan { id: number; name: string }
+export interface AdoTestSuite { id: number; name: string; parentId?: number | null }
+
+export async function getAdoTestPlans(): Promise<AdoTestPlan[]> {
+  const { data } = await api.get<{ plans: AdoTestPlan[] }>('/api/settings/ado/test-plans')
+  return data.plans ?? []
+}
+
+export async function getAdoTestSuites(planId: number): Promise<AdoTestSuite[]> {
+  const { data } = await api.get<{ suites: AdoTestSuite[] }>('/api/settings/ado/test-suites',
+    { params: { planId } })
+  return data.suites ?? []
+}
+
 export type { AdoProject }
