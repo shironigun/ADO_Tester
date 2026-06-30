@@ -40,7 +40,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - All in namespace QaAutomation.Core.Models; existing POCOs unchanged; compiles
 
 #### QAL-003: Add AdoBuild + AdoBuildChange build-read DTOs
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-003
 - **Description:** Blueprint Pipeline Watcher → "Net-new build-read DTOs" (line ~2737-2755). Add two flat positional records next to ChangedFile/AdoTestPlan in AdoModels.cs in the file's existing public sealed record style. Use the canonical name AdoBuildChange (NOT AdoBuildCommit, which appears once in a stray blueprint interface snippet — follow the canonical naming table). Defined here in FOUNDATION; first referenced by the build-read methods in the WATCHER phase (definition-before-use, do not defer).
 - **File:** `backend/src/QaAutomation.Core/Models/AdoModels.cs`

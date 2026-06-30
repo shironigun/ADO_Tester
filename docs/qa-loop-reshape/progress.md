@@ -13,7 +13,7 @@
 |---------|-----------|--------|---------|-----------|-------|
 | QAL-001 | Add seven QA-Loop enums | COMPLETED | 2026-06-30 | 2026-06-30 | 7 enums appended to Enums.cs; 4 exact-name, 4 wire-string with [EnumMember]+extensions |
 | QAL-002 | Add shared agent-output POCOs | COMPLETED | 2026-06-30 | 2026-06-30 | RouteInfo/DtoInfo/WorkflowInfo/InventoryDoc/SurfaceMatrix/ImpactAnalysis appended to AgentOutputs.cs |
-| QAL-003 | Add AdoBuild + AdoBuildChange build-read DTOs | NOT STARTED |  |  |  |
+| QAL-003 | Add AdoBuild + AdoBuildChange build-read DTOs | COMPLETED | 2026-06-30 | 2026-06-30 | 2 records added to AdoModels.cs in Build/pipeline region |
 | QAL-004 | Add QaLoopOptions configuration class | NOT STARTED |  |  |  |
 | QAL-005 | Add DmsProfileOptions registry | NOT STARTED |  |  |  |
 | QAL-006 | Create ApiTestSession + ApiTestDraft entities | NOT STARTED |  |  |  |
@@ -77,13 +77,16 @@
 
 ## Summary
 - **Total Tasks:** 61
-- **Completed:** 2
+- **Completed:** 3
 - **In Progress:** 0
-- **Not Started:** 59
+- **Not Started:** 58
 
 ---
 
 ## Log
+### 2026-06-30 (QAL-003)
+- **QAL-003** COMPLETED — `backend/src/QaAutomation.Core/Models/AdoModels.cs`: AdoBuild(Id,SourceVersion,RepositoryId,FinishedAt) + AdoBuildChange(Id,Message) in Build/pipeline region. Build green.
+
 ### 2026-06-30 (QAL-002)
 - **QAL-002** COMPLETED — `backend/src/QaAutomation.Core/Models/AgentOutputs.cs`: appended RouteInfo, DtoField, DtoInfo, WorkflowStep, WorkflowInfo, InventoryDoc (positional records), SurfaceRow (mutable class), SurfaceMatrix (record), ImpactAnalysis (class). Build green.
 
