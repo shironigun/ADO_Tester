@@ -26,6 +26,7 @@ import AssessmentOutlinedIcon from '@mui/icons-material/AssessmentOutlined'
 import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined'
 import HealthAndSafetyOutlinedIcon from '@mui/icons-material/HealthAndSafetyOutlined'
 import RadioButtonCheckedIcon from '@mui/icons-material/RadioButtonChecked'
+import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined'
 import PageHeader from '../components/PageHeader'
 import Section from '../components/Section'
 import { FadeIn, Stagger, StaggerItem } from '../motion/primitives'
@@ -67,6 +68,11 @@ const K = {
   VERIFY_DETAIL: 'find_bugs.verify_detail',
   VERIFY_STEP_SCOPE: 'find_bugs.verify_step_scope',
   BUG_FROM_CASE_MODE: 'find_bugs.bug_from_case_mode',
+  TEAMS_WEBHOOK: 'teams.webhook_url',
+  TEAMS_TEMPLATE: 'teams.template',
+  QALOOP_POLL: 'qaloop.poll_interval_minutes',
+  QALOOP_REPORT: 'qaloop.report_provider',
+  QALOOP_ACTIVITY: 'qaloop.activity_enabled',
 }
 
 const REPORT_TYPE_OPTIONS = ['User Story', 'Bug', 'Defect', 'Task', 'Issue', 'Feature']
@@ -185,6 +191,7 @@ const TABS = [
   { key: 'llm',      label: 'LLM Providers', icon: <SmartToyOutlinedIcon fontSize="small" /> },
   { key: 'tests',    label: 'Author Tests',  icon: <RuleOutlinedIcon fontSize="small" /> },
   { key: 'findbugs', label: 'Find Bugs',     icon: <BugReportOutlinedIcon fontSize="small" /> },
+  { key: 'qaloop',   label: 'QA Loop',       icon: <ScienceOutlinedIcon fontSize="small" /> },
   { key: 'reports',  label: 'Reports',       icon: <AssessmentOutlinedIcon fontSize="small" /> },
   { key: 'diag',     label: 'Diagnostics',   icon: <HealthAndSafetyOutlinedIcon fontSize="small" /> },
 ] as const
@@ -229,6 +236,11 @@ export default function SettingsPage() {
   const [verifyDetail, setVerifyDetail] = useState('step')
   const [verifyScope, setVerifyScope] = useState('fails_only')
   const [bugFromMode, setBugFromMode] = useState('instant')
+  const [teamsWebhook, setTeamsWebhook] = useState('')
+  const [teamsTemplate, setTeamsTemplate] = useState('developer')
+  const [pollInterval, setPollInterval] = useState('5')
+  const [reportProvider, setReportProvider] = useState('allure')
+  const [qaLoopActivity, setQaLoopActivity] = useState(true)
 
   const [plans, setPlans] = useState<TestPlan[]>([])
   const [suites, setSuites] = useState<TestSuite[]>([])
@@ -281,6 +293,10 @@ export default function SettingsPage() {
       setVerifyDetail(String(data[K.VERIFY_DETAIL] ?? 'step'))
       setVerifyScope(String(data[K.VERIFY_STEP_SCOPE] ?? 'fails_only'))
       setBugFromMode(String(data[K.BUG_FROM_CASE_MODE] ?? 'instant'))
+      setTeamsTemplate(String(data[K.TEAMS_TEMPLATE] ?? 'developer'))
+      setPollInterval(String(data[K.QALOOP_POLL] ?? '5'))
+      setReportProvider(String(data[K.QALOOP_REPORT] ?? 'allure'))
+      setQaLoopActivity(String(data[K.QALOOP_ACTIVITY] ?? 'true').toLowerCase() === 'true')
     } catch (e) { setError(axiosMessage(e)) }
     finally { setLoading(false) }
   }, [])
@@ -347,6 +363,7 @@ export default function SettingsPage() {
         [K.ANTHROPIC_KEY, setAnthropicKey],
         [K.AZURE_KEY, setAzureKey],
         [K.OPENAI_KEY, setOpenaiKey],
+        [K.TEAMS_WEBHOOK, setTeamsWebhook],
       ] as const).forEach(([k, setter]) => { if (values[k]) setter('') })
     } catch (e) { setError(axiosMessage(e)) }
   }
@@ -657,6 +674,50 @@ export default function SettingsPage() {
                       [K.VERIFY_DETAIL]: verifyDetail,
                       [K.VERIFY_STEP_SCOPE]: verifyScope,
                       [K.BUG_FROM_CASE_MODE]: bugFromMode,
+                    })} />
+                  </Panel>
+                </Box>
+              )}
+
+              {/* ── QA LOOP ───────────────────────────────────────────────── */}
+              {tab === 'qaloop' && (
+                <Box>
+                  <TabTitle title="QA Loop" hint="Pipeline watcher, Teams notifications, report format, and activity toggle." />
+                  <Panel>
+                    <Stack spacing={2.5}>
+                      <SecretField label="Teams webhook URL" value={teamsWebhook} set={setTeamsWebhook}
+                        isSet={Boolean(config[`${K.TEAMS_WEBHOOK}.set`])} />
+                      <FormControl size="small" sx={{ maxWidth: 320 }}>
+                        <InputLabel>Teams card template</InputLabel>
+                        <Select label="Teams card template" value={teamsTemplate}
+                          onChange={e => setTeamsTemplate(e.target.value)}>
+                          <MenuItem value="developer">Developer</MenuItem>
+                          <MenuItem value="compact">Compact</MenuItem>
+                          <MenuItem value="scheduled">Scheduled</MenuItem>
+                        </Select>
+                      </FormControl>
+                      <TextField label="Pipeline poll interval (minutes)" size="small" type="number"
+                        sx={{ width: 260 }} value={pollInterval}
+                        onChange={e => setPollInterval(e.target.value)} />
+                      <FormControl size="small" sx={{ maxWidth: 320 }}>
+                        <InputLabel>Report format</InputLabel>
+                        <Select label="Report format" value={reportProvider}
+                          onChange={e => setReportProvider(e.target.value)}>
+                          <MenuItem value="allure">Allure (default)</MenuItem>
+                          <MenuItem value="playwright">Playwright HTML</MenuItem>
+                          <MenuItem value="both">Both</MenuItem>
+                        </Select>
+                      </FormControl>
+                      <FormControlLabel
+                        control={<Switch checked={qaLoopActivity} onChange={(_, v) => setQaLoopActivity(v)} />}
+                        label="Stream agent activity (disabling saves bandwidth and storage)" />
+                    </Stack>
+                    <SaveBar onClick={() => save({
+                      [K.TEAMS_WEBHOOK]: teamsWebhook,
+                      [K.TEAMS_TEMPLATE]: teamsTemplate,
+                      [K.QALOOP_POLL]: pollInterval,
+                      [K.QALOOP_REPORT]: reportProvider,
+                      [K.QALOOP_ACTIVITY]: qaLoopActivity ? 'true' : 'false',
                     })} />
                   </Panel>
                 </Box>

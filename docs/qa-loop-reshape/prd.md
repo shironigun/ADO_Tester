@@ -715,7 +715,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Migration auto-applies on startup; compiles
 
 #### QAL-061: FE Allure report + activity swap + Settings UI
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-061
 - **Description:** solution "## Activity Capture" decision 12 + Frontend Layout amendments (UI/UX 14+15+16). Surface the new backend signals in the FE. Add `activityEnabled` to the session + run DTOs so the FE picks AgentConsole vs indeterminate progress (`reportPath` already exists on run DTOs). The /qa-runs run-detail drawer gains an "Allure report" open-in-new-tab button + a "Download" button (same single-file html) conditional on `reportPath` + provider, with a muted "report unavailable" state when generate failed; the existing "Playwright report" button becomes conditional on provider ∈ {playwright, both}. AgentConsole ↔ indeterminate LinearProgress/LiveActivityIndicator + step pills swaps per `activityEnabled`. Settings page adds a `report_provider` SELECT (Allure default / Playwright / Both) and an `activity_enabled` SWITCH alongside the existing teams.webhook_url / teams.template / qaloop.poll_interval_minutes (real select + switch controls, not text fields). Optional minor run-history grid "report available" indicator. Amends QAL-032/033 (DTOs), QAL-049 (QaRunsPage drawer), QAL-048 (qaLoopConfig console swap), plus the Settings page.
 - **File:** `client/src/pages/QaRunsPage.tsx`, `client/src/session/configs/qaLoop.tsx`, `client/src/session/SessionWorkspace.tsx`, `client/src/pages/SettingsPage.tsx`, `client/src/api/qaRuns.ts`, `client/src/api/qaLoop.ts`, `backend/src/QaAutomation.Core/Contracts/QaLoopContracts.cs`, `backend/src/QaAutomation.Core/Contracts/QaRunsContracts.cs`

@@ -38,6 +38,7 @@ export interface SurfaceRow {
 export interface ApiSessionSummary extends SessionSummary {
   module: string | null
   draftCount: number
+  activityEnabled: boolean
 }
 
 /** Wire shape of a QA Loop session detail (GET /api/qaloop/{id}). */
@@ -46,6 +47,7 @@ export interface ApiSessionDetail extends SessionDetail {
   testPlanId?: number | null
   testSuiteId?: number | null
   inventoryJson?: string | null
+  activityEnabled: boolean
 }
 
 export interface ApiTestDraftDto {

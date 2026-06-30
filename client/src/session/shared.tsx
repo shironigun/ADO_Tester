@@ -9,7 +9,7 @@ import type { SessionDetail, SessionModuleConfig, SessionSummary } from './types
 // working unchanged after the F1 consolidation into common/errors.
 export { axiosMessage } from '../common/errors'
 
-/** Returns the session identity string for display. Uses renderIdentity when defined, else "#id — title". */
+// eslint-disable-next-line react-refresh/only-export-components
 export function sessionIdentity(config: SessionModuleConfig, s: SessionSummary | SessionDetail): string {
   if (config.renderIdentity) return config.renderIdentity(s)
   const title = 'workItemTitle' in s ? s.workItemTitle : null
