@@ -55,3 +55,8 @@ public sealed record FailureOutcome
 
     public List<string> Artifacts { get; init; } = [];
 }
+
+// ── QA Loop triage / file-bugs results ───────────────────────────────────────
+
+public sealed record TriageResult(int TriagedCount, int RealBugCount);
+public sealed record FileBugsResult(int FiledCount, List<int> BugIds);

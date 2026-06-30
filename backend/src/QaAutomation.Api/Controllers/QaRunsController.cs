@@ -21,18 +21,20 @@ public sealed class QaRunsController : ControllerBase
     private readonly IEventBus _bus;
     private readonly IAzureDevOpsClient _ado;
     private readonly ILlmClientFactory _llmFactory;
+    private readonly IResultsIngestService _ingest;
     private readonly QaDbContext _db;
     private readonly IOptions<QaLoopOptions> _opts;
     private readonly ILogger<QaRunsController> _log;
 
     public QaRunsController(
         IServiceProvider sp, IEventBus bus, IAzureDevOpsClient ado, ILlmClientFactory llmFactory,
-        QaDbContext db, IOptions<QaLoopOptions> opts, ILogger<QaRunsController> log)
+        IResultsIngestService ingest, QaDbContext db, IOptions<QaLoopOptions> opts, ILogger<QaRunsController> log)
     {
         _sp = sp;
         _bus = bus;
         _ado = ado;
         _llmFactory = llmFactory;
+        _ingest = ingest;
         _db = db;
         _opts = opts;
         _log = log;
@@ -129,15 +131,13 @@ public sealed class QaRunsController : ControllerBase
     [HttpPost("{runId:int}/triage")]
     public async Task<IActionResult> Triage(int runId, CancellationToken ct)
     {
-        // QAL-038: full AI triage (FailureTriageAgent) is wired here.
-        // Stub: mark all unclassified failures as TestIssue with confidence "low" until QAL-038 implements.
         try
         {
+            var run = await _db.TestRuns.FindAsync([runId], ct);
+            if (run is null) return StatusCode(404, new { detail = "Run not found." });
+            var result = await _ingest.TriageAsync(runId, ct);
             var failures = await _db.TestFailures.Where(f => f.RunId == runId).ToListAsync(ct);
-            if (failures.Count == 0) return StatusCode(404, new { detail = "No failures for this run." });
-            // ponytail: stub — QAL-038 adds real FailureTriageAgent call here
-            await _db.SaveChangesAsync(ct);
-            return Ok(failures.Select(TestFailureDto.From).ToList());
+            return Ok(new { result.TriagedCount, result.RealBugCount, Failures = failures.Select(TestFailureDto.From) });
         }
         catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
     }
@@ -151,19 +151,10 @@ public sealed class QaRunsController : ControllerBase
             return StatusCode(400, new { detail = "failureIds must not be empty." });
         try
         {
-            var failures = await _db.TestFailures
-                .Where(f => f.RunId == runId && req.FailureIds.Contains(f.Id) && f.BugDraftJson != null)
-                .ToListAsync(ct);
-
-            var bugIds = new List<int>();
-            foreach (var failure in failures)
-            {
-                // QAL-038: will inject real ResultsIngestService.FileBugsAsync here.
-                // Stub: skip actual ADO filing.
-                _ = failure; // suppress unused warning
-            }
-
-            return Ok(new FileBugsResponse { FiledCount = bugIds.Count, BugIds = bugIds });
+            var run = await _db.TestRuns.FindAsync([runId], ct);
+            if (run is null) return StatusCode(404, new { detail = "Run not found." });
+            var result = await _ingest.FileBugsAsync(runId, req.FailureIds, req.StoryId, ct);
+            return Ok(new FileBugsResponse { FiledCount = result.FiledCount, BugIds = result.BugIds });
         }
         catch (AdoApiError e) { return StatusCode(502, new { detail = e.Message }); }
         catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }

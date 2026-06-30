@@ -10,4 +10,18 @@ namespace QaAutomation.Core.Abstractions;
 public interface IResultsIngestService
 {
     Task<IngestResultsResult> IngestAsync(int projectId, IngestResultsRequest request, CancellationToken ct = default);
+
+    // ── QA Loop split: triage-persist (never files) + user-gated file-bugs ──
+
+    /// <summary>
+    /// Triage all un-triaged failures for a QA Loop run: calls FailureTriageAgent, updates
+    /// TestFailure rows (Classification/Confidence/Reason/BugDraftJson). NEVER files to ADO.
+    /// </summary>
+    Task<TriageResult> TriageAsync(int runId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Files ADO Bugs from pre-built BugDraftJson on the selected TestFailure rows.
+    /// No second LLM call. Links each Bug to its Test Case + optional story.
+    /// </summary>
+    Task<FileBugsResult> FileBugsAsync(int runId, IReadOnlyList<int> failureIds, int? storyId, CancellationToken ct = default);
 }

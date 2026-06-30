@@ -1,9 +1,12 @@
 using System.Text;
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using QaAutomation.Core.Abstractions;
 using QaAutomation.Core.Contracts;
 using QaAutomation.Core.Models;
 using QaAutomation.Infrastructure.Agents;
+using QaAutomation.Infrastructure.Data;
 
 namespace QaAutomation.Infrastructure.Results;
 
@@ -17,14 +20,17 @@ public sealed class ResultsIngestService : IResultsIngestService
     private readonly ILlmClientFactory _llmFactory;
     private readonly IKnowledgebaseService _kb;
     private readonly IAzureDevOpsClient _ado;
+    private readonly QaDbContext _db;
     private readonly ILogger<ResultsIngestService> _log;
 
     public ResultsIngestService(
-        ILlmClientFactory llmFactory, IKnowledgebaseService kb, IAzureDevOpsClient ado, ILogger<ResultsIngestService> log)
+        ILlmClientFactory llmFactory, IKnowledgebaseService kb, IAzureDevOpsClient ado,
+        QaDbContext db, ILogger<ResultsIngestService> log)
     {
         _llmFactory = llmFactory;
         _kb = kb;
         _ado = ado;
+        _db = db;
         _log = log;
     }
 
@@ -280,4 +286,131 @@ public sealed class ResultsIngestService : IResultsIngestService
 
     private static string Esc(string s) => s
         .Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;").Replace("'", "&#x27;");
+
+    // ── QA Loop: TriageAsync + FileBugsAsync ─────────────────────────────────
+
+    public async Task<TriageResult> TriageAsync(int runId, CancellationToken ct = default)
+    {
+        var failures = await _db.TestFailures
+            .Where(f => f.RunId == runId && f.BugDraftJson == null)
+            .ToListAsync(ct);
+
+        if (failures.Count == 0) return new TriageResult(0, 0);
+
+        var llm = await _llmFactory.CreateAsync(ct);
+        var agent = new FailureTriageAgent(llm);
+        var realBugCount = 0;
+
+        foreach (var failure in failures)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                var triage = await agent.TriageAsync(
+                    failure.TestTitle, failure.AdoTestCaseId, failure.Reason ?? "", "", null,
+                    cancellationToken: ct);
+
+                failure.Classification = QaLoopEnumExtensions.ToFailureClassification(triage.Classification);
+                failure.Confidence = triage.Confidence;
+                failure.Reason = triage.Reason;
+
+                if (triage.Classification == "real_bug")
+                {
+                    var draft = new
+                    {
+                        triage.Bug.Title, triage.Bug.Severity, triage.Bug.Preconditions,
+                        triage.Bug.ReproSteps, triage.Bug.Expected,
+                        Observations = triage.Observations,
+                    };
+                    failure.BugDraftJson = JsonSerializer.Serialize(draft);
+                    realBugCount++;
+                }
+                _log.LogInformation("Triaged failure {Id} '{Title}' → {Class} ({Conf})",
+                    failure.Id, failure.TestTitle, triage.Classification, triage.Confidence);
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "Triage failed for failure {Id} '{Title}'", failure.Id, failure.TestTitle);
+            }
+        }
+
+        await _db.SaveChangesAsync(ct);
+        return new TriageResult(failures.Count, realBugCount);
+    }
+
+    public async Task<FileBugsResult> FileBugsAsync(
+        int runId, IReadOnlyList<int> failureIds, int? storyId, CancellationToken ct = default)
+    {
+        var failures = await _db.TestFailures
+            .Where(f => f.RunId == runId && failureIds.Contains(f.Id) && f.BugDraftJson != null && f.BugId == null)
+            .ToListAsync(ct);
+
+        var bugIds = new List<int>();
+        foreach (var failure in failures)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                // Deserialize the pre-built bug draft
+                using var doc = JsonDocument.Parse(failure.BugDraftJson!);
+                var root = doc.RootElement;
+                var title = root.GetProperty("Title").GetString() ?? "";
+                var severity = root.GetProperty("Severity").GetString() ?? "Medium";
+                var preconditions = root.TryGetProperty("Preconditions", out var pre) ? pre.GetString() ?? "" : "";
+                var expected = root.TryGetProperty("Expected", out var exp) ? exp.GetString() ?? "" : "";
+                var reproSteps = root.TryGetProperty("ReproSteps", out var steps)
+                    ? steps.EnumerateArray().Select(s => s.GetString() ?? "").ToList()
+                    : new List<string>();
+                var observations = root.TryGetProperty("Observations", out var obs)
+                    ? obs.EnumerateArray().Select(s => s.GetString() ?? "").ToList()
+                    : new List<string>();
+
+                var bug = new GeneratedBug
+                {
+                    Title = title, Severity = severity, Preconditions = preconditions,
+                    ReproSteps = reproSteps, Expected = expected,
+                    Actual = string.Join(" ", observations), SuggestedFix = "",
+                };
+                var hasTestCase = failure.AdoTestCaseId.HasValue;
+                var reproHtml = BuildReproHtml(bug, observations, hasTestCase);
+                var systemInfo = BuildQaLoopSystemInfo(failure, severity);
+
+                var bugId = await _ado.CreateBugAsync(
+                    title, severity, preconditions: "", reproSteps: [],
+                    expected: hasTestCase ? "" : expected,
+                    actual: "", suggestedFix: "",
+                    systemInfo: systemInfo, reproHtml: reproHtml, ct: ct);
+
+                if (failure.AdoTestCaseId is int tcId)
+                    await TryLinkAsync(bugId, tcId, "test case");
+                if (storyId is int story)
+                    await TryLinkAsync(bugId, story, "story");
+
+                failure.BugId = bugId;
+                bugIds.Add(bugId);
+                _log.LogInformation("Filed Bug #{Bug} from failure {Id}", bugId, failure.Id);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "FileBugs failed for failure {Id}", failure.Id);
+            }
+        }
+
+        await _db.SaveChangesAsync(ct);
+        return new FileBugsResult(bugIds.Count, bugIds);
+    }
+
+    private static string BuildQaLoopSystemInfo(TestFailure failure, string severity)
+    {
+        var sb = new StringBuilder();
+        sb.Append("<div><b>How this bug was found</b></div>");
+        sb.Append("<div>Filed from a failed QA Loop Playwright run.</div>");
+        sb.Append($"<br/><div><b>Automated test:</b> {Esc(failure.TestTitle)}</div>");
+        if (failure.AdoTestCaseId is int id)
+            sb.Append($"<div><b>ADO Test Case:</b> #{id}</div>");
+        sb.Append($"<br/><div><b>AI triage verdict:</b> Real bug — {Esc(severity)} severity ({Esc(failure.Confidence)} confidence)</div>");
+        if (!string.IsNullOrWhiteSpace(failure.Reason))
+            sb.Append($"<div><b>Why:</b> {Esc(failure.Reason)}</div>");
+        return sb.ToString();
+    }
 }
