@@ -690,7 +690,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Compiles; existing three keys unaffected
 
 #### QAL-059: Allure-rich generated specs (generator prompt amendments)
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-059
 - **Description:** solution "## Allure Reporting" decision 5. Amend the three `*_generator_system.txt` prompts so every generated spec wraps each HTTP call in `test.step` + `allure.attachment` and carries Allure metadata — API-level capture authored INTO the spec, not UI testing (no `use:` block anywhere). Each call attaches: request (method/url/headers with auth redacted/payload), response (status code/headers/body), schema-validation diff (Contract level), assertion expected-vs-actual, and latency as an Allure parameter. Metadata: epic=module, feature=level (Contract/Endpoint/Workflow), story=route/flow, severity, tags, and the `[tcId]` as an `allure.link` to the ADO Test Case. Amends QAL-012 (prompt bodies) + QAL-015/016/017 (the generators that consume them) — prompt-body-only change, generator C# unchanged.
 - **File:** `backend/src/QaAutomation.Infrastructure/Agents/Prompts/contract_generator_system.txt`, `backend/src/QaAutomation.Infrastructure/Agents/Prompts/endpoint_generator_system.txt`, `backend/src/QaAutomation.Infrastructure/Agents/Prompts/workflow_generator_system.txt`
