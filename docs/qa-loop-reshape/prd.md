@@ -159,7 +159,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - ModuleAnalyzerSystem property unchanged; compiles
 
 #### QAL-014: Rewrite ModuleAnalyzerAgent (inventory + matrix + 1-pass refinement)
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-014
 - **Description:** Blueprint Agents & Prompts → "ModuleAnalyzerAgent (rewrite)". Reuse the existing completion + DI plumbing but rewrite output to emit InventoryDoc + SurfaceMatrix in one pass, plus an optional additionalFilesNeeded[] that drives exactly one bounded refinement fetch (no unbounded tool loop). Reconcile surfaces against the supplied existing Test Cases.
 - **File:** `backend/src/QaAutomation.Infrastructure/Agents/ModuleAnalyzerAgent.cs`
@@ -171,7 +171,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - gap surfaces default selected=true; covered surfaces (linkedTestCaseId set) default selected=false
 
 #### QAL-015: Create ContractGeneratorAgent
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-015
 - **Description:** Blueprint Agents & Prompts → ContractGeneratorAgent (new). One LLM call for the Zod schema + validator spec, one for the house-style Test Case. Emits a GeneratedSpec (test case + spec text + schema + source routes).
 - **File:** `backend/src/QaAutomation.Infrastructure/Agents/ContractGeneratorAgent.cs`
@@ -183,7 +183,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Provider-portable single-shot pattern; compiles
 
 #### QAL-016: Create EndpointGeneratorAgent
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-016
 - **Description:** Blueprint Agents & Prompts → EndpointGeneratorAgent (new). Emits one spec file grouping all cases of an endpoint but a separate ADO Test Case per case (happy 200 / 401 / 400).
 - **File:** `backend/src/QaAutomation.Infrastructure/Agents/EndpointGeneratorAgent.cs`
@@ -194,7 +194,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Output path backend/data/scripts/{module}/endpoints/{slug}.endpoint.spec.ts; provider-portable; compiles
 
 #### QAL-017: Create WorkflowGeneratorAgent
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-017
 - **Description:** Blueprint Agents & Prompts → WorkflowGeneratorAgent (new). Emits a chained-call business-flow spec with idempotent cleanup and a Test Case with one ADO step per called endpoint.
 - **File:** `backend/src/QaAutomation.Infrastructure/Agents/WorkflowGeneratorAgent.cs`
@@ -205,7 +205,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Output path backend/data/scripts/{module}/workflows/{slug}.workflow.spec.ts; provider-portable; compiles
 
 #### QAL-018: Create shared [<tcId-pending>] TitleTag enforcement helper
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-018
 - **Description:** Blueprint Agents & Prompts → "Post-LLM [<tcId-pending>] title-tag enforcement (shared)". A static helper the three generators call to verify/auto-inject the placeholder so the JUnit parser's \[(\d+)\] regex can later map failures.
 - **File:** `backend/src/QaAutomation.Infrastructure/Agents/ContractGeneratorAgent.cs`
@@ -215,7 +215,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Shared by all three generator agents (placement may be a small shared static class/region)
 
 #### QAL-019: Create ImpactAnalyzerAgent
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-019
 - **Description:** Blueprint Agents & Prompts → ImpactAnalyzerAgent (new). Reads changed files + commit messages + a compact ApiTestDraft inventory projection + FTS5 KB chunks; returns impacted draft ids with reasoning/confidence. Reuses JsonUtils.CompleteJsonAsync + the PipelineConcurrency gate.
 - **File:** `backend/src/QaAutomation.Infrastructure/Agents/ImpactAnalyzerAgent.cs`

@@ -24,12 +24,12 @@
 | QAL-011 | Author module_analyzer_system.txt rewrite | COMPLETED | 2026-06-30 | 2026-06-30 | Rewritten to emit inventory+surfaceMatrix+additionalFilesNeeded JSON |
 | QAL-012 | Author 7 net-new embedded prompt .txt files | COMPLETED | 2026-06-30 | 2026-06-30 | 7 prompts: contract/endpoint/workflow generator+testcase + impact_analyzer; Allure instrumentation in generators |
 | QAL-013 | Register 7 prompt properties in AgentPrompts | COMPLETED | 2026-06-30 | 2026-06-30 | 7 Load() properties added to AgentPrompts.cs |
-| QAL-014 | Rewrite ModuleAnalyzerAgent (inventory + matrix + 1-pass refinement) | NOT STARTED |  |  |  |
-| QAL-015 | Create ContractGeneratorAgent | NOT STARTED |  |  |  |
-| QAL-016 | Create EndpointGeneratorAgent | NOT STARTED |  |  |  |
-| QAL-017 | Create WorkflowGeneratorAgent | NOT STARTED |  |  |  |
-| QAL-018 | Create shared [<tcId-pending>] TitleTag enforcement helper | NOT STARTED |  |  |  |
-| QAL-019 | Create ImpactAnalyzerAgent | NOT STARTED |  |  |  |
+| QAL-014 | Rewrite ModuleAnalyzerAgent (inventory + matrix + 1-pass refinement) | COMPLETED | 2026-06-30 | 2026-06-30 | New AnalyzeInventoryAsync returning ModuleAnalysis; legacy AnalyzeAsync preserved for ModuleAnalysisService |
+| QAL-015 | Create ContractGeneratorAgent | COMPLETED | 2026-06-30 | 2026-06-30 | ContractGeneratorAgent.cs with 2-pass LLM (spec+schema / test case) |
+| QAL-016 | Create EndpointGeneratorAgent | COMPLETED | 2026-06-30 | 2026-06-30 | EndpointGeneratorAgent.cs generating 200/401/400 cases |
+| QAL-017 | Create WorkflowGeneratorAgent | COMPLETED | 2026-06-30 | 2026-06-30 | WorkflowGeneratorAgent.cs with chained spec + per-leg test case |
+| QAL-018 | Create shared [<tcId-pending>] TitleTag enforcement helper | COMPLETED | 2026-06-30 | 2026-06-30 | TitleTag static partial class in ContractGeneratorAgent.cs |
+| QAL-019 | Create ImpactAnalyzerAgent | COMPLETED | 2026-06-30 | 2026-06-30 | ImpactAnalyzerAgent.cs with inventory projection (no SpecCode) |
 | QAL-020 | Define IQaLoopOrchestrator abstraction | NOT STARTED |  |  |  |
 | QAL-021 | Implement QaLoopOrchestrator scan+analyze background pipeline | NOT STARTED |  |  |  |
 | QAL-022 | Implement GenerateDraftsAsync (3 generators in parallel, selected-only) | NOT STARTED |  |  |  |
@@ -77,13 +77,21 @@
 
 ## Summary
 - **Total Tasks:** 61
-- **Completed:** 13
+- **Completed:** 19
 - **In Progress:** 0
-- **Not Started:** 48
+- **Not Started:** 42
 
 ---
 
 ## Log
+### 2026-06-30 (QAL-014..019)
+- **QAL-014** COMPLETED — `ModuleAnalyzerAgent.cs` rewritten: new AnalyzeInventoryAsync(module, source, existingCases, fetchFile, ...) returning ModuleAnalysis(InventoryDoc, SurfaceMatrix, AdditionalFilesNeeded); legacy AnalyzeAsync preserved for ModuleAnalysisService.
+- **QAL-015** COMPLETED — `ContractGeneratorAgent.cs`: 2-pass (generator+testcase), FallbackTestCase, GeneratedSpec record.
+- **QAL-016** COMPLETED — `EndpointGeneratorAgent.cs`: 200/401/400 cases, one spec file + one test case per case.
+- **QAL-017** COMPLETED — `WorkflowGeneratorAgent.cs`: chained spec with cleanup + per-leg ADO Test Case steps.
+- **QAL-018** COMPLETED — `TitleTag` partial static class in ContractGeneratorAgent.cs: EnsureInSpec + EnsureTitle helpers.
+- **QAL-019** COMPLETED — `ImpactAnalyzerAgent.cs`: DraftInventoryItem projection (no SpecCode), throws AgentException on bad JSON. Build green.
+
 ### 2026-06-30 (QAL-011/012/013)
 - **QAL-011** COMPLETED — `module_analyzer_system.txt` rewritten: emits inventory (routes/dtos/workflows) + surfaceMatrix (3-level rows) + additionalFilesNeeded.
 - **QAL-012** COMPLETED — 7 new prompts: contract/endpoint/workflow _generator + _testcase + impact_analyzer. Generators include Allure test.step + allure.attachment instrumentation (QAL-059 amendment). testcase prompts reuse Mahmood's voice from tester_system.txt.
