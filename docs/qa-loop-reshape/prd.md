@@ -603,7 +603,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - xUnit; runs green via dotnet test --filter FullyQualifiedName~QaLoopOrchestratorTests
 
 #### QAL-052: Write ImpactAnalyzerAgentTests
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-052
 - **Description:** Manifest ImpactAnalyzerAgentTests.cs (new). Verify the agent's JSON parsing/output contract and the malformed-JSON behavior the watcher relies on.
 - **File:** `backend/src/QaAutomation.Tests/ImpactAnalyzerAgentTests.cs`
