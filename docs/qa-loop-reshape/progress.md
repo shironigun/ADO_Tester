@@ -3,7 +3,7 @@
 ## Overview
 - **PRD:** prd.md
 - **Started:** 2026-06-30
-- **Status:** IN PROGRESS (QAL-051 done — 42 of 61 complete)
+- **Status:** IN PROGRESS (QAL-052 done — 43 of 61 complete)
 
 ---
 
@@ -62,7 +62,7 @@
 | QAL-049 | Repoint QaLoopPage + create QaRunsPage and QaPipelinesPage | COMPLETED | 2026-06-30 | 2026-06-30 | QaLoopPage one-liner; QaRunsPage (launcher, paged grid, drawer: failures+triage+file-bugs+impact); QaPipelinesPage (watch cards, enable Switch, Run latest, AddWatchDialog) |
 | QAL-050 | Wire routes/paths.ts, AppRoutes.tsx, Layout.tsx | COMPLETED | 2026-06-30 | 2026-06-30 | qaRuns+qaPipelines paths; /qa-loop/:sessionId full-screen; QA Runs+Pipelines nav+routes; TestRun status colors added to pipeline.ts |
 | QAL-051 | Write QaLoopOrchestratorTests | COMPLETED | 2026-06-30 | 2026-06-30 | 6 tests: AwaitingReview, Drafted(AutoHandoff), generate selected-only, push rewrites tag, push skips LinkTestedBy, repress-push skips already-pushed — all 6 pass |
-| QAL-052 | Write ImpactAnalyzerAgentTests | NOT STARTED |  |  |  |
+| QAL-052 | Write ImpactAnalyzerAgentTests | COMPLETED | 2026-06-30 | 2026-06-30 | 6 tests: valid parse, id filtering, empty ids+skippedReason, malformed JSON throws AgentException, array root throws, SpecCode excluded from prompt — all pass |
 | QAL-053 | Write JUnitTriageSplitTests + watcher ProcessBuild test | NOT STARTED |  |  |  |
 | QAL-054 | Full build, lint, test + golden parity + runtime smoke | NOT STARTED |  |  |  |
 | QAL-055 | Allure runtime deps + per-run reporter wiring | NOT STARTED |  |  |  |
@@ -77,7 +77,7 @@
 
 ## Summary
 - **Total Tasks:** 61
-- **Completed:** 42
+- **Completed:** 43
 - **In Progress:** 0
 - **Not Started:** 33
 
