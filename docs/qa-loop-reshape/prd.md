@@ -665,7 +665,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - All three written into `allure-results/` before generate; missing optional fields degrade gracefully (no crash); compiles
 
 #### QAL-057: Allure generate single-file + trends + ReportPath + fallback
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-057
 - **Description:** solution Runner step 4 + "## Allure Reporting" decisions 3+4+7. After the Playwright run, when `report_provider ∈ {allure, both}`: seed `allure-results/history/` from the persisted per-(module, pipeline) history store, run Node-native `allure generate --single-file`, set `TestRun.ReportPath` to the single-file `.html`, then copy `history/` back to the server-side store so cross-run trend continuity survives. Single-file/trends resolution per decision 4: generate WITH history seeded so trend DATA is baked into the single file; if QAL-057 verification shows the single-file build cannot render the trend widget, ReportPath falls back to the folder `index.html` + a zip download (trends never silently lost). Generate failure → run still passes/fails normally; ReportPath falls back to the Playwright `html/index.html` if present else null + a warning on `TestRun.ErrorMessage`. Amends QAL-025/QAL-028 (persist-outputs + ReportPath resolution).
 - **File:** `backend/src/QaAutomation.Infrastructure/QaRuns/PlaywrightRunner.cs`, `backend/src/QaAutomation.Infrastructure/QaRuns/RunExecutionService.cs`
