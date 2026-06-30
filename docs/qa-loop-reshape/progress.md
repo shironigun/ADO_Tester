@@ -3,7 +3,7 @@
 ## Overview
 - **PRD:** prd.md
 - **Started:** 2026-06-30
-- **Status:** IN PROGRESS (QAL-059 done — 50 of 61 complete)
+- **Status:** IN PROGRESS (QAL-060 done — 51 of 61 complete)
 
 ---
 
@@ -70,20 +70,23 @@
 | QAL-057 | Allure generate single-file + trends + ReportPath + fallback | COMPLETED | 2026-06-30 | 2026-06-30 | GenerateAllureReportAsync: seeds history, npx allure generate --single-file --clean, CopyHistoryBack, finds *.html in allure-report/; fallback=html/index.html or null; provider=playwright skips generate; RunExecutionService sets run.ReportPath; history keyed by (module,pipeline) under allure-history/ |
 | QAL-058 | Settings report_provider + activity_enabled (both keys end-to-end) | COMPLETED | 2026-06-30 | 2026-06-30 | Already fully wired in QAL-042/043: AllKeys+OptionKeys, .env bridge (QALOOP_REPORT_PROVIDER/QALOOP_ACTIVITY_ENABLED), RuntimeSettings PostConfigure overlay, OptionValue switch, _qaLoopCache.Clear(); build verified |
 | QAL-059 | Allure-rich generated specs (generator prompt amendments) | COMPLETED | 2026-06-30 | 2026-06-30 | Already done in QAL-012: all three *_generator_system.txt prompts have test.step, allure.attachment(request/response/assertion), latency parameter, epic/feature/story/severity/tag/link metadata, [<tcId-pending>] preserved, no use: block; EmbeddedResource via *.txt glob in csproj |
-| QAL-060 | ActivityEnabled persistence + streaming gate | NOT STARTED |  |  |  |
+| QAL-060 | ActivityEnabled persistence + streaming gate | COMPLETED | 2026-06-30 | 2026-06-30 | EmitClosure+PersistLog gated by session.ActivityEnabled; SpawnAsync suppressOutput gate; PlaywrightRunSpec.ActivityEnabled; RunExecutionService propagates run.ActivityEnabled |
 | QAL-061 | FE Allure report + activity swap + Settings UI | NOT STARTED |  |  |  |
 
 ---
 
 ## Summary
 - **Total Tasks:** 61
-- **Completed:** 50
+- **Completed:** 51
 - **In Progress:** 0
-- **Not Started:** 11
+- **Not Started:** 10
 
 ---
 
 ## Log
+### 2026-06-30 (QAL-060)
+- **QAL-060** COMPLETED — Streaming gate wired: `PlaywrightRunSpec` gains `ActivityEnabled bool` (default true); `PlaywrightRunner.SpawnAsync` gains `suppressOutput` param — gates the `RelayLine` stdout/stderr publish when true; main Playwright run passes `suppressOutput: !spec.ActivityEnabled`; `RunExecutionService` propagates `run.ActivityEnabled` into spec; `QaLoopOrchestrator.EmitClosure` gains optional `activityEnabled` param (no-op lambda when false) — all 4 generator call sites updated; `PersistLog` skips `EventLogJson` when `session.ActivityEnabled = false`; coarse `Pub` phase/status transitions unchanged. 122/122 tests pass, build clean.
+
 ### 2026-06-30 (QAL-059)
 - **QAL-059** COMPLETED — No changes needed: all three `*_generator_system.txt` prompts already authored in QAL-012 with full Allure instrumentation (test.step, request/response/assertion attachments, latency parameter, epic/feature/story/severity/tag/link metadata, [<tcId-pending>] preserved, no use: block, schema-validation on contract). EmbeddedResource via `*.txt` glob. Build verified.
 

@@ -102,6 +102,7 @@ public sealed class RunExecutionService
                 TriggerBuildId     = run.TriggerBuildId,
                 TriggerCommitSha  = run.TriggerCommitSha,
                 AdoTestRunId      = adoTestRunId,
+                ActivityEnabled   = run.ActivityEnabled,
             };
             var result = await _runner.RunAsync(spec, eventKey, ct);
 

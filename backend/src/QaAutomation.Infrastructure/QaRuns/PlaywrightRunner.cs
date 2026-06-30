@@ -84,7 +84,8 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
         await _concurrency.Gate.WaitAsync(ct);
         try
         {
-            exitCode = await SpawnAsync("npx", $"playwright {args}", runDir, spec.Profile, eventKey, ct);
+            exitCode = await SpawnAsync("npx", $"playwright {args}", runDir, spec.Profile, eventKey, ct,
+                suppressOutput: !spec.ActivityEnabled);
         }
         finally
         {
@@ -361,7 +362,8 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
     // ── Process spawn ────────────────────────────────────────────────────────
 
     private async Task<int> SpawnAsync(
-        string exe, string args, string workDir, string? profile, string eventKey, CancellationToken ct)
+        string exe, string args, string workDir, string? profile, string eventKey, CancellationToken ct,
+        bool suppressOutput = false)
     {
         var psi = new ProcessStartInfo(exe, args)
         {
@@ -378,7 +380,7 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
 
         void RelayLine(string? line, bool isErr)
         {
-            if (string.IsNullOrEmpty(line)) return;
+            if (string.IsNullOrEmpty(line) || suppressOutput) return;
             Pub(eventKey, EventKinds.Stat, "run", line, isErr ? EventLevels.Warn : EventLevels.Info);
         }
 

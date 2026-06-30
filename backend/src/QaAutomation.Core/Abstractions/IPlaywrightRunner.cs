@@ -18,6 +18,8 @@ public sealed class PlaywrightRunSpec
     public int? TriggerBuildId { get; init; }
     public string? TriggerCommitSha { get; init; }
     public int? AdoTestRunId { get; init; }
+    /// <summary>When false, Playwright stdout/stderr is not streamed to the event bus (QAL-060).</summary>
+    public bool ActivityEnabled { get; init; } = true;
 }
 
 /// <summary>Outcome of a Playwright run.</summary>
