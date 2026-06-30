@@ -92,11 +92,15 @@ public sealed class RunExecutionService
             // 3 — Run Playwright
             var spec = new PlaywrightRunSpec
             {
-                RunId = runId,
-                Profile = run.Profile.ToWire(),
-                GrepTags = grepTags,
-                Module = run.Module ?? "",
-                LevelFilter = run.LevelFilter,
+                RunId             = runId,
+                Profile           = run.Profile.ToWire(),
+                GrepTags          = grepTags,
+                Module            = run.Module ?? "",
+                LevelFilter       = run.LevelFilter,
+                TriggerSourceWire = run.TriggerSource.ToWire(),
+                TriggerBuildId    = run.TriggerBuildId,
+                TriggerCommitSha  = run.TriggerCommitSha,
+                AdoTestRunId      = adoTestRunId,
             };
             var result = await _runner.RunAsync(spec, eventKey, ct);
 

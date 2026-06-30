@@ -654,7 +654,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Build/runtime succeeds; junit + json still emit on every run unchanged
 
 #### QAL-056: Allure context files (environment / categories / executor)
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-056
 - **Description:** solution "## Allure Reporting" decision 6. Before `allure generate`, write the three Allure context files into `runs/{runId}/allure-results/`: `environment.properties` (profile, branch, commit, build id, trigger source, module, ADO Test Run id), `categories.json` (defect buckets mapped to the triage taxonomy real_bug/flaky/test_issue/stale_test), and `executor.json` (deep links to the ADO build + ADO Test Run). Sourced from TestRun fields (Profile, TriggerSource, TriggerBuildId, TriggerCommitSha, Module, AdoTestRunId) already resolved by RunExecutionService.
 - **File:** `backend/src/QaAutomation.Infrastructure/QaRuns/PlaywrightRunner.cs`, `backend/src/QaAutomation.Infrastructure/QaRuns/RunExecutionService.cs`
