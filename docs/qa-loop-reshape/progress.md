@@ -42,9 +42,9 @@
 | QAL-029 | Add 2 build-read methods to IAzureDevOpsClient | COMPLETED | 2026-06-30 | 2026-06-30 | GetPipelineBuildsAsync/GetBuildChangesAsync added to interface |
 | QAL-030 | Implement 2 build-read methods in AzureDevOpsClient | COMPLETED | 2026-06-30 | 2026-06-30 | Both implemented in AzureDevOpsClient.cs additive-only |
 | QAL-031 | Implement PipelineWatcherHostedService (poll, impact, fallback, run-latest) | COMPLETED | 2026-06-30 | 2026-06-30 | PipelineWatcherHostedService.cs — BackgroundService, per-watch back-off, ImpactAnalyzer retry+fallback, RunExecutionService fire-and-forget, RunLatestAsync |
-| QAL-032 | Author QaLoopContracts DTOs | NOT STARTED |  |  |  |
-| QAL-033 | Author QaRunsContracts DTOs | NOT STARTED |  |  |  |
-| QAL-034 | Author QaPipelinesContracts DTOs | NOT STARTED |  |  |  |
+| QAL-032 | Author QaLoopContracts DTOs | COMPLETED | 2026-06-30 | 2026-06-30 | QaLoopContracts.cs — ScanStartRequest/Response, ApiAnalysisUpdate, UpdateApiDraftRequest, ApiTestDraftDto, ApiSessionSummary/List/Detail |
+| QAL-033 | Author QaRunsContracts DTOs | COMPLETED | 2026-06-30 | 2026-06-30 | QaRunsContracts.cs — RunStartRequest/Response, TriageRequest, FileBugsRequest/Response, TestFailureDto, TestRunSummary/List/Detail |
+| QAL-034 | Author QaPipelinesContracts DTOs | COMPLETED | 2026-06-30 | 2026-06-30 | QaPipelinesContracts.cs — PipelineWatchDto, AddWatchRequest, UpdateWatchRequest, RunLatestResponse, PreviewImpactRequest, PipelineWatchList |
 | QAL-035 | Implement QaLoopController | NOT STARTED |  |  |  |
 | QAL-036 | Implement QaRunsController | NOT STARTED |  |  |  |
 | QAL-037 | Implement QaPipelinesController | NOT STARTED |  |  |  |
@@ -77,13 +77,18 @@
 
 ## Summary
 - **Total Tasks:** 61
-- **Completed:** 21
+- **Completed:** 24
 - **In Progress:** 0
-- **Not Started:** 40
+- **Not Started:** 37
 
 ---
 
 ## Log
+### 2026-06-30 (QAL-032..034)
+- **QAL-032** COMPLETED — `QaLoopContracts.cs`: ScanStartRequest/Response, ApiAnalysisUpdate (full-replace SurfaceMatrix), UpdateApiDraftRequest (skip-null), ApiTestDraftDto/ApiSessionSummary/List/Detail with static From mappers.
+- **QAL-033** COMPLETED — `QaRunsContracts.cs`: RunStartRequest/Response, TriageRequest, FileBugsRequest/Response, TestFailureDto/TestRunSummary/List/Detail with From mappers.
+- **QAL-034** COMPLETED — `QaPipelinesContracts.cs`: PipelineWatchDto, AddWatchRequest, UpdateWatchRequest, RunLatestResponse, PreviewImpactRequest, PipelineWatchList. Build green.
+
 ### 2026-06-30 (QAL-028, QAL-031)
 - **QAL-028** COMPLETED — `RunExecutionService.cs`: scoped service; resolves Pushed drafts (impact-scoped or module-wide); resolves single plan/suite (rejects multi-suite with skip warning); GetTestPoints→CreateAdoTestRunAsync→PlaywrightRunner.RunAsync→SetAdoTestResultAsync per test→CompleteAdoTestRunAsync; persists TestFailure rows (triage deferred to QAL-038); Queued→Running→Passed/Failed/Error lifecycle. Build green.
 - **QAL-031** COMPLETED — `PipelineWatcherHostedService.cs`: BackgroundService polling every `qaloop.poll_interval_minutes`; per-watch 15-min back-off on error; processes builds oldest-first; GetBuildChangesAsync→GetCommitChangedFilesAsync→ImpactAnalyzerAgent (1 retry + module-wide fallback); Cancelled TestRun when no impacted tests; fire-and-forget RunExecutionService for impacted runs; RunLatestAsync for manual trigger. Build green.
