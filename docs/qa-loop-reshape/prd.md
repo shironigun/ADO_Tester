@@ -101,7 +101,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - public sealed class in QaAutomation.Core.Models; compiles
 
 #### QAL-009: Register 5 DbSets + OnModelCreating in QaDbContext
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-009
 - **Description:** Blueprint Data Layer → "QaDbContext changes". Add 5 DbSet<> and OnModelCreating registrations: ToTable + explicit HasColumnName per property + value converters for the 4 wire-string enums + HasIndex(...).HasDatabaseName(...) + cascade FKs. JSON-blob columns are plain TEXT NULL strings with no converters. Legacy entities untouched.
 - **File:** `backend/src/QaAutomation.Infrastructure/Data/QaDbContext.cs`
@@ -113,7 +113,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - No legacy entity/table/column altered; build succeeds
 
 #### QAL-010: Generate AddQaLoopReshape EF migration
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-010
 - **Description:** Blueprint Data Layer → "EF migration" + Build/Run/Migrate. Generate (do not hand-edit) the migration from OnModelCreating. dotnet is not on PATH — use the wrapper from the dotnet-build-environment memory; stop the backend first if running (SQLite file lock). Migration auto-applies on next backend start via DatabaseInitializer (there is NO dotnet ef database update step).
 - **File:** `backend/src/QaAutomation.Infrastructure/Data/Migrations/<ts>_AddQaLoopReshape.cs`, `backend/src/QaAutomation.Infrastructure/Data/Migrations/<ts>_AddQaLoopReshape.Designer.cs`, `backend/src/QaAutomation.Infrastructure/Data/Migrations/QaDbContextModelSnapshot.cs`
