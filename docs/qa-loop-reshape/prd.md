@@ -374,7 +374,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
 ### API (CONTROLLERS + DTOs + SSE)
 
 #### QAL-032: Author QaLoopContracts DTOs
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-032
 - **Description:** Blueprint API → "Contracts: QaLoopContracts.cs". sealed class DTOs, camelCase wire, enum-by-exact-name, static From(entity) mappers, {Total,Items} lists. PATCH-draft skip-null; PATCH-analysis full-replace.
 - **File:** `backend/src/QaAutomation.Core/Contracts/QaLoopContracts.cs`
@@ -386,7 +386,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Namespace QaAutomation.Core.Contracts; compiles
 
 #### QAL-033: Author QaRunsContracts DTOs
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-033
 - **Description:** Blueprint API → "Contracts: QaRunsContracts.cs". Run start/list/detail, triage, file-bugs DTOs with From mappers.
 - **File:** `backend/src/QaAutomation.Core/Contracts/QaRunsContracts.cs`
@@ -397,7 +397,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Namespace QaAutomation.Core.Contracts; compiles
 
 #### QAL-034: Author QaPipelinesContracts DTOs
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-034
 - **Description:** Blueprint API → "Contracts: QaPipelinesContracts.cs". Watch list/add/patch, run-latest, preview-impact DTOs with From mapper.
 - **File:** `backend/src/QaAutomation.Core/Contracts/QaPipelinesContracts.cs`
