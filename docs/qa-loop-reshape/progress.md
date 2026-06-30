@@ -14,7 +14,7 @@
 | QAL-001 | Add seven QA-Loop enums | COMPLETED | 2026-06-30 | 2026-06-30 | 7 enums appended to Enums.cs; 4 exact-name, 4 wire-string with [EnumMember]+extensions |
 | QAL-002 | Add shared agent-output POCOs | COMPLETED | 2026-06-30 | 2026-06-30 | RouteInfo/DtoInfo/WorkflowInfo/InventoryDoc/SurfaceMatrix/ImpactAnalysis appended to AgentOutputs.cs |
 | QAL-003 | Add AdoBuild + AdoBuildChange build-read DTOs | COMPLETED | 2026-06-30 | 2026-06-30 | 2 records added to AdoModels.cs in Build/pipeline region |
-| QAL-004 | Add QaLoopOptions configuration class | NOT STARTED |  |  |  |
+| QAL-004 | Add QaLoopOptions configuration class | COMPLETED | 2026-06-30 | 2026-06-30 | New QaLoopOptions.cs with PollIntervalMinutes/TeamsWebhookUrl/TeamsTemplate/ScriptsFolderName/RunsFolderName/ReportProvider/ActivityEnabled |
 | QAL-005 | Add DmsProfileOptions registry | NOT STARTED |  |  |  |
 | QAL-006 | Create ApiTestSession + ApiTestDraft entities | NOT STARTED |  |  |  |
 | QAL-007 | Create TestRun + TestFailure entities | NOT STARTED |  |  |  |
@@ -77,13 +77,16 @@
 
 ## Summary
 - **Total Tasks:** 61
-- **Completed:** 3
+- **Completed:** 4
 - **In Progress:** 0
-- **Not Started:** 58
+- **Not Started:** 57
 
 ---
 
 ## Log
+### 2026-06-30 (QAL-004)
+- **QAL-004** COMPLETED — new `backend/src/QaAutomation.Core/Configuration/QaLoopOptions.cs` with SectionName="QaLoop", PollIntervalMinutes(5), TeamsWebhookUrl, TeamsTemplate("developer"), ScriptsFolderName("scripts"), RunsFolderName("runs"), ReportProvider("allure"), ActivityEnabled(true). Build green.
+
 ### 2026-06-30 (QAL-003)
 - **QAL-003** COMPLETED — `backend/src/QaAutomation.Core/Models/AdoModels.cs`: AdoBuild(Id,SourceVersion,RepositoryId,FinishedAt) + AdoBuildChange(Id,Message) in Build/pipeline region. Build green.
 
