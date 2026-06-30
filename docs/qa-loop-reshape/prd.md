@@ -546,7 +546,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - tsc passes
 
 #### QAL-047: Create api/qaRuns.ts and api/qaPipelines.ts
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-047
 - **Description:** Blueprint Frontend → "api/qaRuns.ts (new)" + "api/qaPipelines.ts (new)". Wrap the shared client.ts axios instance, one method per route; SSE URLs via apiUrl.
 - **File:** `client/src/api/qaRuns.ts`, `client/src/api/qaPipelines.ts`

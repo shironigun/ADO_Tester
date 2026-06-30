@@ -3,7 +3,7 @@
 ## Overview
 - **PRD:** prd.md
 - **Started:** 2026-06-30
-- **Status:** IN PROGRESS (QAL-046 done — 37 of 61 complete)
+- **Status:** IN PROGRESS (QAL-047 done — 38 of 61 complete)
 
 ---
 
@@ -57,7 +57,7 @@
 | QAL-044 | Generalize session types + sessionIdentity helper | COMPLETED | 2026-06-30 | 2026-06-30 | workItemId/Title nullable; SessionModuleConfig key+'qa-loop'+renderIdentity?; SessionDetail tolerates module/inventoryJson; sessionIdentity() in shared.tsx |
 | QAL-045 | Apply config-driven identity at the 4 hardcoded sites | COMPLETED | 2026-06-30 | 2026-06-30 | SessionWorkspace.tsx (card title, drawer header, analytics row) + SessionDetailFullScreen.tsx (header) — all use sessionIdentity() |
 | QAL-046 | Rewrite api/qaLoop.ts | COMPLETED | 2026-06-30 | 2026-06-30 | Full rewrite targeting /api/qaloop: 11 methods + types + re-exports getPlans/getSuites/searchWorkItems |
-| QAL-047 | Create api/qaRuns.ts and api/qaPipelines.ts | NOT STARTED |  |  |  |
+| QAL-047 | Create api/qaRuns.ts and api/qaPipelines.ts | COMPLETED | 2026-06-30 | 2026-06-30 | qaRuns.ts (startRun, listRunsPage, getRunDetail, triage, fileBugs, previewImpact, runStreamUrl) + qaPipelines.ts (listWatches, addWatch, updateWatch, deleteWatch, runLatest) |
 | QAL-048 | Create qaLoopConfig SessionWorkspace config + scan form | NOT STARTED |  |  |  |
 | QAL-049 | Repoint QaLoopPage + create QaRunsPage and QaPipelinesPage | NOT STARTED |  |  |  |
 | QAL-050 | Wire routes/paths.ts, AppRoutes.tsx, Layout.tsx | NOT STARTED |  |  |  |
