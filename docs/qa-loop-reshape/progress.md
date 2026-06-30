@@ -3,7 +3,7 @@
 ## Overview
 - **PRD:** prd.md
 - **Started:** 2026-06-30
-- **Status:** IN PROGRESS (QAL-049 done — 40 of 61 complete)
+- **Status:** IN PROGRESS (QAL-050 done — 41 of 61 complete)
 
 ---
 
@@ -60,7 +60,7 @@
 | QAL-047 | Create api/qaRuns.ts and api/qaPipelines.ts | COMPLETED | 2026-06-30 | 2026-06-30 | qaRuns.ts (startRun, listRunsPage, getRunDetail, triage, fileBugs, previewImpact, runStreamUrl) + qaPipelines.ts (listWatches, addWatch, updateWatch, deleteWatch, runLatest) |
 | QAL-048 | Create qaLoopConfig SessionWorkspace config + scan form | COMPLETED | 2026-06-30 | 2026-06-30 | qaLoop.tsx — qaLoopConfig (key, renderIdentity), QaLoopStartForm, QaLoopDetailBody, CoverageMatrix, DraftsByLevel, PushPanel |
 | QAL-049 | Repoint QaLoopPage + create QaRunsPage and QaPipelinesPage | COMPLETED | 2026-06-30 | 2026-06-30 | QaLoopPage one-liner; QaRunsPage (launcher, paged grid, drawer: failures+triage+file-bugs+impact); QaPipelinesPage (watch cards, enable Switch, Run latest, AddWatchDialog) |
-| QAL-050 | Wire routes/paths.ts, AppRoutes.tsx, Layout.tsx | NOT STARTED |  |  |  |
+| QAL-050 | Wire routes/paths.ts, AppRoutes.tsx, Layout.tsx | COMPLETED | 2026-06-30 | 2026-06-30 | qaRuns+qaPipelines paths; /qa-loop/:sessionId full-screen; QA Runs+Pipelines nav+routes; TestRun status colors added to pipeline.ts |
 | QAL-051 | Write QaLoopOrchestratorTests | NOT STARTED |  |  |  |
 | QAL-052 | Write ImpactAnalyzerAgentTests | NOT STARTED |  |  |  |
 | QAL-053 | Write JUnitTriageSplitTests + watcher ProcessBuild test | NOT STARTED |  |  |  |
@@ -77,7 +77,7 @@
 
 ## Summary
 - **Total Tasks:** 61
-- **Completed:** 40
+- **Completed:** 41
 - **In Progress:** 0
 - **Not Started:** 33
 

@@ -579,7 +579,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - tsc + eslint pass
 
 #### QAL-050: Wire routes/paths.ts, AppRoutes.tsx, Layout.tsx
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-050
 - **Description:** Blueprint Frontend → "Routing & nav wiring". Add qaRuns/qaPipelines to paths; register /qa-loop/:sessionId (+ epic parity route) full-screen routes in AppRoutes; add QA Runs + Pipelines nav items and the two in-shell page routes in Layout, repointing /qa-loop off the removed QaLoopPage UI to the new SessionWorkspace page.
 - **File:** `client/src/routes/paths.ts`, `client/src/routes/AppRoutes.tsx`, `client/src/layout/Layout.tsx`
