@@ -678,7 +678,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Compiles; a broken report never breaks a run
 
 #### QAL-058: Settings report_provider + activity_enabled (both keys end-to-end)
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-058
 - **Description:** solution "## Allure Reporting" decision 2 + "## Activity Capture" decision 8. Add the two new dotted settings keys end-to-end through the two-layer settings pipeline (mirrors QAL-042/043 wiring for the existing three keys). QaLoopOptions gains `ReportProvider` (default `allure`) + `ActivityEnabled` (default `true`); `.env` bridges `QALOOP_REPORT_PROVIDER` / `QALOOP_ACTIVITY_ENABLED` → QaLoopOptions via PostConfigure, then a RuntimeSettings overlay PostConfigure AFTER (DB-over-env); AppSettingsService registers `qaloop.report_provider` + `qaloop.activity_enabled` in AllKeys + OptionKeys (read via IOptionsMonitor<QaLoopOptions>, _qaLoopCache.Clear() on update); GET /api/config returns both. Amends QAL-004 (QaLoopOptions props), QAL-042 (AppSettingsService keys), QAL-043 (.env bridge + overlay).
 - **File:** `backend/src/QaAutomation.Core/Configuration/QaLoopOptions.cs`, `backend/src/QaAutomation.Infrastructure/DependencyInjection.cs`, `backend/src/QaAutomation.Infrastructure/Settings/AppSettingsService.cs`

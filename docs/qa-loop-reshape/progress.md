@@ -3,7 +3,7 @@
 ## Overview
 - **PRD:** prd.md
 - **Started:** 2026-06-30
-- **Status:** IN PROGRESS (QAL-057 done — 48 of 61 complete)
+- **Status:** IN PROGRESS (QAL-058 done — 49 of 61 complete)
 
 ---
 
@@ -68,7 +68,7 @@
 | QAL-055 | Allure runtime deps + per-run reporter wiring | COMPLETED | 2026-06-30 | 2026-06-30 | PlaywrightRunner: @allurereport/cli + allure-playwright in runtime package.json; allure --version capability check in EnsureRuntimeAsync; reporters moved to config (allure-playwright always, html gated on report_provider ∈ {playwright,both}); _reportProvider field from QaLoopOptions; fallback comment: allure-commandline+JRE if --single-file unsupported |
 | QAL-056 | Allure context files (environment / categories / executor) | COMPLETED | 2026-06-30 | 2026-06-30 | PlaywrightRunSpec gains TriggerSourceWire/TriggerBuildId/TriggerCommitSha/AdoTestRunId; WriteAllureContext writes environment.properties+categories.json+executor.json to allure-results/ after spawn; RunExecutionService populates context fields; graceful degradation on any write failure |
 | QAL-057 | Allure generate single-file + trends + ReportPath + fallback | COMPLETED | 2026-06-30 | 2026-06-30 | GenerateAllureReportAsync: seeds history, npx allure generate --single-file --clean, CopyHistoryBack, finds *.html in allure-report/; fallback=html/index.html or null; provider=playwright skips generate; RunExecutionService sets run.ReportPath; history keyed by (module,pipeline) under allure-history/ |
-| QAL-058 | Settings report_provider + activity_enabled (both keys end-to-end) | NOT STARTED |  |  |  |
+| QAL-058 | Settings report_provider + activity_enabled (both keys end-to-end) | COMPLETED | 2026-06-30 | 2026-06-30 | Already fully wired in QAL-042/043: AllKeys+OptionKeys, .env bridge (QALOOP_REPORT_PROVIDER/QALOOP_ACTIVITY_ENABLED), RuntimeSettings PostConfigure overlay, OptionValue switch, _qaLoopCache.Clear(); build verified |
 | QAL-059 | Allure-rich generated specs (generator prompt amendments) | NOT STARTED |  |  |  |
 | QAL-060 | ActivityEnabled persistence + streaming gate | NOT STARTED |  |  |  |
 | QAL-061 | FE Allure report + activity swap + Settings UI | NOT STARTED |  |  |  |
@@ -77,13 +77,16 @@
 
 ## Summary
 - **Total Tasks:** 61
-- **Completed:** 48
+- **Completed:** 49
 - **In Progress:** 0
-- **Not Started:** 13
+- **Not Started:** 12
 
 ---
 
 ## Log
+### 2026-06-30 (QAL-058)
+- **QAL-058** COMPLETED — No code changes needed: both keys fully wired in QAL-042/043. `AppSettingsService.AllKeys`/`OptionKeys`/`OptionValue` already include `qaloop.report_provider`+`qaloop.activity_enabled`; `.env` bridge + `RuntimeSettings` PostConfigure in `AddQaLoop` already present; `_qaLoopCache.Clear()` on `ApplyAsync` already wired. Verified build clean.
+
 ### 2026-06-30 (QAL-057)
 - **QAL-057** COMPLETED — `PlaywrightRunner`: `GenerateAllureReportAsync` seeds history, runs `npx allure generate --single-file --clean`, copies history back, returns first `.html` in `allure-report/`; fallback = `html/index.html` or null; `provider=playwright` skips generate; `_historyDir` added; `PlaywrightRunSpec` gains `TriggerPipelineId`; `RunExecutionService` sets `run.ReportPath = result.ReportPath`.
 
