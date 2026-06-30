@@ -94,6 +94,9 @@ public static class DependencyInjection
                 o.TimeoutSeconds = Math.Max(10, t);
         });
 
+        // QaLoopOptions stub registration — PostConfigure + .env bridge added in QAL-043.
+        services.AddOptions<QaLoopOptions>();
+
         services.AddSingleton<IAppSettingsService, AppSettingsService>();
         return services;
     }
