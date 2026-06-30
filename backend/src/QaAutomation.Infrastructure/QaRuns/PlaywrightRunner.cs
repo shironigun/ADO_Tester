@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
@@ -25,6 +26,7 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
     private readonly string _runtimeDir;
     private readonly ILogger<PlaywrightRunner> _log;
     private readonly string _reportProvider;
+    private readonly string _adoBaseUrl;
 
     // Provisioned exactly once; guarded by _runtimeLock.
     private volatile bool _runtimeReady;
@@ -33,6 +35,7 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
     public PlaywrightRunner(
         IEventBus bus, PipelineConcurrency concurrency,
         IOptions<StorageOptions> storage, IOptions<QaLoopOptions> qaLoop,
+        IOptions<AzureDevOpsOptions> ado,
         ILogger<PlaywrightRunner> log)
     {
         _bus = bus;
@@ -42,6 +45,7 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
         _runsDir         = Path.GetFullPath(Path.Combine(dataDir, qaLoop.Value.RunsFolderName));
         _runtimeDir      = Path.GetFullPath(Path.Combine(dataDir, "playwright-runtime"));
         _reportProvider  = qaLoop.Value.ReportProvider;
+        _adoBaseUrl      = ado.Value.BaseUrl;
         _log = log;
     }
 
@@ -86,6 +90,7 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
         }
 
         sw.Stop();
+        WriteAllureContext(runDir, spec);
         var junit = ParseJUnit(junitPath);
 
         Pub(eventKey, EventKinds.Result, "run",
@@ -178,6 +183,62 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
         {
             try { Directory.CreateSymbolicLink(nmLink, nmTarget); }
             catch (Exception ex) { _log.LogWarning(ex, "Could not symlink node_modules; Playwright may re-install"); }
+        }
+    }
+
+    // ── Allure context files (QAL-056) ───────────────────────────────────────
+
+    private void WriteAllureContext(string runDir, PlaywrightRunSpec spec)
+    {
+        try
+        {
+            var resultsDir = Path.Combine(runDir, "allure-results");
+            Directory.CreateDirectory(resultsDir);
+
+            // environment.properties
+            var env = new StringBuilder();
+            env.AppendLine($"profile={spec.Profile}");
+            env.AppendLine($"module={spec.Module}");
+            env.AppendLine($"trigger.source={spec.TriggerSourceWire}");
+            if (spec.TriggerBuildId.HasValue)  env.AppendLine($"build.id={spec.TriggerBuildId}");
+            if (!string.IsNullOrEmpty(spec.TriggerCommitSha)) env.AppendLine($"commit={spec.TriggerCommitSha}");
+            if (spec.AdoTestRunId.HasValue)    env.AppendLine($"ado.test.run.id={spec.AdoTestRunId}");
+            File.WriteAllText(Path.Combine(resultsDir, "environment.properties"), env.ToString());
+
+            // categories.json — maps Allure failure statuses to our triage taxonomy
+            var categories = """
+                [
+                  { "name": "Real Bug",    "matchedStatuses": ["failed"] },
+                  { "name": "Flaky",       "matchedStatuses": ["failed"] },
+                  { "name": "Test Issue",  "matchedStatuses": ["broken"] },
+                  { "name": "Stale Test",  "matchedStatuses": ["skipped"] }
+                ]
+                """;
+            File.WriteAllText(Path.Combine(resultsDir, "categories.json"), categories);
+
+            // executor.json — deep links to ADO build + ADO Test Run
+            var buildUrl = spec.TriggerBuildId.HasValue
+                ? $"{_adoBaseUrl}/_build/results?buildId={spec.TriggerBuildId}"
+                : null;
+            var testRunUrl = spec.AdoTestRunId.HasValue
+                ? $"{_adoBaseUrl}/_testManagement/runs?runId={spec.AdoTestRunId}"
+                : null;
+
+            var executor = new Dictionary<string, object?>(6)
+            {
+                ["name"] = "ADO QA Pipeline",
+            };
+            if (spec.TriggerBuildId.HasValue) executor["buildName"] = $"Build #{spec.TriggerBuildId}";
+            if (buildUrl is not null)         executor["buildUrl"]  = buildUrl;
+            if (spec.AdoTestRunId.HasValue)   executor["reportName"] = $"ADO Test Run #{spec.AdoTestRunId}";
+            if (testRunUrl is not null)        executor["reportUrl"] = testRunUrl;
+
+            File.WriteAllText(Path.Combine(resultsDir, "executor.json"),
+                JsonSerializer.Serialize(executor, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Failed to write Allure context files for run {RunId} — generate may be incomplete", spec.RunId);
         }
     }
 
