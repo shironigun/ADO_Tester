@@ -30,10 +30,10 @@
 | QAL-017 | Create WorkflowGeneratorAgent | COMPLETED | 2026-06-30 | 2026-06-30 | WorkflowGeneratorAgent.cs with chained spec + per-leg test case |
 | QAL-018 | Create shared [<tcId-pending>] TitleTag enforcement helper | COMPLETED | 2026-06-30 | 2026-06-30 | TitleTag static partial class in ContractGeneratorAgent.cs |
 | QAL-019 | Create ImpactAnalyzerAgent | COMPLETED | 2026-06-30 | 2026-06-30 | ImpactAnalyzerAgent.cs with inventory projection (no SpecCode) |
-| QAL-020 | Define IQaLoopOrchestrator abstraction | NOT STARTED |  |  |  |
-| QAL-021 | Implement QaLoopOrchestrator scan+analyze background pipeline | NOT STARTED |  |  |  |
-| QAL-022 | Implement GenerateDraftsAsync (3 generators in parallel, selected-only) | NOT STARTED |  |  |  |
-| QAL-023 | Implement Push / PushDraft (idempotent re-push, tag rewrite) | NOT STARTED |  |  |  |
+| QAL-020 | Define IQaLoopOrchestrator abstraction | COMPLETED | 2026-06-30 | 2026-06-30 | IQaLoopOrchestrator.cs with Start/GenerateDrafts/PushAll/PushDraft/Cancel |
+| QAL-021 | Implement QaLoopOrchestrator scan+analyze background pipeline | COMPLETED | 2026-06-30 | 2026-06-30 | QaLoopOrchestrator.cs — Analyzing→AwaitingReview/Drafting; persists InventoryJson+AnalysisJson; EventPhases.Analyze added |
+| QAL-022 | Implement GenerateDraftsAsync (3 generators in parallel, selected-only) | COMPLETED | 2026-06-30 | 2026-06-30 | GenerateDraftsInnerAsync — Task.WhenAll across all three levels; per-surface GenerateSafeAsync; spec written to disk; EventPhases.Generate added |
+| QAL-023 | Implement Push / PushDraft (idempotent re-push, tag rewrite) | COMPLETED | 2026-06-30 | 2026-06-30 | RunPushAsync + PushDraftAsync — [<tcId-pending>]→[id] on title+spec; LinkTestedBy only when WorkItemId set; partial push stays Drafted |
 | QAL-024 | Define IPlaywrightRunner abstraction | NOT STARTED |  |  |  |
 | QAL-025 | Implement PlaywrightRunner (install-once runtime, grep, spawn, parse) | NOT STARTED |  |  |  |
 | QAL-026 | Add 3 ADO Test Run lifecycle + GetTestPoints methods to IAzureDevOpsClient | NOT STARTED |  |  |  |

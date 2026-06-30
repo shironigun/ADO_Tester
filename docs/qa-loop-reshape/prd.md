@@ -228,7 +228,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
 ### ORCHESTRATOR
 
 #### QAL-020: Define IQaLoopOrchestrator abstraction
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-020
 - **Description:** Blueprint QaLoopOrchestrator → "Interface". Mirror the AgentOrchestrator surface: Start, GenerateDrafts, Push, PushDraft, Cancel.
 - **File:** `backend/src/QaAutomation.Core/Abstractions/IQaLoopOrchestrator.cs`
@@ -237,7 +237,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Namespace QaAutomation.Core.Abstractions; compiles
 
 #### QAL-021: Implement QaLoopOrchestrator scan+analyze background pipeline
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-021
 - **Description:** Blueprint QaLoopOrchestrator → Start / Launch / queue-gate wrapper / Start-seed-and-analyze. Copy the AgentOrchestrator skeleton verbatim (own DI scope via IServiceScopeFactory, IEventBus SSE with Last-Event-ID replay, durable EventLogJson, CancellationRegistry, PipelineConcurrency). HTTP seeds the ApiTestSession synchronously; the background task fetches source, runs ModuleAnalyzerAgent, persists Inventory/Analysis, and stops at AwaitingReview (or proceeds when AutoHandoff=1).
 - **File:** `backend/src/QaAutomation.Infrastructure/Orchestrators/QaLoopOrchestrator.cs`
@@ -249,7 +249,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Reconciles against the chosen suite's existing Test Cases when testSuiteId supplied
 
 #### QAL-022: Implement GenerateDraftsAsync (3 generators in parallel, selected-only)
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-022
 - **Description:** Blueprint QaLoopOrchestrator → "AwaitingReview gate → GenerateDraftsAsync" + "GenerateDraftsInnerAsync". After review, run Contract/Endpoint/Workflow generators via Task.WhenAll, generating drafts only for surfaces still selected (not flagged covered). Per-draft errors go to ApiTestDraft.ErrorMessage without failing the batch; specs written to disk.
 - **File:** `backend/src/QaAutomation.Infrastructure/Orchestrators/QaLoopOrchestrator.cs`
@@ -262,7 +262,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - StepsJson serialized as array of {action, expected}; SourceRoutesJson populated from generator inventory input
 
 #### QAL-023: Implement Push / PushDraft (idempotent re-push, tag rewrite)
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-023
 - **Description:** Blueprint QaLoopOrchestrator → "Push" + "Per-row synchronous push". For each Approved draft: CreateTestCaseAsync → AddTestCaseToSuiteAsync → LinkTestedByAsync only when WorkItemId.HasValue → rewrite [<tcId-pending>] to the real [id] on disk and on the draft Title. Push is idempotent on draft Status; re-pressing Push retries only non-Pushed drafts.
 - **File:** `backend/src/QaAutomation.Infrastructure/Orchestrators/QaLoopOrchestrator.cs`
