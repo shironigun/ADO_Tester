@@ -499,7 +499,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - (amended: Allure/activity — also register `qaloop.report_provider` + `qaloop.activity_enabled` in AllKeys + OptionKeys per QAL-058, same plaintext + IOptionsMonitor<QaLoopOptions> pattern)
 
 #### QAL-043: Add .env bridge + RuntimeSettings overlay + AddQaLoop DI registration
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-043
 - **Description:** Blueprint TeamsNotifier/Settings → ".env additions" + "DependencyInjection.cs → AddQaLoop", and the manifest DI bullet. New private AddQaLoop(...) extension called from AddInfrastructure. Bridge flat .env (TEAMS_WEBHOOK_URL, TEAMS_TEMPLATE, QALOOP_POLL_INTERVAL_MINUTES) → QaLoopOptions via PostConfigure, then a RuntimeSettings.Get overlay PostConfigure AFTER so DB wins. Register orchestrator, runner, run-execution service, watcher, notifier, agents, options.
 - **File:** `backend/src/QaAutomation.Infrastructure/DependencyInjection.cs`
