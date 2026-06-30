@@ -45,9 +45,9 @@
 | QAL-032 | Author QaLoopContracts DTOs | COMPLETED | 2026-06-30 | 2026-06-30 | QaLoopContracts.cs — ScanStartRequest/Response, ApiAnalysisUpdate, UpdateApiDraftRequest, ApiTestDraftDto, ApiSessionSummary/List/Detail |
 | QAL-033 | Author QaRunsContracts DTOs | COMPLETED | 2026-06-30 | 2026-06-30 | QaRunsContracts.cs — RunStartRequest/Response, TriageRequest, FileBugsRequest/Response, TestFailureDto, TestRunSummary/List/Detail |
 | QAL-034 | Author QaPipelinesContracts DTOs | COMPLETED | 2026-06-30 | 2026-06-30 | QaPipelinesContracts.cs — PipelineWatchDto, AddWatchRequest, UpdateWatchRequest, RunLatestResponse, PreviewImpactRequest, PipelineWatchList |
-| QAL-035 | Implement QaLoopController | NOT STARTED |  |  |  |
-| QAL-036 | Implement QaRunsController | NOT STARTED |  |  |  |
-| QAL-037 | Implement QaPipelinesController | NOT STARTED |  |  |  |
+| QAL-035 | Implement QaLoopController | COMPLETED | 2026-06-30 | 2026-06-30 | QaLoopController.cs — 11 endpoints (scan/start, stream SSE, analysis PATCH, generate-drafts, draft PATCH, approve-all, push-all, push-draft, cancel, list, detail) |
+| QAL-036 | Implement QaRunsController | COMPLETED | 2026-06-30 | 2026-06-30 | QaRunsController.cs — 7 endpoints (start, stream, list, detail, triage stub, file-bugs stub, preview-impact) |
+| QAL-037 | Implement QaPipelinesController | COMPLETED | 2026-06-30 | 2026-06-30 | QaPipelinesController.cs — 5 endpoints (list, add, patch, delete, run-latest) |
 | QAL-038 | Split IResultsIngestService + ResultsIngestService into Triage/FileBugs | NOT STARTED |  |  |  |
 | QAL-039 | Define ITeamsNotifier abstraction | NOT STARTED |  |  |  |
 | QAL-040 | Author 3 Teams card templates | NOT STARTED |  |  |  |
@@ -77,13 +77,18 @@
 
 ## Summary
 - **Total Tasks:** 61
-- **Completed:** 24
+- **Completed:** 28
 - **In Progress:** 0
-- **Not Started:** 37
+- **Not Started:** 33
 
 ---
 
 ## Log
+### 2026-06-30 (QAL-035..037)
+- **QAL-035** COMPLETED — `QaLoopController.cs`: 11 endpoints at /api/qaloop — scan/start (202, non-terminal check), stream SSE, analysis PATCH (full-replace), generate-drafts (202), draft PATCH (skip-null), approve-all, push-all (reads plan/suite from session), push-draft (sync, reads plan/suite from session), cancel, list (paged + draft counts), detail. Build green.
+- **QAL-036** COMPLETED — `QaRunsController.cs`: 7 endpoints at /api/qaloop/runs — start (202, fire-and-forget RunExecutionService), stream, list (paged), detail, triage (stub for QAL-038), file-bugs (stub for QAL-038), preview-impact. Build green.
+- **QAL-037** COMPLETED — `QaPipelinesController.cs`: 5 endpoints at /api/qaloop/pipelines — list, add (409 on duplicate pipeline), patch (Enabled/Module), delete, run-latest (202). Build green.
+
 ### 2026-06-30 (QAL-032..034)
 - **QAL-032** COMPLETED — `QaLoopContracts.cs`: ScanStartRequest/Response, ApiAnalysisUpdate (full-replace SurfaceMatrix), UpdateApiDraftRequest (skip-null), ApiTestDraftDto/ApiSessionSummary/List/Detail with static From mappers.
 - **QAL-033** COMPLETED — `QaRunsContracts.cs`: RunStartRequest/Response, TriageRequest, FileBugsRequest/Response, TestFailureDto/TestRunSummary/List/Detail with From mappers.
