@@ -75,6 +75,10 @@ public static class EventPhases
     /// <summary>Emitted by the Find-Bugs triage pass (used at runtime by the Python orchestrator
     /// though absent from its declared phase literal).</summary>
     public const string Triage = "triage";
+    /// <summary>QA Loop — module analyzer phase.</summary>
+    public const string Analyze = "analyze";
+    /// <summary>QA Loop — spec/test-case generators phase.</summary>
+    public const string Generate = "generate";
 }
 
 /// <summary>Frozen <c>level</c> wire values.</summary>
