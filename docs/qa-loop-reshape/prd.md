@@ -407,7 +407,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Namespace QaAutomation.Core.Contracts; compiles
 
 #### QAL-035: Implement QaLoopController
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-035
 - **Description:** Blueprint API → "QaLoopController" + route map. Thin [ApiController] [Route("api/qaloop")] mirroring AuthorTestsController: 202 on async start/push, 200 on sync ops, {total,items} paging, ProblemDetails (ADO→502, not-found→404, else→500). SSE reuses existing SseWriter.
 - **File:** `backend/src/QaAutomation.Api/Controllers/QaLoopController.cs`
@@ -419,7 +419,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Error mapping matches blueprint status codes; thin controller; compiles
 
 #### QAL-036: Implement QaRunsController
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-036
 - **Description:** Blueprint API → "QaRunsController". [Route("api/qaloop/runs")]. Manual run start, list/detail, triage (draft-first, never files), user-gated file-bugs, preview-impact.
 - **File:** `backend/src/QaAutomation.Api/Controllers/QaRunsController.cs`
@@ -431,7 +431,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Error mapping ADO→502, not-found→404, else→500; compiles
 
 #### QAL-037: Implement QaPipelinesController
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-037
 - **Description:** Blueprint API → "QaPipelinesController". [Route("api/qaloop/pipelines")]. Watch CRUD + run-latest manual trigger.
 - **File:** `backend/src/QaAutomation.Api/Controllers/QaPipelinesController.cs`
