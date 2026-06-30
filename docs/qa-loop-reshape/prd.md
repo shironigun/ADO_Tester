@@ -702,7 +702,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - contract/endpoint/workflow `_testcase_system.txt` (house-style) prompts UNCHANGED (Mahmood voice / golden parity untouched)
 
 #### QAL-060: ActivityEnabled persistence + streaming gate
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-060
 - **Description:** solution "## Activity Capture" decisions 9+10+11+13. Add `ActivityEnabled bool` (default true) to the ApiTestSession + TestRun entities + their QaDbContext mapping, folded into the SAME AddQaLoopReshape migration (migration column DEFAULT 1 so existing rows always show their activity). Capture the flag from `qaloop.activity_enabled` at row creation. When false for a NEW row: QaLoopOrchestrator (sessions) + PlaywrightRunner/RunExecutionService (runs) SUPPRESS verbose streaming (agent token-level ConsoleEvents for sessions; Playwright stdout for runs) AND skip heavy EventLogJson persistence, but STILL emit coarse phase/status transitions so step-state + completion still work. When true (or any existing row with stored EventLogJson): behaviour unchanged. Amends QAL-006/007 (entity columns), QAL-009 (mapping), QAL-010 (migration), QAL-021/022 (orchestrator gate), QAL-025/028 (runner/run-exec gate).
 - **File:** `backend/src/QaAutomation.Core/Models/ApiTestSession.cs`, `backend/src/QaAutomation.Core/Models/TestRun.cs`, `backend/src/QaAutomation.Infrastructure/Data/QaDbContext.cs`, `backend/src/QaAutomation.Infrastructure/Data/Migrations/<ts>_AddQaLoopReshape.cs`, `backend/src/QaAutomation.Infrastructure/Orchestrators/QaLoopOrchestrator.cs`, `backend/src/QaAutomation.Infrastructure/QaRuns/PlaywrightRunner.cs`, `backend/src/QaAutomation.Infrastructure/QaRuns/RunExecutionService.cs`

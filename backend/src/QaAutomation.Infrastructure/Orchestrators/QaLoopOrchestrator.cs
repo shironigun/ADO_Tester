@@ -211,7 +211,7 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
 
             var analysis = await new ModuleAnalyzerAgent(llm).AnalyzeInventoryAsync(
                 session.Module, source, existingCases,
-                fetchFile, emit: EmitClosure(key, EventPhases.Analyze), ct: ct);
+                fetchFile, emit: EmitClosure(key, EventPhases.Analyze, session.ActivityEnabled), ct: ct);
 
             // Pre-select: gap rows = selected; covered rows = not selected
             foreach (var row in analysis.Surface.Rows)
@@ -340,7 +340,7 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
             allTasks.Add(GenerateSafeAsync(async () =>
             {
                 var spec = await new ContractGeneratorAgent(llm).GenerateAsync(
-                    session.Module, route, emit: EmitClosure(key, EventPhases.Generate), ct: ct);
+                    session.Module, route, emit: EmitClosure(key, EventPhases.Generate, session.ActivityEnabled), ct: ct);
                 return new List<GeneratedSpec> { spec };
             }, key));
         }
@@ -350,7 +350,7 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
             var route = r;
             allTasks.Add(GenerateSafeAsync(async () =>
                 (List<GeneratedSpec>?) await new EndpointGeneratorAgent(llm).GenerateAsync(
-                    session.Module, route, emit: EmitClosure(key, EventPhases.Generate), ct: ct), key));
+                    session.Module, route, emit: EmitClosure(key, EventPhases.Generate, session.ActivityEnabled), ct: ct), key));
         }
 
         foreach (var w in workflowItems)
@@ -359,7 +359,7 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
             allTasks.Add(GenerateSafeAsync(async () =>
             {
                 var spec = await new WorkflowGeneratorAgent(llm).GenerateAsync(
-                    session.Module, workflow, analysis.Inventory, emit: EmitClosure(key, EventPhases.Generate), ct: ct);
+                    session.Module, workflow, analysis.Inventory, emit: EmitClosure(key, EventPhases.Generate, session.ActivityEnabled), ct: ct);
                 return new List<GeneratedSpec> { spec };
             }, key));
         }
@@ -667,8 +667,10 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
         return steps;
     }
 
-    private Action<LlmEmit> EmitClosure(string key, string phase)
-        => emit => _bus.Publish(key, new ConsoleEvent { Kind = emit.Kind, Text = emit.Text, Phase = phase });
+    private Action<LlmEmit> EmitClosure(string key, string phase, bool activityEnabled = true)
+        => activityEnabled
+            ? emit => _bus.Publish(key, new ConsoleEvent { Kind = emit.Kind, Text = emit.Text, Phase = phase })
+            : _ => { };
 
     private void Pub(string key, string kind, string? phase = null, string text = "",
         string level = EventLevels.Info, Dictionary<string, object?>? data = null)
@@ -676,6 +678,7 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
 
     private void PersistLog(ApiTestSession session, string key)
     {
+        if (!session.ActivityEnabled) return;
         try { session.EventLogJson = JsonSerializer.Serialize(_bus.Narrative(key)); }
         catch { /* never block the pipeline on log persistence */ }
     }
