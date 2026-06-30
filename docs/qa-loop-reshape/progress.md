@@ -3,7 +3,7 @@
 ## Overview
 - **PRD:** prd.md
 - **Started:** 2026-06-30
-- **Status:** NOT STARTED
+- **Status:** IN PROGRESS (QAL-038 done — 29 of 61 complete)
 
 ---
 
@@ -48,7 +48,7 @@
 | QAL-035 | Implement QaLoopController | COMPLETED | 2026-06-30 | 2026-06-30 | QaLoopController.cs — 11 endpoints (scan/start, stream SSE, analysis PATCH, generate-drafts, draft PATCH, approve-all, push-all, push-draft, cancel, list, detail) |
 | QAL-036 | Implement QaRunsController | COMPLETED | 2026-06-30 | 2026-06-30 | QaRunsController.cs — 7 endpoints (start, stream, list, detail, triage stub, file-bugs stub, preview-impact) |
 | QAL-037 | Implement QaPipelinesController | COMPLETED | 2026-06-30 | 2026-06-30 | QaPipelinesController.cs — 5 endpoints (list, add, patch, delete, run-latest) |
-| QAL-038 | Split IResultsIngestService + ResultsIngestService into Triage/FileBugs | NOT STARTED |  |  |  |
+| QAL-038 | Split IResultsIngestService + ResultsIngestService into Triage/FileBugs | COMPLETED | 2026-06-30 | 2026-06-30 | TriageAsync (FailureTriageAgent, BugDraftJson persist) + FileBugsAsync (no 2nd LLM, CreateBugAsync, link TC+story) in ResultsIngestService; triage/file-bugs endpoints wired in QaRunsController |
 | QAL-039 | Define ITeamsNotifier abstraction | NOT STARTED |  |  |  |
 | QAL-040 | Author 3 Teams card templates | NOT STARTED |  |  |  |
 | QAL-041 | Implement TeamsNotifier | NOT STARTED |  |  |  |

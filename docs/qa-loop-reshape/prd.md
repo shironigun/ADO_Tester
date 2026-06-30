@@ -444,7 +444,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
 ### NOTIFICATIONS & SETTINGS & DI
 
 #### QAL-038: Split IResultsIngestService + ResultsIngestService into Triage/FileBugs
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-038
 - **Description:** Blueprint PlaywrightRunner → "ResultsIngestService split". Split IngestAsync into TriageAsync (triage-persist, writes TestFailure + BugDraftJson, never files) and FileBugsAsync (deserialize BugDraftJson → CreateBugAsync, no second LLM call). Reuse FailureTriageAgent and the house-style body builders BuildReproHtml/BuildSystemInfo verbatim (byte-exact, golden parity).
 - **File:** `backend/src/QaAutomation.Core/Abstractions/IResultsIngestService.cs`, `backend/src/QaAutomation.Infrastructure/Results/ResultsIngestService.cs`
