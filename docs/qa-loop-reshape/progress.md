@@ -38,10 +38,10 @@
 | QAL-025 | Implement PlaywrightRunner (install-once runtime, grep, spawn, parse) | COMPLETED | 2026-06-30 | 2026-06-30 | PlaywrightRunner.cs — SemaphoreSlim once-guard; symlink node_modules; grep alternation; JUnit XML parser |
 | QAL-026 | Add 3 ADO Test Run lifecycle + GetTestPoints methods to IAzureDevOpsClient | COMPLETED | 2026-06-30 | 2026-06-30 | CreateAdoTestRunAsync/SetAdoTestResultAsync/CompleteAdoTestRunAsync/GetTestPointsAsync added to interface |
 | QAL-027 | Implement ADO Test Run lifecycle methods in AzureDevOpsClient | COMPLETED | 2026-06-30 | 2026-06-30 | 4 methods implemented in AzureDevOpsClient.cs; test stubs updated |
-| QAL-028 | Implement RunExecutionService (runner + ADO Test Run + triage handoff) | NOT STARTED |  |  |  |
+| QAL-028 | Implement RunExecutionService (runner + ADO Test Run + triage handoff) | COMPLETED | 2026-06-30 | 2026-06-30 | RunExecutionService.cs — draft resolution (impact vs module), ADO Test Run lifecycle (skip on multi-suite), Playwright run, TestFailure persistence |
 | QAL-029 | Add 2 build-read methods to IAzureDevOpsClient | COMPLETED | 2026-06-30 | 2026-06-30 | GetPipelineBuildsAsync/GetBuildChangesAsync added to interface |
 | QAL-030 | Implement 2 build-read methods in AzureDevOpsClient | COMPLETED | 2026-06-30 | 2026-06-30 | Both implemented in AzureDevOpsClient.cs additive-only |
-| QAL-031 | Implement PipelineWatcherHostedService (poll, impact, fallback, run-latest) | NOT STARTED |  |  |  |
+| QAL-031 | Implement PipelineWatcherHostedService (poll, impact, fallback, run-latest) | COMPLETED | 2026-06-30 | 2026-06-30 | PipelineWatcherHostedService.cs — BackgroundService, per-watch back-off, ImpactAnalyzer retry+fallback, RunExecutionService fire-and-forget, RunLatestAsync |
 | QAL-032 | Author QaLoopContracts DTOs | NOT STARTED |  |  |  |
 | QAL-033 | Author QaRunsContracts DTOs | NOT STARTED |  |  |  |
 | QAL-034 | Author QaPipelinesContracts DTOs | NOT STARTED |  |  |  |
@@ -77,13 +77,17 @@
 
 ## Summary
 - **Total Tasks:** 61
-- **Completed:** 19
+- **Completed:** 21
 - **In Progress:** 0
-- **Not Started:** 42
+- **Not Started:** 40
 
 ---
 
 ## Log
+### 2026-06-30 (QAL-028, QAL-031)
+- **QAL-028** COMPLETED — `RunExecutionService.cs`: scoped service; resolves Pushed drafts (impact-scoped or module-wide); resolves single plan/suite (rejects multi-suite with skip warning); GetTestPoints→CreateAdoTestRunAsync→PlaywrightRunner.RunAsync→SetAdoTestResultAsync per test→CompleteAdoTestRunAsync; persists TestFailure rows (triage deferred to QAL-038); Queued→Running→Passed/Failed/Error lifecycle. Build green.
+- **QAL-031** COMPLETED — `PipelineWatcherHostedService.cs`: BackgroundService polling every `qaloop.poll_interval_minutes`; per-watch 15-min back-off on error; processes builds oldest-first; GetBuildChangesAsync→GetCommitChangedFilesAsync→ImpactAnalyzerAgent (1 retry + module-wide fallback); Cancelled TestRun when no impacted tests; fire-and-forget RunExecutionService for impacted runs; RunLatestAsync for manual trigger. Build green.
+
 ### 2026-06-30 (QAL-014..019)
 - **QAL-014** COMPLETED — `ModuleAnalyzerAgent.cs` rewritten: new AnalyzeInventoryAsync(module, source, existingCases, fetchFile, ...) returning ModuleAnalysis(InventoryDoc, SurfaceMatrix, AdditionalFilesNeeded); legacy AnalyzeAsync preserved for ModuleAnalysisService.
 - **QAL-015** COMPLETED — `ContractGeneratorAgent.cs`: 2-pass (generator+testcase), FallbackTestCase, GeneratedSpec record.

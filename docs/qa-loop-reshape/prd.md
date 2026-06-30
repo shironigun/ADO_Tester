@@ -325,7 +325,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - No edits to existing write bodies; golden parity preserved; compiles
 
 #### QAL-028: Implement RunExecutionService (runner + ADO Test Run + triage handoff)
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-028
 - **Description:** Blueprint PlaywrightRunner → "RunExecutionService" + "ADO Test Run lifecycle" → plan/suite resolution + skip rule, per-result outcomes + complete. Scoped service (uses DbContext). Drives the runner, the ADO Test Run lifecycle, and hands off to triage.
 - **File:** `backend/src/QaAutomation.Infrastructure/QaRuns/RunExecutionService.cs`
@@ -359,7 +359,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Additive only; existing write bodies untouched; compiles
 
 #### QAL-031: Implement PipelineWatcherHostedService (poll, impact, fallback, run-latest)
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-031
 - **Description:** Blueprint Pipeline Watcher → "PipelineWatcherHostedService" + "run-latest manual trigger" + "Behaviour summary", and solution §Pipeline Watcher. IHostedService poll loop on qaloop.poll_interval_minutes (default 5). For each enabled watch: list new succeeded builds (id > LastSeenBuildId, oldest-first) → resolve commits → changed files (reuse GetCommitChangedFilesAsync) → ImpactAnalyzerAgent → empty? Cancelled TestRun (no Playwright, no Teams) : create TestRun + enqueue run scoped to impactedDraftIds → advance LastSeenBuildId. Back off to 15 min on poll error.
 - **File:** `backend/src/QaAutomation.Infrastructure/QaPipelines/PipelineWatcherHostedService.cs`
