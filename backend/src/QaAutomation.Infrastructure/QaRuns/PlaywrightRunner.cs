@@ -24,6 +24,7 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
     private readonly string _runsDir;
     private readonly string _runtimeDir;
     private readonly ILogger<PlaywrightRunner> _log;
+    private readonly string _reportProvider;
 
     // Provisioned exactly once; guarded by _runtimeLock.
     private volatile bool _runtimeReady;
@@ -37,9 +38,10 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
         _bus = bus;
         _concurrency = concurrency;
         var dataDir = storage.Value.DataDirectory;
-        _scriptsDir = Path.GetFullPath(Path.Combine(dataDir, qaLoop.Value.ScriptsFolderName));
-        _runsDir    = Path.GetFullPath(Path.Combine(dataDir, qaLoop.Value.RunsFolderName));
-        _runtimeDir = Path.GetFullPath(Path.Combine(dataDir, "playwright-runtime"));
+        _scriptsDir      = Path.GetFullPath(Path.Combine(dataDir, qaLoop.Value.ScriptsFolderName));
+        _runsDir         = Path.GetFullPath(Path.Combine(dataDir, qaLoop.Value.RunsFolderName));
+        _runtimeDir      = Path.GetFullPath(Path.Combine(dataDir, "playwright-runtime"));
+        _reportProvider  = qaLoop.Value.ReportProvider;
         _log = log;
     }
 
@@ -64,10 +66,9 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
         WriteRunConfig(runDir, spec);
 
         var grep = BuildGrep(spec.GrepTags);
-        var args = $"test --grep \"{grep}\" --reporter=junit,json " +
-                   $"--output={EscPath(runDir)} " +
-                   $"--reporter=junit:{EscPath(junitPath)} " +
-                   $"--reporter=json:{EscPath(resultsPath)}";
+        // Reporters are declared in playwright.config.ts (allure-playwright + conditional html);
+        // --output sets the artifacts folder; junit/json paths are relative in the config.
+        var args = $"test --grep \"{grep}\" --output={EscPath(runDir)}";
 
         Pub(eventKey, EventKinds.Phase, "run", $"Playwright run {spec.RunId} starting · grep={grep}");
 
@@ -119,6 +120,11 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
             WriteRuntimePackageJson(_runtimeDir);
             await SpawnAsync("npm", "ci", _runtimeDir, profile: null, eventKey, ct);
             await SpawnAsync("npx", "playwright install --with-deps chromium", _runtimeDir, profile: null, eventKey, ct);
+            // Allure capability check — log version; a non-zero exit here only warns (generate handled later)
+            // ponytail: fallback if @allurereport/cli lacks --single-file: ship allure-commandline + bundled JRE
+            var allureExit = await SpawnAsync("npx", "allure --version", _runtimeDir, profile: null, eventKey, ct);
+            if (allureExit != 0)
+                Pub(eventKey, EventKinds.System, text: "WARNING: allure --version check failed; report generation may be unavailable.", level: EventLevels.Warn);
             _runtimeReady = true;
             Pub(eventKey, EventKinds.System, text: "Playwright runtime ready.", level: EventLevels.Success);
         }
@@ -149,13 +155,16 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
             """;
         File.WriteAllText(Path.Combine(runDir, "package.json"), pkgJson);
 
-        // playwright.config.ts
+        // playwright.config.ts — reporters: junit+json always-on, allure-playwright always-on,
+        // html gated on report_provider ∈ {playwright, both}
+        var htmlReporter = (_reportProvider == "playwright" || _reportProvider == "both")
+            ? ", ['html']" : "";
         var config = $$"""
             import { defineConfig } from '@playwright/test';
             import path from 'path';
             export default defineConfig({
               testDir: '{{testDir}}',
-              reporter: [['junit', { outputFile: 'junit.xml' }], ['json', { outputFile: 'results.json' }]],
+              reporter: [['junit', { outputFile: 'junit.xml' }], ['json', { outputFile: 'results.json' }], ['allure-playwright', { resultsDir: 'allure-results' }]{{htmlReporter}}],
               use: { baseURL: process.env.BASE_URL ?? 'http://localhost' },
               projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
             });
@@ -174,12 +183,16 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
 
     private static void WriteRuntimePackageJson(string dir)
     {
+        // @allurereport/cli: Node-native Allure 3 CLI (no JRE). allure-playwright: Playwright reporter.
+        // ponytail: if @allurereport/cli --single-file is unsupported, fallback = allure-commandline + bundled JRE
         const string json = """
             {
               "name": "qa-playwright-runtime",
               "private": true,
               "devDependencies": {
-                "@playwright/test": "latest"
+                "@playwright/test": "latest",
+                "allure-playwright": "latest",
+                "@allurereport/cli": "latest"
               }
             }
             """;
