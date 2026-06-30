@@ -50,7 +50,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Placed in the Build/pipeline-reads region; compiles; no existing record altered
 
 #### QAL-004: Add QaLoopOptions configuration class
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-004
 - **Description:** Blueprint TeamsNotifier/Settings → "Configuration: QaLoopOptions". Typed options bound to section "QaLoop", carrying poll interval, Teams webhook/template, and runtime/scripts/runs folder names; bridged from flat .env keys then overlaid by RuntimeSettings (wiring done in DI task).
 - **File:** `backend/src/QaAutomation.Core/Configuration/QaLoopOptions.cs`
