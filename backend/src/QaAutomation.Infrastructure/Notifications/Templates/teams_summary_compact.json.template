@@ -1,0 +1,45 @@
+{
+  "type": "message",
+  "attachments": [
+    {
+      "contentType": "application/vnd.microsoft.card.adaptive",
+      "content": {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "body": [
+          {
+            "type": "TextBlock",
+            "text": "QA Loop Run — {{module}}",
+            "weight": "Bolder",
+            "size": "Medium",
+            "wrap": true
+          },
+          {
+            "type": "FactSet",
+            "facts": [
+              { "title": "Status",   "value": "{{status}}" },
+              { "title": "Passed",   "value": "{{passed}}" },
+              { "title": "Failed",   "value": "{{failed}}" },
+              { "title": "Duration", "value": "{{duration}}" },
+              { "title": "Triggered by", "value": "{{trigger}}" }
+            ]
+          },
+          {
+            "type": "TextBlock",
+            "text": "{{report_line}}",
+            "wrap": true,
+            "isVisible": "{{has_report}}"
+          }
+        ],
+        "actions": [
+          {
+            "type": "Action.OpenUrl",
+            "title": "View ADO Test Run",
+            "url": "{{ado_run_url}}"
+          }
+        ]
+      }
+    }
+  ]
+}
