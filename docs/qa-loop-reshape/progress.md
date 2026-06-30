@@ -21,9 +21,9 @@
 | QAL-008 | Create PipelineWatch entity | COMPLETED | 2026-06-30 | 2026-06-30 | New PipelineWatch.cs |
 | QAL-009 | Register 5 DbSets + OnModelCreating in QaDbContext | COMPLETED | 2026-06-30 | 2026-06-30 | 5 DbSets + wire-string converters + indexes + cascade FKs in QaDbContext.cs |
 | QAL-010 | Generate AddQaLoopReshape EF migration | COMPLETED | 2026-06-30 | 2026-06-30 | Generated 20260630152918_AddQaLoopReshape.cs; 5 tables with cascade FKs + unique PipelineWatches index |
-| QAL-011 | Author module_analyzer_system.txt rewrite | NOT STARTED |  |  |  |
-| QAL-012 | Author 7 net-new embedded prompt .txt files | NOT STARTED |  |  |  |
-| QAL-013 | Register 7 prompt properties in AgentPrompts | NOT STARTED |  |  |  |
+| QAL-011 | Author module_analyzer_system.txt rewrite | COMPLETED | 2026-06-30 | 2026-06-30 | Rewritten to emit inventory+surfaceMatrix+additionalFilesNeeded JSON |
+| QAL-012 | Author 7 net-new embedded prompt .txt files | COMPLETED | 2026-06-30 | 2026-06-30 | 7 prompts: contract/endpoint/workflow generator+testcase + impact_analyzer; Allure instrumentation in generators |
+| QAL-013 | Register 7 prompt properties in AgentPrompts | COMPLETED | 2026-06-30 | 2026-06-30 | 7 Load() properties added to AgentPrompts.cs |
 | QAL-014 | Rewrite ModuleAnalyzerAgent (inventory + matrix + 1-pass refinement) | NOT STARTED |  |  |  |
 | QAL-015 | Create ContractGeneratorAgent | NOT STARTED |  |  |  |
 | QAL-016 | Create EndpointGeneratorAgent | NOT STARTED |  |  |  |
@@ -77,13 +77,18 @@
 
 ## Summary
 - **Total Tasks:** 61
-- **Completed:** 10
+- **Completed:** 13
 - **In Progress:** 0
-- **Not Started:** 51
+- **Not Started:** 48
 
 ---
 
 ## Log
+### 2026-06-30 (QAL-011/012/013)
+- **QAL-011** COMPLETED — `module_analyzer_system.txt` rewritten: emits inventory (routes/dtos/workflows) + surfaceMatrix (3-level rows) + additionalFilesNeeded.
+- **QAL-012** COMPLETED — 7 new prompts: contract/endpoint/workflow _generator + _testcase + impact_analyzer. Generators include Allure test.step + allure.attachment instrumentation (QAL-059 amendment). testcase prompts reuse Mahmood's voice from tester_system.txt.
+- **QAL-013** COMPLETED — 7 Load() properties in AgentPrompts.cs. Build green.
+
 ### 2026-06-30 (QAL-009/010)
 - **QAL-009** COMPLETED — `QaDbContext.cs`: 5 new DbSets, 4 wire-string ValueConverters (TestLevel/FailureClassification/TriggerSource/DmsProfile), 5 entity registrations with indexes and cascade FKs. Build green.
 - **QAL-010** COMPLETED — `20260630152918_AddQaLoopReshape.cs` generated; creates ApiTestSessions, ApiTestDrafts, TestRuns, TestFailures, PipelineWatches with TEXT enum columns, unique PipelineWatches index, all cascade FKs.
