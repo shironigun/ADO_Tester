@@ -592,7 +592,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
 ### TESTING
 
 #### QAL-051: Write QaLoopOrchestratorTests
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-051
 - **Description:** Manifest QaLoopOrchestratorTests.cs (new) + blueprint orchestrator contracts. Cover the scan→analyze→generate→push lifecycle edges and the selected-only / idempotent-re-push / tag-rewrite invariants.
 - **File:** `backend/src/QaAutomation.Tests/QaLoopOrchestratorTests.cs`
