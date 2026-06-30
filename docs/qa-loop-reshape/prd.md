@@ -487,7 +487,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Singleton; compiles
 
 #### QAL-042: Register 3 settings keys in AppSettingsService
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-042
 - **Description:** Blueprint TeamsNotifier/Settings → "AppSettingsService key registration". Add the three dotted keys to AllKeys + OptionKeys (+ SecretKeys for the webhook only); inject IOptionsMonitor<QaLoopOptions> and read the keys in OptionValue; evict the QaLoop options cache on update so DB values rebuild. RuntimeSettings is a key/value bag — do not add typed properties.
 - **File:** `backend/src/QaAutomation.Infrastructure/Settings/AppSettingsService.cs`
