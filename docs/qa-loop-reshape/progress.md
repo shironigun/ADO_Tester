@@ -3,7 +3,7 @@
 ## Overview
 - **PRD:** prd.md
 - **Started:** 2026-06-30
-- **Status:** IN PROGRESS (QAL-056 done — 47 of 61 complete)
+- **Status:** IN PROGRESS (QAL-057 done — 48 of 61 complete)
 
 ---
 
@@ -67,7 +67,7 @@
 | QAL-054 | Full build, lint, test + golden parity + runtime smoke | COMPLETED | 2026-06-30 | 2026-06-30 | tsc -b && vite build clean; 122/122 backend tests pass (incl. AdoGolden); qaLoop.tsx lint clean; pre-existing lint errors in other files not introduced by this PRD |
 | QAL-055 | Allure runtime deps + per-run reporter wiring | COMPLETED | 2026-06-30 | 2026-06-30 | PlaywrightRunner: @allurereport/cli + allure-playwright in runtime package.json; allure --version capability check in EnsureRuntimeAsync; reporters moved to config (allure-playwright always, html gated on report_provider ∈ {playwright,both}); _reportProvider field from QaLoopOptions; fallback comment: allure-commandline+JRE if --single-file unsupported |
 | QAL-056 | Allure context files (environment / categories / executor) | COMPLETED | 2026-06-30 | 2026-06-30 | PlaywrightRunSpec gains TriggerSourceWire/TriggerBuildId/TriggerCommitSha/AdoTestRunId; WriteAllureContext writes environment.properties+categories.json+executor.json to allure-results/ after spawn; RunExecutionService populates context fields; graceful degradation on any write failure |
-| QAL-057 | Allure generate single-file + trends + ReportPath + fallback | NOT STARTED |  |  |  |
+| QAL-057 | Allure generate single-file + trends + ReportPath + fallback | COMPLETED | 2026-06-30 | 2026-06-30 | GenerateAllureReportAsync: seeds history, npx allure generate --single-file --clean, CopyHistoryBack, finds *.html in allure-report/; fallback=html/index.html or null; provider=playwright skips generate; RunExecutionService sets run.ReportPath; history keyed by (module,pipeline) under allure-history/ |
 | QAL-058 | Settings report_provider + activity_enabled (both keys end-to-end) | NOT STARTED |  |  |  |
 | QAL-059 | Allure-rich generated specs (generator prompt amendments) | NOT STARTED |  |  |  |
 | QAL-060 | ActivityEnabled persistence + streaming gate | NOT STARTED |  |  |  |
@@ -77,13 +77,16 @@
 
 ## Summary
 - **Total Tasks:** 61
-- **Completed:** 47
+- **Completed:** 48
 - **In Progress:** 0
-- **Not Started:** 14
+- **Not Started:** 13
 
 ---
 
 ## Log
+### 2026-06-30 (QAL-057)
+- **QAL-057** COMPLETED — `PlaywrightRunner`: `GenerateAllureReportAsync` seeds history, runs `npx allure generate --single-file --clean`, copies history back, returns first `.html` in `allure-report/`; fallback = `html/index.html` or null; `provider=playwright` skips generate; `_historyDir` added; `PlaywrightRunSpec` gains `TriggerPipelineId`; `RunExecutionService` sets `run.ReportPath = result.ReportPath`.
+
 ### 2026-06-30 (QAL-056)
 - **QAL-056** COMPLETED — `PlaywrightRunSpec` gains 4 Allure context fields; `PlaywrightRunner.WriteAllureContext` writes `environment.properties` (profile, module, trigger, build, commit, ado run), `categories.json` (real_bug/flaky/test_issue/stale_test taxonomy), `executor.json` (ADO build+test-run deep links) into `allure-results/` after Playwright spawn; failure is catch-logged not rethrown; `_adoBaseUrl` from injected `IOptions<AzureDevOpsOptions>`; 122/122 tests pass.
 

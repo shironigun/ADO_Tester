@@ -12,8 +12,9 @@ public sealed class PlaywrightRunSpec
     /// <summary>Optional level filter ("contracts" | "endpoints" | "workflows"); null = all.</summary>
     public string? LevelFilter { get; init; }
 
-    // Allure context fields (QAL-056) — optional, sourced from TestRun at execution time
+    // Allure context fields (QAL-056/057) — optional, sourced from TestRun at execution time
     public string TriggerSourceWire { get; init; } = "";
+    public int? TriggerPipelineId { get; init; }
     public int? TriggerBuildId { get; init; }
     public string? TriggerCommitSha { get; init; }
     public int? AdoTestRunId { get; init; }

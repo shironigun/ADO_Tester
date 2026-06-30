@@ -97,8 +97,9 @@ public sealed class RunExecutionService
                 GrepTags          = grepTags,
                 Module            = run.Module ?? "",
                 LevelFilter       = run.LevelFilter,
-                TriggerSourceWire = run.TriggerSource.ToWire(),
-                TriggerBuildId    = run.TriggerBuildId,
+                TriggerSourceWire  = run.TriggerSource.ToWire(),
+                TriggerPipelineId  = run.TriggerPipelineId,
+                TriggerBuildId     = run.TriggerBuildId,
                 TriggerCommitSha  = run.TriggerCommitSha,
                 AdoTestRunId      = adoTestRunId,
             };
@@ -111,11 +112,12 @@ public sealed class RunExecutionService
             }
 
             // 5 — Persist run counts + paths
-            run.Passed    = result.Passed;
-            run.Failed    = result.Failed;
-            run.Skipped   = result.Skipped;
+            run.Passed     = result.Passed;
+            run.Failed     = result.Failed;
+            run.Skipped    = result.Skipped;
             run.DurationMs = result.DurationMs;
             run.JunitPath  = result.JunitPath;
+            run.ReportPath = result.ReportPath;
             run.FinishedAt = DateTime.UtcNow;
             run.Status     = result.Failed > 0 ? TestRunStatus.Failed : TestRunStatus.Passed;
 

@@ -27,6 +27,7 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
     private readonly ILogger<PlaywrightRunner> _log;
     private readonly string _reportProvider;
     private readonly string _adoBaseUrl;
+    private readonly string _historyDir;
 
     // Provisioned exactly once; guarded by _runtimeLock.
     private volatile bool _runtimeReady;
@@ -44,6 +45,7 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
         _scriptsDir      = Path.GetFullPath(Path.Combine(dataDir, qaLoop.Value.ScriptsFolderName));
         _runsDir         = Path.GetFullPath(Path.Combine(dataDir, qaLoop.Value.RunsFolderName));
         _runtimeDir      = Path.GetFullPath(Path.Combine(dataDir, "playwright-runtime"));
+        _historyDir      = Path.GetFullPath(Path.Combine(dataDir, "allure-history"));
         _reportProvider  = qaLoop.Value.ReportProvider;
         _adoBaseUrl      = ado.Value.BaseUrl;
         _log = log;
@@ -91,6 +93,7 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
 
         sw.Stop();
         WriteAllureContext(runDir, spec);
+        var reportPath = await GenerateAllureReportAsync(runDir, spec, eventKey, ct);
         var junit = ParseJUnit(junitPath);
 
         Pub(eventKey, EventKinds.Result, "run",
@@ -100,14 +103,15 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
 
         return new PlaywrightRunResult
         {
-            ExitCode       = exitCode,
-            Passed         = junit.Passed,
-            Failed         = junit.Failed,
-            Skipped        = junit.Skipped,
-            DurationMs     = sw.ElapsedMilliseconds,
-            JunitPath      = File.Exists(junitPath) ? junitPath : null,
+            ExitCode        = exitCode,
+            Passed          = junit.Passed,
+            Failed          = junit.Failed,
+            Skipped         = junit.Skipped,
+            DurationMs      = sw.ElapsedMilliseconds,
+            JunitPath       = File.Exists(junitPath) ? junitPath : null,
             ResultsJsonPath = File.Exists(resultsPath) ? resultsPath : null,
-            FailedTests    = junit.FailedTests,
+            ReportPath      = reportPath,
+            FailedTests     = junit.FailedTests,
         };
     }
 
@@ -184,6 +188,100 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
             try { Directory.CreateSymbolicLink(nmLink, nmTarget); }
             catch (Exception ex) { _log.LogWarning(ex, "Could not symlink node_modules; Playwright may re-install"); }
         }
+    }
+
+    // ── Allure generate + history (QAL-057) ─────────────────────────────────
+
+    private async Task<string?> GenerateAllureReportAsync(
+        string runDir, PlaywrightRunSpec spec, string eventKey, CancellationToken ct)
+    {
+        var resultsDir = Path.Combine(runDir, "allure-results");
+        var reportDir  = Path.Combine(runDir, "allure-report");
+
+        // provider=playwright → no Allure generate; return Playwright html if present
+        if (_reportProvider == "playwright")
+        {
+            var pwHtml = Path.Combine(runDir, "html", "index.html");
+            return File.Exists(pwHtml) ? pwHtml : null;
+        }
+
+        if (!Directory.Exists(resultsDir))
+        {
+            _log.LogWarning("Run {RunId}: allure-results missing — skipping generate", spec.RunId);
+            return FallbackReportPath(runDir);
+        }
+
+        // Seed history store into allure-results/history/ for trend continuity
+        SeedHistory(resultsDir, spec);
+
+        try
+        {
+            Pub(eventKey, EventKinds.System, "run", "Generating Allure report…");
+            var genExit = await SpawnAsync(
+                "npx", $"allure generate {EscPath(resultsDir)} -o {EscPath(reportDir)} --single-file --clean",
+                runDir, profile: null, eventKey, ct);
+
+            if (genExit != 0)
+            {
+                _log.LogWarning("Run {RunId}: allure generate exited {Code}", spec.RunId, genExit);
+                return FallbackReportPath(runDir);
+            }
+
+            // Copy fresh history back to server-side store
+            CopyHistoryBack(resultsDir, spec);
+
+            // Single-file is typically index.html; fall back to any .html in the report dir
+            var singleFile = Path.Combine(reportDir, "index.html");
+            if (!File.Exists(singleFile))
+                singleFile = Directory.EnumerateFiles(reportDir, "*.html").FirstOrDefault();
+
+            if (singleFile is null)
+            {
+                _log.LogWarning("Run {RunId}: allure generate produced no .html", spec.RunId);
+                return FallbackReportPath(runDir);
+            }
+
+            Pub(eventKey, EventKinds.System, "run", "Allure report ready.", level: EventLevels.Success);
+            return singleFile;
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Run {RunId}: allure generate failed", spec.RunId);
+            return FallbackReportPath(runDir);
+        }
+    }
+
+    private static string? FallbackReportPath(string runDir)
+    {
+        var pwHtml = Path.Combine(runDir, "html", "index.html");
+        return File.Exists(pwHtml) ? pwHtml : null;
+    }
+
+    private void SeedHistory(string resultsDir, PlaywrightRunSpec spec)
+    {
+        var storeDir = HistoryStoreDir(spec);
+        if (!Directory.Exists(storeDir)) return;
+        var histDest = Path.Combine(resultsDir, "history");
+        Directory.CreateDirectory(histDest);
+        foreach (var f in Directory.EnumerateFiles(storeDir))
+            File.Copy(f, Path.Combine(histDest, Path.GetFileName(f)), overwrite: true);
+    }
+
+    private void CopyHistoryBack(string resultsDir, PlaywrightRunSpec spec)
+    {
+        var histSrc = Path.Combine(resultsDir, "history");
+        if (!Directory.Exists(histSrc)) return;
+        var storeDir = HistoryStoreDir(spec);
+        Directory.CreateDirectory(storeDir);
+        foreach (var f in Directory.EnumerateFiles(histSrc))
+            File.Copy(f, Path.Combine(storeDir, Path.GetFileName(f)), overwrite: true);
+    }
+
+    private string HistoryStoreDir(PlaywrightRunSpec spec)
+    {
+        var moduleKey   = string.IsNullOrEmpty(spec.Module) ? "_all" : spec.Module;
+        var pipelineKey = spec.TriggerPipelineId?.ToString() ?? "manual";
+        return Path.Combine(_historyDir, moduleKey, pipelineKey);
     }
 
     // ── Allure context files (QAL-056) ───────────────────────────────────────
