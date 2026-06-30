@@ -72,7 +72,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
 ### DATA LAYER
 
 #### QAL-006: Create ApiTestSession + ApiTestDraft entities
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-006
 - **Description:** Blueprint Data Layer → Entities → ApiTestSession + ApiTestDraft (Core/Models/ApiTestSession.cs, new). Match existing EF entity style exactly (public sealed class, int Id, plain int FKs, DateTime CreatedAt/UpdatedAt, nav collection = []). WorkItemId/WorkItemTitle nullable for scan mode.
 - **File:** `backend/src/QaAutomation.Core/Models/ApiTestSession.cs`
@@ -82,7 +82,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Both public sealed class in QaAutomation.Core.Models; compiles
 
 #### QAL-007: Create TestRun + TestFailure entities
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-007
 - **Description:** Blueprint Data Layer → Entities → TestRun + TestFailure (Core/Models/TestRun.cs, new). One TestRun per execution; one TestFailure per failed test carrying triage state and the serialized Bug draft.
 - **File:** `backend/src/QaAutomation.Core/Models/TestRun.cs`
@@ -92,7 +92,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - public sealed class in QaAutomation.Core.Models; compiles
 
 #### QAL-008: Create PipelineWatch entity
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-008
 - **Description:** Blueprint Data Layer → Entities → PipelineWatch (Core/Models/PipelineWatch.cs, new). Configured pipelines polled by the watcher; MVP has exactly one row.
 - **File:** `backend/src/QaAutomation.Core/Models/PipelineWatch.cs`

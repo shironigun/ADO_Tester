@@ -16,9 +16,9 @@
 | QAL-003 | Add AdoBuild + AdoBuildChange build-read DTOs | COMPLETED | 2026-06-30 | 2026-06-30 | 2 records added to AdoModels.cs in Build/pipeline region |
 | QAL-004 | Add QaLoopOptions configuration class | COMPLETED | 2026-06-30 | 2026-06-30 | New QaLoopOptions.cs with PollIntervalMinutes/TeamsWebhookUrl/TeamsTemplate/ScriptsFolderName/RunsFolderName/ReportProvider/ActivityEnabled |
 | QAL-005 | Add DmsProfileOptions registry | COMPLETED | 2026-06-30 | 2026-06-30 | DmsProfileOptions.cs with static All registry; Infinity.Credentialed=true |
-| QAL-006 | Create ApiTestSession + ApiTestDraft entities | NOT STARTED |  |  |  |
-| QAL-007 | Create TestRun + TestFailure entities | NOT STARTED |  |  |  |
-| QAL-008 | Create PipelineWatch entity | NOT STARTED |  |  |  |
+| QAL-006 | Create ApiTestSession + ApiTestDraft entities | COMPLETED | 2026-06-30 | 2026-06-30 | New ApiTestSession.cs with ActivityEnabled column |
+| QAL-007 | Create TestRun + TestFailure entities | COMPLETED | 2026-06-30 | 2026-06-30 | New TestRun.cs with ActivityEnabled column |
+| QAL-008 | Create PipelineWatch entity | COMPLETED | 2026-06-30 | 2026-06-30 | New PipelineWatch.cs |
 | QAL-009 | Register 5 DbSets + OnModelCreating in QaDbContext | NOT STARTED |  |  |  |
 | QAL-010 | Generate AddQaLoopReshape EF migration | NOT STARTED |  |  |  |
 | QAL-011 | Author module_analyzer_system.txt rewrite | NOT STARTED |  |  |  |
@@ -77,13 +77,18 @@
 
 ## Summary
 - **Total Tasks:** 61
-- **Completed:** 5
+- **Completed:** 8
 - **In Progress:** 0
-- **Not Started:** 56
+- **Not Started:** 53
 
 ---
 
 ## Log
+### 2026-06-30 (QAL-006/007/008)
+- **QAL-006** COMPLETED — new `ApiTestSession.cs` (ApiTestSession + ApiTestDraft entities, includes ActivityEnabled per QAL-060 amendment).
+- **QAL-007** COMPLETED — new `TestRun.cs` (TestRun + TestFailure entities, includes ActivityEnabled per QAL-060 amendment).
+- **QAL-008** COMPLETED — new `PipelineWatch.cs`. Build green.
+
 ### 2026-06-30 (QAL-005)
 - **QAL-005** COMPLETED — new `backend/src/QaAutomation.Core/Configuration/DmsProfileOptions.cs` with static All registry (Ideal/Infinity/Aspen/Quantum); Infinity.Credentialed=true, others false. Build green.
 
