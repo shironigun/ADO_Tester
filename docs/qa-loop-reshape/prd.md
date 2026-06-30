@@ -524,7 +524,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - tsc passes
 
 #### QAL-045: Apply config-driven identity at the 4 hardcoded sites
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-045
 - **Description:** Blueprint Frontend → SessionWorkspace.tsx (3 sites: card, drawer header, analytics row) + SessionDetailFullScreen.tsx (4th site: header). Replace the inline #{id} — {title} with sessionIdentity(config, ...).
 - **File:** `client/src/session/SessionWorkspace.tsx`, `client/src/session/SessionDetailFullScreen.tsx`
