@@ -3,7 +3,7 @@
 ## Overview
 - **PRD:** prd.md
 - **Started:** 2026-06-30
-- **Status:** IN PROGRESS (QAL-054 done — 45 of 61 complete)
+- **Status:** IN PROGRESS (QAL-055 done — 46 of 61 complete)
 
 ---
 
@@ -65,7 +65,7 @@
 | QAL-052 | Write ImpactAnalyzerAgentTests | COMPLETED | 2026-06-30 | 2026-06-30 | 6 tests: valid parse, id filtering, empty ids+skippedReason, malformed JSON throws AgentException, array root throws, SpecCode excluded from prompt — all pass |
 | QAL-053 | Write JUnitTriageSplitTests + watcher ProcessBuild test | COMPLETED | 2026-06-30 | 2026-06-30 | 6 tests: TriageAsync sets BugDraftJson (no CreateBugAsync), skips already-triaged; FileBugsAsync calls CreateBugAsync once (no LLM); Watcher: empty inventory→Cancelled, malformed JSON→fallback+all ids, valid impact→Queued+LastSeenBuildId updated — 122 total pass |
 | QAL-054 | Full build, lint, test + golden parity + runtime smoke | COMPLETED | 2026-06-30 | 2026-06-30 | tsc -b && vite build clean; 122/122 backend tests pass (incl. AdoGolden); qaLoop.tsx lint clean; pre-existing lint errors in other files not introduced by this PRD |
-| QAL-055 | Allure runtime deps + per-run reporter wiring | NOT STARTED |  |  |  |
+| QAL-055 | Allure runtime deps + per-run reporter wiring | COMPLETED | 2026-06-30 | 2026-06-30 | PlaywrightRunner: @allurereport/cli + allure-playwright in runtime package.json; allure --version capability check in EnsureRuntimeAsync; reporters moved to config (allure-playwright always, html gated on report_provider ∈ {playwright,both}); _reportProvider field from QaLoopOptions; fallback comment: allure-commandline+JRE if --single-file unsupported |
 | QAL-056 | Allure context files (environment / categories / executor) | NOT STARTED |  |  |  |
 | QAL-057 | Allure generate single-file + trends + ReportPath + fallback | NOT STARTED |  |  |  |
 | QAL-058 | Settings report_provider + activity_enabled (both keys end-to-end) | NOT STARTED |  |  |  |
@@ -77,13 +77,16 @@
 
 ## Summary
 - **Total Tasks:** 61
-- **Completed:** 45
+- **Completed:** 46
 - **In Progress:** 0
-- **Not Started:** 16
+- **Not Started:** 15
 
 ---
 
 ## Log
+### 2026-06-30 (QAL-055)
+- **QAL-055** COMPLETED — `PlaywrightRunner.cs`: `WriteRuntimePackageJson` adds `allure-playwright`+`@allurereport/cli`; `EnsureRuntimeAsync` adds `npx allure --version` capability check + fallback warn; `WriteRunConfig` moves reporters to config template (junit+json+allure-playwright always, html gated on `report_provider ∈ {playwright,both}`); `RunAsync` drops `--reporter` CLI args; `_reportProvider` field from constructor. Build clean.
+
 ### 2026-06-30 (QAL-054)
 - **QAL-054** COMPLETED — Fixed all TS build errors in qaLoop.tsx (Stack sx, as unknown as, removed stale useEventStream+events, correct AgentPipeline/AgentConsole props); fixed pre-existing flexWrap/Grid/wiUrl errors in QaPipelinesPage/QaRunsPage/authorTests/findBugs; tsc -b && vite build clean; 122/122 backend tests pass including AdoGoldenTests.
 
