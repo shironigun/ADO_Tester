@@ -34,13 +34,13 @@
 | QAL-021 | Implement QaLoopOrchestrator scan+analyze background pipeline | COMPLETED | 2026-06-30 | 2026-06-30 | QaLoopOrchestrator.cs — Analyzing→AwaitingReview/Drafting; persists InventoryJson+AnalysisJson; EventPhases.Analyze added |
 | QAL-022 | Implement GenerateDraftsAsync (3 generators in parallel, selected-only) | COMPLETED | 2026-06-30 | 2026-06-30 | GenerateDraftsInnerAsync — Task.WhenAll across all three levels; per-surface GenerateSafeAsync; spec written to disk; EventPhases.Generate added |
 | QAL-023 | Implement Push / PushDraft (idempotent re-push, tag rewrite) | COMPLETED | 2026-06-30 | 2026-06-30 | RunPushAsync + PushDraftAsync — [<tcId-pending>]→[id] on title+spec; LinkTestedBy only when WorkItemId set; partial push stays Drafted |
-| QAL-024 | Define IPlaywrightRunner abstraction | NOT STARTED |  |  |  |
-| QAL-025 | Implement PlaywrightRunner (install-once runtime, grep, spawn, parse) | NOT STARTED |  |  |  |
-| QAL-026 | Add 3 ADO Test Run lifecycle + GetTestPoints methods to IAzureDevOpsClient | NOT STARTED |  |  |  |
-| QAL-027 | Implement ADO Test Run lifecycle methods in AzureDevOpsClient | NOT STARTED |  |  |  |
+| QAL-024 | Define IPlaywrightRunner abstraction | COMPLETED | 2026-06-30 | 2026-06-30 | IPlaywrightRunner.cs with PlaywrightRunSpec/PlaywrightRunResult/FailedTestResult |
+| QAL-025 | Implement PlaywrightRunner (install-once runtime, grep, spawn, parse) | COMPLETED | 2026-06-30 | 2026-06-30 | PlaywrightRunner.cs — SemaphoreSlim once-guard; symlink node_modules; grep alternation; JUnit XML parser |
+| QAL-026 | Add 3 ADO Test Run lifecycle + GetTestPoints methods to IAzureDevOpsClient | COMPLETED | 2026-06-30 | 2026-06-30 | CreateAdoTestRunAsync/SetAdoTestResultAsync/CompleteAdoTestRunAsync/GetTestPointsAsync added to interface |
+| QAL-027 | Implement ADO Test Run lifecycle methods in AzureDevOpsClient | COMPLETED | 2026-06-30 | 2026-06-30 | 4 methods implemented in AzureDevOpsClient.cs; test stubs updated |
 | QAL-028 | Implement RunExecutionService (runner + ADO Test Run + triage handoff) | NOT STARTED |  |  |  |
-| QAL-029 | Add 2 build-read methods to IAzureDevOpsClient | NOT STARTED |  |  |  |
-| QAL-030 | Implement 2 build-read methods in AzureDevOpsClient | NOT STARTED |  |  |  |
+| QAL-029 | Add 2 build-read methods to IAzureDevOpsClient | COMPLETED | 2026-06-30 | 2026-06-30 | GetPipelineBuildsAsync/GetBuildChangesAsync added to interface |
+| QAL-030 | Implement 2 build-read methods in AzureDevOpsClient | COMPLETED | 2026-06-30 | 2026-06-30 | Both implemented in AzureDevOpsClient.cs additive-only |
 | QAL-031 | Implement PipelineWatcherHostedService (poll, impact, fallback, run-latest) | NOT STARTED |  |  |  |
 | QAL-032 | Author QaLoopContracts DTOs | NOT STARTED |  |  |  |
 | QAL-033 | Author QaRunsContracts DTOs | NOT STARTED |  |  |  |
