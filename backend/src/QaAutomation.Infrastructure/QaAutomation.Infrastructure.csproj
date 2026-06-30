@@ -30,6 +30,8 @@
   <ItemGroup>
     <!-- Frozen agent prompts, extracted byte-exact from the Python (write_prompts.py). -->
     <EmbeddedResource Include="Agents\Prompts\*.txt" />
+    <!-- Teams adaptive-card templates for QA Loop notifications. -->
+    <EmbeddedResource Include="Notifications\Templates\*.json.template" />
   </ItemGroup>
 
 </Project>

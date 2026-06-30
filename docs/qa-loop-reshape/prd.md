@@ -464,7 +464,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Namespace QaAutomation.Core.Abstractions; compiles
 
 #### QAL-040: Author 3 Teams card templates
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-040
 - **Description:** Blueprint TeamsNotifier → "Embedded templates". Three .json.template resources under Notifications/Templates/ (NOT under Prompts/). Requires a second EmbeddedResource glob in the Infrastructure .csproj since the Prompts glob does not cover them. Use the blueprint's literal glob pattern Notifications\Templates\*.json.template (line 4203).
 - **File:** `backend/src/QaAutomation.Infrastructure/Notifications/Templates/teams_summary_compact.json.template`, `backend/src/QaAutomation.Infrastructure/Notifications/Templates/teams_summary_developer.json.template`, `backend/src/QaAutomation.Infrastructure/Notifications/Templates/teams_summary_scheduled.json.template`

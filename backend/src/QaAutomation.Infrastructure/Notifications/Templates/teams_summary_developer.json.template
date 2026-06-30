@@ -1,0 +1,84 @@
+{
+  "type": "message",
+  "attachments": [
+    {
+      "contentType": "application/vnd.microsoft.card.adaptive",
+      "content": {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "body": [
+          {
+            "type": "TextBlock",
+            "text": "QA Loop Run — {{module}}",
+            "weight": "Bolder",
+            "size": "Medium",
+            "wrap": true
+          },
+          {
+            "type": "FactSet",
+            "facts": [
+              { "title": "Status",   "value": "{{status}}" },
+              { "title": "Passed",   "value": "{{passed}}" },
+              { "title": "Failed",   "value": "{{failed}}" },
+              { "title": "Duration", "value": "{{duration}}" },
+              { "title": "Trigger",  "value": "{{trigger}}" },
+              { "title": "Profile",  "value": "{{profile}}" }
+            ]
+          },
+          {
+            "type": "TextBlock",
+            "text": "**Level breakdown**",
+            "weight": "Bolder",
+            "separator": true
+          },
+          {
+            "type": "TextBlock",
+            "text": "{{level_breakdown}}",
+            "wrap": true,
+            "fontType": "Monospace"
+          },
+          {
+            "type": "TextBlock",
+            "text": "**Failed tests**",
+            "weight": "Bolder",
+            "separator": true,
+            "isVisible": "{{has_failures}}"
+          },
+          {
+            "type": "TextBlock",
+            "text": "{{failed_tests}}",
+            "wrap": true,
+            "isVisible": "{{has_failures}}"
+          },
+          {
+            "type": "TextBlock",
+            "text": "**Impact reasoning:** {{impact_reasoning}}",
+            "wrap": true,
+            "separator": true,
+            "isVisible": "{{has_impact}}"
+          },
+          {
+            "type": "TextBlock",
+            "text": "{{report_line}}",
+            "wrap": true,
+            "isVisible": "{{has_report}}"
+          }
+        ],
+        "actions": [
+          {
+            "type": "Action.OpenUrl",
+            "title": "View ADO Test Run",
+            "url": "{{ado_run_url}}"
+          },
+          {
+            "type": "Action.OpenUrl",
+            "title": "View Report",
+            "url": "{{report_url}}",
+            "isEnabled": "{{has_report}}"
+          }
+        ]
+      }
+    }
+  ]
+}
