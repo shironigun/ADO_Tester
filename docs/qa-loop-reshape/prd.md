@@ -614,7 +614,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - xUnit; runs green via the matching --filter
 
 #### QAL-053: Write JUnitTriageSplitTests + watcher ProcessBuild test
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-053
 - **Description:** Manifest JUnitTriageSplitTests.cs (new) + blueprint Pipeline Watcher → "Verification". Cover the triage/file-bugs split (draft-first) and the watcher's ProcessBuildAsync with a fake IAzureDevOpsClient + stub ImpactAnalyzerAgent.
 - **File:** `backend/src/QaAutomation.Tests/JUnitTriageSplitTests.cs`
