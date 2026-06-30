@@ -75,4 +75,33 @@ public interface IAzureDevOpsClient
     /// Repo-relative paths (no leading slash). Used to read a module's source straight from Azure Repos.</summary>
     Task<IReadOnlyList<string>> ListRepoFilePathsAsync(string scopePath, string? branch = null, string? repoId = null, CancellationToken ct = default);
     Task<IReadOnlyList<string>> SearchCodeAsync(string text, int top = 20, string? repoId = null, CancellationToken ct = default);
+
+    // ── ADO Test Run lifecycle (QAL-026) ──────────────────────────────────────
+
+    /// <summary>Create an ADO Test Run bound to a plan; returns the new run id.</summary>
+    Task<int> CreateAdoTestRunAsync(int planId, int suiteId, string name,
+        IReadOnlyList<int> pointIds, CancellationToken ct = default);
+
+    /// <summary>Post a single test result for one test point in the given run.</summary>
+    Task SetAdoTestResultAsync(int adoTestRunId, int testPointId, string outcome,
+        string? errorMessage, long durationMs, CancellationToken ct = default);
+
+    /// <summary>Mark the ADO Test Run as Completed.</summary>
+    Task CompleteAdoTestRunAsync(int adoTestRunId, CancellationToken ct = default);
+
+    /// <summary>Resolve test-point ids for the supplied test case ids within a plan/suite.
+    /// Returns a mapping of testCaseId → testPointId (only entries that exist in ADO).</summary>
+    Task<IReadOnlyDictionary<int, int>> GetTestPointsAsync(
+        int planId, int suiteId, IReadOnlyList<int> testCaseIds, CancellationToken ct = default);
+
+    // ── Build / pipeline reads (QAL-029) ─────────────────────────────────────
+
+    /// <summary>List completed+succeeded builds for the given pipeline definition, newest-first.
+    /// When <paramref name="minBuildId"/> is supplied only builds with id &gt; that value are returned.</summary>
+    Task<IReadOnlyList<AdoBuild>> GetPipelineBuildsAsync(
+        int pipelineId, int? minBuildId = null, CancellationToken ct = default);
+
+    /// <summary>List the commits associated with a build (build changes).</summary>
+    Task<IReadOnlyList<AdoBuildChange>> GetBuildChangesAsync(
+        int buildId, CancellationToken ct = default);
 }

@@ -276,7 +276,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
 ### RUNNER & ADO TEST RUN
 
 #### QAL-024: Define IPlaywrightRunner abstraction
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-024
 - **Description:** Blueprint PlaywrightRunner section → "The Runner". Runner abstraction (singleton-able) consumed by RunExecutionService.
 - **File:** `backend/src/QaAutomation.Core/Abstractions/IPlaywrightRunner.cs`
@@ -286,7 +286,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Namespace QaAutomation.Core.Abstractions; compiles
 
 #### QAL-025: Implement PlaywrightRunner (install-once runtime, grep, spawn, parse)
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-025
 - **Description:** Blueprint PlaywrightRunner → prepare dir / provision runtime once / determine spec set + build --grep / spawn serialized + streamed / persist outputs / counts. Shared playwright-runtime provisioned once at runner-service startup (npm ci + npx playwright install), read-only at run time. AUTOMATION_PROFILE set on the child ProcessStartInfo.Environment, not a CLI flag.
 - **File:** `backend/src/QaAutomation.Infrastructure/QaRuns/PlaywrightRunner.cs`
@@ -301,7 +301,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - (amended: Allure/activity — the human-facing HTML report + reporter list + ReportPath resolution are delegated to QAL-055/QAL-057; junit + json stay always-on; verbose stdout streaming + EventLogJson are gated by ActivityEnabled per QAL-060)
 
 #### QAL-026: Add 3 ADO Test Run lifecycle + GetTestPoints methods to IAzureDevOpsClient
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-026
 - **Description:** Blueprint API/ADO mutation (new) + PlaywrightRunner → "New IAzureDevOpsClient methods". Append the test-run lifecycle + test-point resolution to the interface, each with trailing CancellationToken ct = default. NOTE: this interface file is also edited in the WATCHER phase (2 build-read methods) — both edits are purely additive appends to the same file; no conflict.
 - **File:** `backend/src/QaAutomation.Core/Abstractions/IAzureDevOpsClient.cs`
@@ -313,7 +313,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Grouped in a new region with trailing ct = default; compiles
 
 #### QAL-027: Implement ADO Test Run lifecycle methods in AzureDevOpsClient
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-027
 - **Description:** Blueprint PlaywrightRunner → "New IAzureDevOpsClient methods" implementation. Additive only — follow existing Opts.BaseUrl + Opts.ApiVersion + SendDocAsync/GetDocAsync helpers; do NOT touch CreateTestCaseAsync/CreateBugAsync bodies (golden parity). NOTE: this implementation file is also edited in the WATCHER phase (2 build-read methods) — additive append, no conflict.
 - **File:** `backend/src/QaAutomation.Infrastructure/AzureDevOps/AzureDevOpsClient.cs`
@@ -339,7 +339,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
 ### PIPELINE WATCHER & ADO CLIENT METHODS
 
 #### QAL-029: Add 2 build-read methods to IAzureDevOpsClient
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-029
 - **Description:** Blueprint Pipeline Watcher → "IAzureDevOpsClient additions". Append the two build reads (Build read scope already on the PAT) so the watcher can enumerate succeeded builds and their commits; file resolution reuses existing GetCommitChangedFilesAsync. Additive append to the same interface file the RUNNER phase touched — no conflict. Use canonical AdoBuildChange (defined in FOUNDATION).
 - **File:** `backend/src/QaAutomation.Core/Abstractions/IAzureDevOpsClient.cs`
@@ -349,7 +349,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Both in the build/pipeline-reads region with trailing ct = default; compiles
 
 #### QAL-030: Implement 2 build-read methods in AzureDevOpsClient
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-030
 - **Description:** Blueprint Pipeline Watcher → "AzureDevOpsClient implementations". GET-and-map against /_apis/build/builds, mirroring GetTestPlansAsync style; no new usings (System.Globalization already imported). Additive append to the same impl file the RUNNER phase touched — no conflict; existing write bodies untouched.
 - **File:** `backend/src/QaAutomation.Infrastructure/AzureDevOps/AzureDevOpsClient.cs`

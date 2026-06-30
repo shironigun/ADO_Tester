@@ -1026,6 +1026,111 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
         return JsonDocument.Parse(await r.Content.ReadAsStringAsync(ct) is { Length: > 0 } s ? s : "{}");
     }
 
+    // ── ADO Test Run lifecycle (QAL-027) ─────────────────────────────────────
+
+    public async Task<int> CreateAdoTestRunAsync(int planId, int suiteId, string name,
+        IReadOnlyList<int> pointIds, CancellationToken ct = default)
+    {
+        var body = new JsonObject
+        {
+            ["name"]   = name,
+            ["plan"]   = new JsonObject { ["id"] = planId.ToString(CultureInfo.InvariantCulture) },
+            ["pointIds"] = new JsonArray(pointIds.Select(id => JsonValue.Create(id)).ToArray<JsonNode?>()),
+        };
+        var url = $"{Opts.BaseUrl}/_apis/test/runs?api-version=7.0";
+        using var doc = await PostDocAsync(url, body, "Create ADO Test Run", ct);
+        return doc.RootElement.GetProperty("id").GetInt32();
+    }
+
+    public async Task SetAdoTestResultAsync(int adoTestRunId, int testPointId, string outcome,
+        string? errorMessage, long durationMs, CancellationToken ct = default)
+    {
+        var result = new JsonObject
+        {
+            ["testPoint"]    = new JsonObject { ["id"] = testPointId.ToString(CultureInfo.InvariantCulture) },
+            ["outcome"]      = outcome,
+            ["durationInMs"] = durationMs,
+        };
+        if (!string.IsNullOrEmpty(errorMessage))
+            result["errorMessage"] = errorMessage;
+
+        var body = new JsonArray { result };
+        var url = $"{Opts.BaseUrl}/_apis/test/Runs/{adoTestRunId}/results?api-version=7.0";
+        using var _ = await PostDocAsync(url, body, $"Set ADO test result (run {adoTestRunId})", ct);
+    }
+
+    public async Task CompleteAdoTestRunAsync(int adoTestRunId, CancellationToken ct = default)
+    {
+        var body = new JsonObject { ["state"] = "Completed" };
+        var url = $"{Opts.BaseUrl}/_apis/test/runs/{adoTestRunId}?api-version=7.0";
+        using var _ = await SendDocAsync(HttpMethod.Patch, url, body, "application/json",
+            $"Complete ADO test run {adoTestRunId}", ct);
+    }
+
+    public async Task<IReadOnlyDictionary<int, int>> GetTestPointsAsync(
+        int planId, int suiteId, IReadOnlyList<int> testCaseIds, CancellationToken ct = default)
+    {
+        var ids = string.Join(",", testCaseIds);
+        var url = $"{Opts.BaseUrl}/_apis/testplan/Plans/{planId}/Suites/{suiteId}/TestPoint" +
+                  $"?testCaseId={ids}&api-version={Opts.ApiVersion}";
+        using var doc = await GetDocAsync(url, "Get test points", ct);
+        var map = new Dictionary<int, int>();
+        if (doc.RootElement.TryGetProperty("value", out var arr))
+            foreach (var pt in arr.EnumerateArray())
+            {
+                var tcId = pt.TryGetProperty("testCaseReference", out var tcr)
+                    ? (tcr.TryGetProperty("id", out var idProp) ? idProp.GetInt32() : 0)
+                    : 0;
+                var ptId = pt.TryGetProperty("id", out var ptProp) ? ptProp.GetInt32() : 0;
+                if (tcId > 0 && ptId > 0) map[tcId] = ptId;
+            }
+        return map;
+    }
+
+    // ── Build / pipeline reads (QAL-030) ────────────────────────────────────
+
+    public async Task<IReadOnlyList<AdoBuild>> GetPipelineBuildsAsync(
+        int pipelineId, int? minBuildId = null, CancellationToken ct = default)
+    {
+        var url = $"{Opts.BaseUrl}/_apis/build/builds?definitions={pipelineId}" +
+                  "&statusFilter=completed&resultFilter=succeeded&queryOrder=finishTimeDescending" +
+                  $"&api-version={Opts.ApiVersion}";
+        if (minBuildId.HasValue)
+            url += $"&minBuildId={minBuildId.Value + 1}";
+
+        using var doc = await GetDocAsync(url, $"Get pipeline builds {pipelineId}", ct);
+        var builds = new List<AdoBuild>();
+        if (doc.RootElement.TryGetProperty("value", out var arr))
+            foreach (var b in arr.EnumerateArray())
+            {
+                var id  = b.TryGetProperty("id", out var idP) ? idP.GetInt32() : 0;
+                var sha = b.TryGetProperty("sourceVersion", out var svP) ? svP.GetString() ?? "" : "";
+                var repoId = b.TryGetProperty("repository", out var rp)
+                    ? (rp.TryGetProperty("id", out var rIdP) ? rIdP.GetString() ?? "" : "") : "";
+                var finished = b.TryGetProperty("finishTime", out var ftP)
+                    ? DateTime.Parse(ftP.GetString() ?? "", CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)
+                    : DateTime.UtcNow;
+                if (id > 0) builds.Add(new AdoBuild(id, sha, repoId, finished));
+            }
+        return builds;
+    }
+
+    public async Task<IReadOnlyList<AdoBuildChange>> GetBuildChangesAsync(
+        int buildId, CancellationToken ct = default)
+    {
+        var url = $"{Opts.BaseUrl}/_apis/build/builds/{buildId}/changes?api-version={Opts.ApiVersion}";
+        using var doc = await GetDocAsync(url, $"Get build changes {buildId}", ct);
+        var changes = new List<AdoBuildChange>();
+        if (doc.RootElement.TryGetProperty("value", out var arr))
+            foreach (var c in arr.EnumerateArray())
+            {
+                var sha = c.TryGetProperty("id", out var idP) ? idP.GetString() ?? "" : "";
+                var msg = c.TryGetProperty("message", out var mP) ? mP.GetString() ?? "" : "";
+                if (!string.IsNullOrEmpty(sha)) changes.Add(new AdoBuildChange(sha, msg));
+            }
+        return changes;
+    }
+
     private Task<JsonDocument> PostDocAsync(string url, JsonNode body, string op, CancellationToken ct) =>
         SendDocAsync(HttpMethod.Post, url, body, "application/json", op, ct);
 
