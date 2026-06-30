@@ -19,8 +19,8 @@
 | QAL-006 | Create ApiTestSession + ApiTestDraft entities | COMPLETED | 2026-06-30 | 2026-06-30 | New ApiTestSession.cs with ActivityEnabled column |
 | QAL-007 | Create TestRun + TestFailure entities | COMPLETED | 2026-06-30 | 2026-06-30 | New TestRun.cs with ActivityEnabled column |
 | QAL-008 | Create PipelineWatch entity | COMPLETED | 2026-06-30 | 2026-06-30 | New PipelineWatch.cs |
-| QAL-009 | Register 5 DbSets + OnModelCreating in QaDbContext | NOT STARTED |  |  |  |
-| QAL-010 | Generate AddQaLoopReshape EF migration | NOT STARTED |  |  |  |
+| QAL-009 | Register 5 DbSets + OnModelCreating in QaDbContext | COMPLETED | 2026-06-30 | 2026-06-30 | 5 DbSets + wire-string converters + indexes + cascade FKs in QaDbContext.cs |
+| QAL-010 | Generate AddQaLoopReshape EF migration | COMPLETED | 2026-06-30 | 2026-06-30 | Generated 20260630152918_AddQaLoopReshape.cs; 5 tables with cascade FKs + unique PipelineWatches index |
 | QAL-011 | Author module_analyzer_system.txt rewrite | NOT STARTED |  |  |  |
 | QAL-012 | Author 7 net-new embedded prompt .txt files | NOT STARTED |  |  |  |
 | QAL-013 | Register 7 prompt properties in AgentPrompts | NOT STARTED |  |  |  |
@@ -77,13 +77,17 @@
 
 ## Summary
 - **Total Tasks:** 61
-- **Completed:** 8
+- **Completed:** 10
 - **In Progress:** 0
-- **Not Started:** 53
+- **Not Started:** 51
 
 ---
 
 ## Log
+### 2026-06-30 (QAL-009/010)
+- **QAL-009** COMPLETED — `QaDbContext.cs`: 5 new DbSets, 4 wire-string ValueConverters (TestLevel/FailureClassification/TriggerSource/DmsProfile), 5 entity registrations with indexes and cascade FKs. Build green.
+- **QAL-010** COMPLETED — `20260630152918_AddQaLoopReshape.cs` generated; creates ApiTestSessions, ApiTestDrafts, TestRuns, TestFailures, PipelineWatches with TEXT enum columns, unique PipelineWatches index, all cascade FKs.
+
 ### 2026-06-30 (QAL-006/007/008)
 - **QAL-006** COMPLETED — new `ApiTestSession.cs` (ApiTestSession + ApiTestDraft entities, includes ActivityEnabled per QAL-060 amendment).
 - **QAL-007** COMPLETED — new `TestRun.cs` (TestRun + TestFailure entities, includes ActivityEnabled per QAL-060 amendment).
