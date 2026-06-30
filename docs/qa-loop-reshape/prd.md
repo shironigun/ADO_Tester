@@ -455,7 +455,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - FailureTriageAgent, JUnitParser, BuildReproHtml, BuildSystemInfo unchanged; the four classifications preserved; golden tests still pass
 
 #### QAL-039: Define ITeamsNotifier abstraction
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-039
 - **Description:** Blueprint TeamsNotifier → "Abstraction". Notifier fired on run completion and on triage/file-bugs.
 - **File:** `backend/src/QaAutomation.Core/Abstractions/ITeamsNotifier.cs`

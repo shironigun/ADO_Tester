@@ -3,7 +3,7 @@
 ## Overview
 - **PRD:** prd.md
 - **Started:** 2026-06-30
-- **Status:** IN PROGRESS (QAL-038 done — 29 of 61 complete)
+- **Status:** IN PROGRESS (QAL-039 done — 30 of 61 complete)
 
 ---
 
@@ -49,7 +49,7 @@
 | QAL-036 | Implement QaRunsController | COMPLETED | 2026-06-30 | 2026-06-30 | QaRunsController.cs — 7 endpoints (start, stream, list, detail, triage stub, file-bugs stub, preview-impact) |
 | QAL-037 | Implement QaPipelinesController | COMPLETED | 2026-06-30 | 2026-06-30 | QaPipelinesController.cs — 5 endpoints (list, add, patch, delete, run-latest) |
 | QAL-038 | Split IResultsIngestService + ResultsIngestService into Triage/FileBugs | COMPLETED | 2026-06-30 | 2026-06-30 | TriageAsync (FailureTriageAgent, BugDraftJson persist) + FileBugsAsync (no 2nd LLM, CreateBugAsync, link TC+story) in ResultsIngestService; triage/file-bugs endpoints wired in QaRunsController |
-| QAL-039 | Define ITeamsNotifier abstraction | NOT STARTED |  |  |  |
+| QAL-039 | Define ITeamsNotifier abstraction | COMPLETED | 2026-06-30 | 2026-06-30 | ITeamsNotifier.cs — NotifyRunCompleteAsync(run) + NotifyTriageAsync(run, count, bugIds) |
 | QAL-040 | Author 3 Teams card templates | NOT STARTED |  |  |  |
 | QAL-041 | Implement TeamsNotifier | NOT STARTED |  |  |  |
 | QAL-042 | Register 3 settings keys in AppSettingsService | NOT STARTED |  |  |  |
