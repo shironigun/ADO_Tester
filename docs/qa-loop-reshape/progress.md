@@ -15,7 +15,7 @@
 | QAL-002 | Add shared agent-output POCOs | COMPLETED | 2026-06-30 | 2026-06-30 | RouteInfo/DtoInfo/WorkflowInfo/InventoryDoc/SurfaceMatrix/ImpactAnalysis appended to AgentOutputs.cs |
 | QAL-003 | Add AdoBuild + AdoBuildChange build-read DTOs | COMPLETED | 2026-06-30 | 2026-06-30 | 2 records added to AdoModels.cs in Build/pipeline region |
 | QAL-004 | Add QaLoopOptions configuration class | COMPLETED | 2026-06-30 | 2026-06-30 | New QaLoopOptions.cs with PollIntervalMinutes/TeamsWebhookUrl/TeamsTemplate/ScriptsFolderName/RunsFolderName/ReportProvider/ActivityEnabled |
-| QAL-005 | Add DmsProfileOptions registry | NOT STARTED |  |  |  |
+| QAL-005 | Add DmsProfileOptions registry | COMPLETED | 2026-06-30 | 2026-06-30 | DmsProfileOptions.cs with static All registry; Infinity.Credentialed=true |
 | QAL-006 | Create ApiTestSession + ApiTestDraft entities | NOT STARTED |  |  |  |
 | QAL-007 | Create TestRun + TestFailure entities | NOT STARTED |  |  |  |
 | QAL-008 | Create PipelineWatch entity | NOT STARTED |  |  |  |
@@ -77,13 +77,16 @@
 
 ## Summary
 - **Total Tasks:** 61
-- **Completed:** 4
+- **Completed:** 5
 - **In Progress:** 0
-- **Not Started:** 57
+- **Not Started:** 56
 
 ---
 
 ## Log
+### 2026-06-30 (QAL-005)
+- **QAL-005** COMPLETED — new `backend/src/QaAutomation.Core/Configuration/DmsProfileOptions.cs` with static All registry (Ideal/Infinity/Aspen/Quantum); Infinity.Credentialed=true, others false. Build green.
+
 ### 2026-06-30 (QAL-004)
 - **QAL-004** COMPLETED — new `backend/src/QaAutomation.Core/Configuration/QaLoopOptions.cs` with SectionName="QaLoop", PollIntervalMinutes(5), TeamsWebhookUrl, TeamsTemplate("developer"), ScriptsFolderName("scripts"), RunsFolderName("runs"), ReportProvider("allure"), ActivityEnabled(true). Build green.
 
