@@ -435,7 +435,7 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
             <Chip size="small" label={`#${session.workItemId}`} />
             {wiType && <Chip size="small" variant="outlined" label={wiType} />}
             <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }}>{session.workItemTitle}</Typography>
-            <Link href={wiUrl(session.workItemId)} target="_blank" rel="noreferrer" variant="body2">Open in Azure DevOps</Link>
+            <Link href={wiUrl(session.workItemId as number)} target="_blank" rel="noreferrer" variant="body2">Open in Azure DevOps</Link>
           </Stack>
         </CardContent></Card>
       )}

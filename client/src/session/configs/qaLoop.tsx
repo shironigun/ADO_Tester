@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
   Alert, Autocomplete, Box, Button, Card, CardContent, Checkbox, Chip, CircularProgress,
-  FormControlLabel, IconButton, Stack, Tab, Tabs, TextField, Tooltip, Typography,
+  IconButton, Stack, Tab, Tabs, TextField, Tooltip, Typography,
 } from '@mui/material'
 import CheckIcon from '@mui/icons-material/Check'
 import CloseIcon from '@mui/icons-material/Close'
@@ -19,10 +19,10 @@ import type {
 } from '../types'
 import { parseEventLog } from '../shared'
 import { axiosMessage } from '../../common/errors'
-import { useEventStream } from '../../hooks/useEventStream'
+
 import {
   startScan, listSessionsPage, getSessionDetail, saveAnalysis, generateDrafts, patchDraft,
-  approveAllDrafts, pushSession, pushDraft, cancelSession, sessionStreamUrl,
+  approveAllDrafts, pushSession, cancelSession, sessionStreamUrl,
   type ApiSessionDetail, type ApiTestDraftDto, type ScanStartRequest, type SurfaceRow,
 } from '../../api/qaLoop'
 import { getPlans, getSuites, searchWorkItems } from '../../api/authorTests'
@@ -38,6 +38,7 @@ const PIPELINE_STEPS: PipelineStep[] = [
   { key: 'push',   label: 'Push',   icon: <CheckIcon /> },
 ]
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function activeStepIndex(status: string, _activity: string | null): number {
   switch (status) {
     case 'Scanning':      return 0
@@ -131,7 +132,7 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
           onChange={(_, v) => setStory(v)} value={story}
           renderInput={p => <TextField {...p} label="Story (optional)" size="small" />}
         />
-        <Stack direction="row" spacing={1} justifyContent="flex-end">
+        <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
           <Button onClick={onClose} disabled={loading}>Cancel</Button>
           <Button type="submit" variant="contained" disabled={loading || !module.trim()}
             startIcon={loading ? <CircularProgress size={16} /> : undefined}>
@@ -189,7 +190,7 @@ function CoverageMatrix({ session, onSaved }: { session: ApiSessionDetail; onSav
           return (
             <Stack key={key} direction="row" spacing={1} sx={{ alignItems: 'center' }}>
               <Checkbox size="small" checked={selected.has(key)}
-                onChange={e => setSelected(prev => { const s = new Set(prev); e.target.checked ? s.add(key) : s.delete(key); return s })} />
+                onChange={e => setSelected(prev => { const s = new Set(prev); if (e.target.checked) s.add(key); else s.delete(key); return s })} />
               <Chip size="small" label={r.level} />
               <Chip size="small" label={r.status === 'covered' ? 'covered' : 'gap'} color={r.status === 'covered' ? 'success' : 'warning'} variant="outlined" />
               <Typography variant="body2" sx={{ fontFamily: 'monospace', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -206,7 +207,7 @@ function CoverageMatrix({ session, onSaved }: { session: ApiSessionDetail; onSav
 // ── Drafts by level ───────────────────────────────────────────────────────────
 
 function DraftsByLevel({ session, refetch }: { session: ApiSessionDetail; refetch: () => void }) {
-  const drafts = (session.drafts ?? []) as ApiTestDraftDto[]
+  const drafts = (session.drafts ?? []) as unknown as ApiTestDraftDto[]
   const levels = ['Contract', 'Endpoint', 'Workflow']
   const [tab, setTab] = useState(0)
   const [editId, setEditId] = useState<number | null>(null)
@@ -299,7 +300,7 @@ function PushPanel({ session, refetch }: { session: ApiSessionDetail; refetch: (
   const [pushing, setPushing] = useState(false)
   const [error, setError]   = useState('')
 
-  const drafts = (session.drafts ?? []) as ApiTestDraftDto[]
+  const drafts = (session.drafts ?? []) as unknown as ApiTestDraftDto[]
   const approved = drafts.filter(d => d.status === 'Approved').length
 
   async function doPush() {
@@ -357,7 +358,6 @@ export function QaLoopDetailBody({ session, refetch, onError, fullScreen }: Deta
   const live = !['Done', 'Failed', 'Cancelled'].includes(s.status)
   const stepIdx = activeStepIndex(s.status, s.currentActivity)
   const [tab, setTab] = useState<'detail' | 'coverage' | 'drafts' | 'push'>('detail')
-  const { events } = useEventStream(live ? sessionStreamUrl(s.id) : null, parseEventLog(s.eventLogJson))
 
   async function doGenerate() {
     try { await generateDrafts(s.id); refetch() }
@@ -366,7 +366,7 @@ export function QaLoopDetailBody({ session, refetch, onError, fullScreen }: Deta
 
   return (
     <Box sx={{ maxWidth: fullScreen ? undefined : 800 }}>
-      <AgentPipeline steps={PIPELINE_STEPS} activeIndex={stepIdx} status={s.status} sx={{ mb: 2 }} />
+      <AgentPipeline steps={PIPELINE_STEPS} activeIndex={stepIdx} inFlight={live} failed={s.status === 'Failed'} currentActivity={s.currentActivity ?? null} />
       {live && <Box sx={{ mb: 2 }}><LiveActivityIndicator active text={s.currentActivity ?? 'Processing…'} /></Box>}
 
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
@@ -384,7 +384,7 @@ export function QaLoopDetailBody({ session, refetch, onError, fullScreen }: Deta
             }>Coverage analysis ready. Generate Playwright drafts when ready.</Alert>
           )}
           {s.errorMessage && <Alert severity="error" sx={{ mb: 2 }}>{s.errorMessage}</Alert>}
-          <AgentConsole events={events} sx={{ maxHeight: 400 }} />
+          <AgentConsole streamUrl={live ? sessionStreamUrl(s.id) : null} seedEvents={parseEventLog(s.eventLogJson)} />
         </Box>
       )}
 
@@ -397,6 +397,7 @@ export function QaLoopDetailBody({ session, refetch, onError, fullScreen }: Deta
 
 // ── Config export ─────────────────────────────────────────────────────────────
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const qaLoopConfig: SessionModuleConfig = {
   key: 'qa-loop',
   apiBase: '/api/qaloop',

@@ -79,7 +79,7 @@ function RunDrawer({ run, onClose }: { run: TestRunSummary; onClose: () => void 
   const detail: TestRunDetail | undefined = detailQ.data
 
   function toggleId(id: number) {
-    setSelectedIds(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
+    setSelectedIds(prev => { const s = new Set(prev); if (s.has(id)) s.delete(id); else s.add(id); return s })
   }
   async function doTriage() {
     setTriaging(true); setError('')
@@ -110,7 +110,7 @@ function RunDrawer({ run, onClose }: { run: TestRunSummary; onClose: () => void 
             <Typography variant="subtitle1" sx={{ fontWeight: 600, flex: 1 }}>{run.module ?? `Run #${run.id}`}</Typography>
             <IconButton size="small" onClick={onClose}><CloseIcon /></IconButton>
           </Stack>
-          <Stack direction="row" spacing={2} flexWrap="wrap" sx={{ mb: 1 }}>
+          <Stack direction="row" spacing={2} sx={{ mb: 1, flexWrap: 'wrap' }}>
             <Typography variant="caption">Profile: {run.profile}</Typography>
             <Typography variant="caption">Passed: {run.passed}</Typography>
             <Typography variant="caption">Failed: {run.failed}</Typography>
@@ -246,7 +246,7 @@ export default function QaRunsPage() {
           <CardContent>
             <Typography variant="subtitle2" sx={{ mb: 2 }}>New Run</Typography>
             {launchError && <Alert severity="error" sx={{ mb: 2 }}>{launchError}</Alert>}
-            <Stack direction="row" spacing={2} flexWrap="wrap">
+            <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap' }}>
               <TextField label="Module filter" size="small" value={module} onChange={e => setModule(e.target.value)} sx={{ minWidth: 160 }} />
               <TextField label="Level filter" size="small" value={level} onChange={e => setLevel(e.target.value)} placeholder="Contract|Endpoint|Workflow" sx={{ minWidth: 160 }} />
               <TextField label="Tag filter" size="small" value={tag} onChange={e => setTag(e.target.value)} sx={{ minWidth: 120 }} />

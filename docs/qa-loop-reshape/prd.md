@@ -626,7 +626,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
 ### BUILD & VERIFY
 
 #### QAL-054: Full build, lint, test + golden parity + runtime smoke
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-054
 - **Description:** Blueprint Build/Run/Migrate + Reference Documents. Final gate. dotnet is not on PATH — use the wrapper from the dotnet-build-environment memory. Confirm the migration auto-applies, the existing byte-exact ADO golden tests still pass (new ADO methods are additive only), and both operating modes work end-to-end.
 - **File:** `backend/QaAutomation.sln`, `client/package.json`

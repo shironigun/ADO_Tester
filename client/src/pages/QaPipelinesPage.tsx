@@ -95,7 +95,7 @@ function WatchCard({ watch }: { watch: PipelineWatchDto }) {
       />
       <CardContent sx={{ pt: 1 }}>
         {error && <Alert severity="error" sx={{ mb: 1 }} onClose={() => setError('')}>{error}</Alert>}
-        <Stack direction="row" spacing={2} sx={{ mb: 1 }} flexWrap="wrap">
+        <Stack direction="row" spacing={2} sx={{ mb: 1, flexWrap: 'wrap' }}>
           <Typography variant="caption" color="text.secondary">Last run: {fmtDate(watch.lastRunAt)}</Typography>
           {watch.lastBuildId && <Chip size="small" label={`Build #${watch.lastBuildId}`} variant="outlined" />}
         </Stack>
@@ -124,7 +124,7 @@ export default function QaPipelinesPage() {
           : (
             <Grid container spacing={2}>
               {watches.map(w => (
-                <Grid item xs={12} sm={6} md={4} key={w.id}>
+                <Grid size={{ xs: 12, sm: 6, md: 4 }} key={w.id}>
                   <WatchCard watch={w} />
                 </Grid>
               ))}
