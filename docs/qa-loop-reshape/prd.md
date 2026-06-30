@@ -126,7 +126,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
 ### AGENTS & PROMPTS
 
 #### QAL-011: Author module_analyzer_system.txt rewrite
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-011
 - **Description:** Blueprint Agents & Prompts. Rewrite the (modified) embedded prompt body to the new inventory + per-level coverage-matrix contract (was a flat flows[] list). Stays a single AgentPrompts property; only the .txt body changes.
 - **File:** `backend/src/QaAutomation.Infrastructure/Agents/Prompts/module_analyzer_system.txt`
@@ -136,7 +136,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Byte content is the new contract; file remains an EmbeddedResource under Prompts/
 
 #### QAL-012: Author 7 net-new embedded prompt .txt files
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-012
 - **Description:** Blueprint Agents & Prompts → "Net-new embedded prompt files" table. Seven new prompts under Prompts/. The three *_testcase_system prompts reuse the tester_system.txt skeleton to preserve Mahmood's voice. The .csproj already globs Prompts/*.txt as EmbeddedResource — verify the glob covers them.
 - **File:** `backend/src/QaAutomation.Infrastructure/Agents/Prompts/contract_generator_system.txt`, `backend/src/QaAutomation.Infrastructure/Agents/Prompts/contract_testcase_system.txt`, `backend/src/QaAutomation.Infrastructure/Agents/Prompts/endpoint_generator_system.txt`, `backend/src/QaAutomation.Infrastructure/Agents/Prompts/endpoint_testcase_system.txt`, `backend/src/QaAutomation.Infrastructure/Agents/Prompts/workflow_generator_system.txt`, `backend/src/QaAutomation.Infrastructure/Agents/Prompts/workflow_testcase_system.txt`, `backend/src/QaAutomation.Infrastructure/Agents/Prompts/impact_analyzer_system.txt`
@@ -149,7 +149,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - All 7 are EmbeddedResource and build into the assembly
 
 #### QAL-013: Register 7 prompt properties in AgentPrompts
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-013
 - **Description:** Blueprint Agents & Prompts → "AgentPrompts registrations". Add seven Load(...) properties; ModuleAnalyzerSystem declaration unchanged (only its body was rewritten).
 - **File:** `backend/src/QaAutomation.Infrastructure/Agents/AgentPrompts.cs`
