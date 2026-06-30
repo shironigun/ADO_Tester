@@ -513,7 +513,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
 ### FRONTEND
 
 #### QAL-044: Generalize session types + sessionIdentity helper
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-044
 - **Description:** Blueprint Frontend → "SessionWorkspace generalization". Make workItemId/workItemTitle nullable on SessionSummary/SessionDetail, widen SessionModuleConfig.key to include 'qa-loop', add optional renderIdentity, tolerate module/inventoryJson on detail. Add sessionIdentity(config, s) fallback helper in session/shared.tsx.
 - **File:** `client/src/session/types.ts`, `client/src/session/shared.tsx`

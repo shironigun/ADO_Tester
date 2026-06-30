@@ -3,11 +3,18 @@ import { Box, Chip, Stack, Typography } from '@mui/material'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useEventStream, type ConsoleEvent } from '../hooks/useEventStream'
 import { MONO_FONT } from '../theme/tokens'
-import type { SessionDetail, SessionModuleConfig } from './types'
+import type { SessionDetail, SessionModuleConfig, SessionSummary } from './types'
 
 // Re-export the shared error helper so the session-config files importing it from `./shared` keep
 // working unchanged after the F1 consolidation into common/errors.
 export { axiosMessage } from '../common/errors'
+
+/** Returns the session identity string for display. Uses renderIdentity when defined, else "#id — title". */
+export function sessionIdentity(config: SessionModuleConfig, s: SessionSummary | SessionDetail): string {
+  if (config.renderIdentity) return config.renderIdentity(s)
+  const title = 'workItemTitle' in s ? s.workItemTitle : null
+  return title ? `#${s.id} — ${title}` : `#${s.id}`
+}
 
 const PHASE_LABEL: Record<string, string> = {
   fetch: 'FETCH', retrieve: 'KB', analyst: 'ANALYST', tester: 'TESTER',
