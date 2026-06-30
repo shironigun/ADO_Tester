@@ -1,14 +1,16 @@
 import { useState } from 'react'
 import {
   Alert, Autocomplete, Box, Button, Card, CardContent, Checkbox, Chip, CircularProgress,
-  Collapse, Drawer, IconButton, Stack, Tab, Table, TableBody, TableCell,
+  Collapse, Drawer, IconButton, LinearProgress, Stack, Tab, Table, TableBody, TableCell,
   TableHead, TableRow, Tabs, TextField, Tooltip, Typography,
 } from '@mui/material'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import CloseIcon from '@mui/icons-material/Close'
 import BugReportIcon from '@mui/icons-material/BugReport'
+import DownloadIcon from '@mui/icons-material/Download'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
+import AgentConsole from '../components/AgentConsole'
 import { useQuery } from '@tanstack/react-query'
 import PageHeader from '../components/PageHeader'
 import StatusChip from '../components/StatusChip'
@@ -17,7 +19,7 @@ import { axiosMessage } from '../common/errors'
 import { searchWorkItems } from '../api/authorTests'
 import type { WorkItemOption } from '../session/types'
 import {
-  startRun, listRunsPage, getRunDetail, triage, fileBugs,
+  startRun, listRunsPage, getRunDetail, triage, fileBugs, runStreamUrl,
   type TestRunSummary, type TestRunDetail, type TestFailureDto,
 } from '../api/qaRuns'
 
@@ -61,7 +63,7 @@ function FailureRow({ f, selected, onToggle }: { f: TestFailureDto; selected: bo
 
 // ── Run drawer ────────────────────────────────────────────────────────────────
 function RunDrawer({ run, onClose }: { run: TestRunSummary; onClose: () => void }) {
-  const [tab, setTab] = useState<'failures' | 'impact'>('failures')
+  const [tab, setTab] = useState<'failures' | 'impact' | 'console'>('failures')
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [story, setStory] = useState<WorkItemOption | null>(null)
   const [storyInput, setStoryInput] = useState('')
@@ -116,13 +118,21 @@ function RunDrawer({ run, onClose }: { run: TestRunSummary; onClose: () => void 
             <Typography variant="caption">Failed: {run.failed}</Typography>
             <Typography variant="caption">Duration: {fmtDuration(run.durationMs)}</Typography>
           </Stack>
-          <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
+          <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: 'wrap' }}>
             {adoRunUrl && <Button size="small" startIcon={<OpenInNewIcon />} href={adoRunUrl} target="_blank" rel="noopener">ADO Test Run</Button>}
-            {run.reportPath && <Button size="small" startIcon={<OpenInNewIcon />} href={run.reportPath} target="_blank" rel="noopener">Report</Button>}
+            {!IN_FLIGHT.includes(run.status) && (
+              run.reportPath
+                ? <>
+                    <Button size="small" startIcon={<OpenInNewIcon />} component="a" href={`/api/qaloop/runs/${run.id}/report`} target="_blank" rel="noopener">Report ↗</Button>
+                    <Button size="small" startIcon={<DownloadIcon />} component="a" href={`/api/qaloop/runs/${run.id}/report?dl=true`} download={`qa-run-${run.id}-report.html`}>Download</Button>
+                  </>
+                : <Typography variant="caption" color="text.disabled" sx={{ alignSelf: 'center' }}>report unavailable</Typography>
+            )}
           </Stack>
           <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ borderBottom: 1, borderColor: 'divider' }}>
             <Tab value="failures" label={`Failures (${failures.length})`} sx={{ textTransform: 'none', minHeight: 36 }} />
             <Tab value="impact" label="Impact" sx={{ textTransform: 'none', minHeight: 36 }} />
+            {IN_FLIGHT.includes(run.status) && <Tab value="console" label="Console" sx={{ textTransform: 'none', minHeight: 36 }} />}
           </Tabs>
         </Box>
         <Box sx={{ flex: 1, overflowY: 'auto', p: 2 }}>
@@ -180,6 +190,12 @@ function RunDrawer({ run, onClose }: { run: TestRunSummary; onClose: () => void 
                 </Card>
               )}
             </Box>
+          )}
+
+          {tab === 'console' && (
+            run.activityEnabled
+              ? <AgentConsole streamUrl={IN_FLIGHT.includes(run.status) ? runStreamUrl(run.id) : null} seedEvents={[]} />
+              : <Box sx={{ py: 2 }}><LinearProgress /></Box>
           )}
 
           {tab === 'impact' && (

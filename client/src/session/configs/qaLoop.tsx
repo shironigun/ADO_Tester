@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
   Alert, Autocomplete, Box, Button, Card, CardContent, Checkbox, Chip, CircularProgress,
-  IconButton, Stack, Tab, Tabs, TextField, Tooltip, Typography,
+  IconButton, LinearProgress, Stack, Tab, Tabs, TextField, Tooltip, Typography,
 } from '@mui/material'
 import CheckIcon from '@mui/icons-material/Check'
 import CloseIcon from '@mui/icons-material/Close'
@@ -384,7 +384,11 @@ export function QaLoopDetailBody({ session, refetch, onError, fullScreen }: Deta
             }>Coverage analysis ready. Generate Playwright drafts when ready.</Alert>
           )}
           {s.errorMessage && <Alert severity="error" sx={{ mb: 2 }}>{s.errorMessage}</Alert>}
-          <AgentConsole streamUrl={live ? sessionStreamUrl(s.id) : null} seedEvents={parseEventLog(s.eventLogJson)} />
+          {(s.activityEnabled || (s.eventLogJson?.length ?? 0) > 2)
+            ? <AgentConsole streamUrl={live ? sessionStreamUrl(s.id) : null} seedEvents={parseEventLog(s.eventLogJson)} />
+            : live
+              ? <Box sx={{ py: 1 }}><LinearProgress /></Box>
+              : null}
         </Box>
       )}
 

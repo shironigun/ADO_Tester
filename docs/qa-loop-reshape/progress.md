@@ -3,7 +3,7 @@
 ## Overview
 - **PRD:** prd.md
 - **Started:** 2026-06-30
-- **Status:** IN PROGRESS (QAL-060 done — 51 of 61 complete)
+- **Status:** COMPLETE (QAL-061 done — 61 of 61 complete)
 
 ---
 
@@ -71,19 +71,22 @@
 | QAL-058 | Settings report_provider + activity_enabled (both keys end-to-end) | COMPLETED | 2026-06-30 | 2026-06-30 | Already fully wired in QAL-042/043: AllKeys+OptionKeys, .env bridge (QALOOP_REPORT_PROVIDER/QALOOP_ACTIVITY_ENABLED), RuntimeSettings PostConfigure overlay, OptionValue switch, _qaLoopCache.Clear(); build verified |
 | QAL-059 | Allure-rich generated specs (generator prompt amendments) | COMPLETED | 2026-06-30 | 2026-06-30 | Already done in QAL-012: all three *_generator_system.txt prompts have test.step, allure.attachment(request/response/assertion), latency parameter, epic/feature/story/severity/tag/link metadata, [<tcId-pending>] preserved, no use: block; EmbeddedResource via *.txt glob in csproj |
 | QAL-060 | ActivityEnabled persistence + streaming gate | COMPLETED | 2026-06-30 | 2026-06-30 | EmitClosure+PersistLog gated by session.ActivityEnabled; SpawnAsync suppressOutput gate; PlaywrightRunSpec.ActivityEnabled; RunExecutionService propagates run.ActivityEnabled |
-| QAL-061 | FE Allure report + activity swap + Settings UI | NOT STARTED |  |  |  |
+| QAL-061 | FE Allure report + activity swap + Settings UI | COMPLETED | 2026-06-30 | 2026-06-30 | BE: GET {id}/report endpoint (serves HTML, ?dl=true for download); FE: activityEnabled on run+session DTOs; QaRunsPage drawer: Report↗/Download/unavailable + Console tab with AgentConsole or LinearProgress; qaLoop.tsx activity swap; Settings QA Loop tab with Teams/poll/report-provider/activity-switch |
 
 ---
 
 ## Summary
 - **Total Tasks:** 61
-- **Completed:** 51
+- **Completed:** 61
 - **In Progress:** 0
-- **Not Started:** 10
+- **Not Started:** 0
 
 ---
 
 ## Log
+### 2026-06-30 (QAL-061)
+- **QAL-061** COMPLETED — BE: `GET /api/qaloop/runs/{id}/report` serves `run.ReportPath` as `text/html`; `?dl=true` adds `Content-Disposition: attachment`. FE: `activityEnabled: boolean` added to `TestRunSummary` (qaRuns.ts) + `ApiSessionSummary`/`ApiSessionDetail` (qaLoop.ts). QaRunsPage drawer: report buttons become "Report ↗" + "Download" conditional on `reportPath` (muted "report unavailable" when null); Console tab added for in-flight runs (AgentConsole when `activityEnabled`, LinearProgress otherwise); `DownloadIcon`+`LinearProgress`+`AgentConsole`+`runStreamUrl` imported. qaLoop.tsx: activity swap at "Activity" tab — `AgentConsole` when `activityEnabled` or stored events present, else `LinearProgress`; `LinearProgress` added to MUI import. SettingsPage.tsx: `ScienceOutlinedIcon` + "QA Loop" tab entry added; 5 new K entries (`TEAMS_WEBHOOK`/`TEAMS_TEMPLATE`/`QALOOP_POLL`/`QALOOP_REPORT`/`QALOOP_ACTIVITY`); state vars + loadConfig hydration + secret-clear + QA Loop panel with SecretField/Select/TextField/Switch. tsc + vite build clean; 122/122 backend tests pass.
+
 ### 2026-06-30 (QAL-060)
 - **QAL-060** COMPLETED — Streaming gate wired: `PlaywrightRunSpec` gains `ActivityEnabled bool` (default true); `PlaywrightRunner.SpawnAsync` gains `suppressOutput` param — gates the `RelayLine` stdout/stderr publish when true; main Playwright run passes `suppressOutput: !spec.ActivityEnabled`; `RunExecutionService` propagates `run.ActivityEnabled` into spec; `QaLoopOrchestrator.EmitClosure` gains optional `activityEnabled` param (no-op lambda when false) — all 4 generator call sites updated; `PersistLog` skips `EventLogJson` when `session.ActivityEnabled = false`; coarse `Pub` phase/status transitions unchanged. 122/122 tests pass, build clean.
 

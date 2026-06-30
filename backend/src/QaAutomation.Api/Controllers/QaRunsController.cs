@@ -186,6 +186,19 @@ public sealed class QaRunsController : ControllerBase
         catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
     }
 
+    /// <summary>Serve the run's HTML report (Allure single-file or Playwright html).</summary>
+    [HttpGet("{runId:int}/report")]
+    public async Task<IActionResult> Report(
+        int runId, [FromQuery] bool dl = false, CancellationToken ct = default)
+    {
+        var run = await _db.TestRuns.FindAsync([runId], ct);
+        if (run?.ReportPath is null || !System.IO.File.Exists(run.ReportPath))
+            return NotFound(new { detail = "Report not available." });
+        return dl
+            ? PhysicalFile(run.ReportPath, "text/html; charset=utf-8", $"qa-run-{runId}-report.html")
+            : PhysicalFile(run.ReportPath, "text/html; charset=utf-8");
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static bool TryParseProfileWire(string wire, out DmsProfile profile)

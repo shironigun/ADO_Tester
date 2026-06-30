@@ -20,6 +20,7 @@ export interface TestRunSummary {
   finishedAt: string | null
   adoTestRunId: number | null
   reportPath: string | null
+  activityEnabled: boolean
 }
 
 export interface TestFailureDto {
