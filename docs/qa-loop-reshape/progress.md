@@ -3,7 +3,7 @@
 ## Overview
 - **PRD:** prd.md
 - **Started:** 2026-06-30
-- **Status:** IN PROGRESS (QAL-040 done — 31 of 61 complete)
+- **Status:** IN PROGRESS (QAL-041 done — 32 of 61 complete)
 
 ---
 
@@ -51,7 +51,7 @@
 | QAL-038 | Split IResultsIngestService + ResultsIngestService into Triage/FileBugs | COMPLETED | 2026-06-30 | 2026-06-30 | TriageAsync (FailureTriageAgent, BugDraftJson persist) + FileBugsAsync (no 2nd LLM, CreateBugAsync, link TC+story) in ResultsIngestService; triage/file-bugs endpoints wired in QaRunsController |
 | QAL-039 | Define ITeamsNotifier abstraction | COMPLETED | 2026-06-30 | 2026-06-30 | ITeamsNotifier.cs — NotifyRunCompleteAsync(run) + NotifyTriageAsync(run, count, bugIds) |
 | QAL-040 | Author 3 Teams card templates | COMPLETED | 2026-06-30 | 2026-06-30 | 3 .json.template files (compact/developer/scheduled) in Notifications/Templates/; second EmbeddedResource glob in Infrastructure .csproj |
-| QAL-041 | Implement TeamsNotifier | NOT STARTED |  |  |  |
+| QAL-041 | Implement TeamsNotifier | COMPLETED | 2026-06-30 | 2026-06-30 | TeamsNotifier.cs — singleton, template loading, token substitution, silent on empty webhook, Cancelled skip |
 | QAL-042 | Register 3 settings keys in AppSettingsService | NOT STARTED |  |  |  |
 | QAL-043 | Add .env bridge + RuntimeSettings overlay + AddQaLoop DI registration | NOT STARTED |  |  |  |
 | QAL-044 | Generalize session types + sessionIdentity helper | NOT STARTED |  |  |  |

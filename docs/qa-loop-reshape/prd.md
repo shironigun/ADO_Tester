@@ -475,7 +475,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - A second <EmbeddedResource Include="Notifications\Templates\*.json.template" /> glob added to the Infrastructure .csproj; all three build into the assembly
 
 #### QAL-041: Implement TeamsNotifier
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-041
 - **Description:** Blueprint TeamsNotifier → "Implementation" + "Where it fires". Single configurable webhook (teams.webhook_url); active template selected by teams.template (default developer). Empty webhook → log and return silently. Always-notify default; skipped (Cancelled) runs do not notify.
 - **File:** `backend/src/QaAutomation.Infrastructure/Notifications/TeamsNotifier.cs`
