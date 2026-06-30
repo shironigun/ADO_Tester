@@ -3,7 +3,7 @@
 ## Overview
 - **PRD:** prd.md
 - **Started:** 2026-06-30
-- **Status:** IN PROGRESS (QAL-052 done — 43 of 61 complete)
+- **Status:** IN PROGRESS (QAL-053 done — 44 of 61 complete)
 
 ---
 
@@ -63,7 +63,7 @@
 | QAL-050 | Wire routes/paths.ts, AppRoutes.tsx, Layout.tsx | COMPLETED | 2026-06-30 | 2026-06-30 | qaRuns+qaPipelines paths; /qa-loop/:sessionId full-screen; QA Runs+Pipelines nav+routes; TestRun status colors added to pipeline.ts |
 | QAL-051 | Write QaLoopOrchestratorTests | COMPLETED | 2026-06-30 | 2026-06-30 | 6 tests: AwaitingReview, Drafted(AutoHandoff), generate selected-only, push rewrites tag, push skips LinkTestedBy, repress-push skips already-pushed — all 6 pass |
 | QAL-052 | Write ImpactAnalyzerAgentTests | COMPLETED | 2026-06-30 | 2026-06-30 | 6 tests: valid parse, id filtering, empty ids+skippedReason, malformed JSON throws AgentException, array root throws, SpecCode excluded from prompt — all pass |
-| QAL-053 | Write JUnitTriageSplitTests + watcher ProcessBuild test | NOT STARTED |  |  |  |
+| QAL-053 | Write JUnitTriageSplitTests + watcher ProcessBuild test | COMPLETED | 2026-06-30 | 2026-06-30 | 6 tests: TriageAsync sets BugDraftJson (no CreateBugAsync), skips already-triaged; FileBugsAsync calls CreateBugAsync once (no LLM); Watcher: empty inventory→Cancelled, malformed JSON→fallback+all ids, valid impact→Queued+LastSeenBuildId updated — 122 total pass |
 | QAL-054 | Full build, lint, test + golden parity + runtime smoke | NOT STARTED |  |  |  |
 | QAL-055 | Allure runtime deps + per-run reporter wiring | NOT STARTED |  |  |  |
 | QAL-056 | Allure context files (environment / categories / executor) | NOT STARTED |  |  |  |
@@ -77,9 +77,9 @@
 
 ## Summary
 - **Total Tasks:** 61
-- **Completed:** 43
+- **Completed:** 44
 - **In Progress:** 0
-- **Not Started:** 33
+- **Not Started:** 17
 
 ---
 
