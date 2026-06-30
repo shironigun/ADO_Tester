@@ -29,7 +29,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - File compiles; existing enums untouched
 
 #### QAL-002: Add shared agent-output POCOs
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-002
 - **Description:** Blueprint Agents & Prompts → "Shared agent output POCOs (Core/Models/AgentOutputs.cs, modified)" and Generator Design InventoryJson/AnalysisJson shapes. Add the net-new records that the analyzer emits and the generators/impact analyzer consume.
 - **File:** `backend/src/QaAutomation.Core/Models/AgentOutputs.cs`

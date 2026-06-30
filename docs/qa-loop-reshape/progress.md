@@ -12,7 +12,7 @@
 | Task ID | Task Name | Status | Started | Completed | Notes |
 |---------|-----------|--------|---------|-----------|-------|
 | QAL-001 | Add seven QA-Loop enums | COMPLETED | 2026-06-30 | 2026-06-30 | 7 enums appended to Enums.cs; 4 exact-name, 4 wire-string with [EnumMember]+extensions |
-| QAL-002 | Add shared agent-output POCOs | NOT STARTED |  |  |  |
+| QAL-002 | Add shared agent-output POCOs | COMPLETED | 2026-06-30 | 2026-06-30 | RouteInfo/DtoInfo/WorkflowInfo/InventoryDoc/SurfaceMatrix/ImpactAnalysis appended to AgentOutputs.cs |
 | QAL-003 | Add AdoBuild + AdoBuildChange build-read DTOs | NOT STARTED |  |  |  |
 | QAL-004 | Add QaLoopOptions configuration class | NOT STARTED |  |  |  |
 | QAL-005 | Add DmsProfileOptions registry | NOT STARTED |  |  |  |
@@ -77,13 +77,16 @@
 
 ## Summary
 - **Total Tasks:** 61
-- **Completed:** 1
+- **Completed:** 2
 - **In Progress:** 0
-- **Not Started:** 60
+- **Not Started:** 59
 
 ---
 
 ## Log
+### 2026-06-30 (QAL-002)
+- **QAL-002** COMPLETED — `backend/src/QaAutomation.Core/Models/AgentOutputs.cs`: appended RouteInfo, DtoField, DtoInfo, WorkflowStep, WorkflowInfo, InventoryDoc (positional records), SurfaceRow (mutable class), SurfaceMatrix (record), ImpactAnalysis (class). Build green.
+
 ### 2026-06-30 (QAL-001)
 - **QAL-001** COMPLETED — `backend/src/QaAutomation.Core/Models/Enums.cs`: appended 7 QA Loop enums (ApiSessionStatus, ApiDraftStatus, TestRunStatus as exact-name; TestLevel, FailureClassification, TriggerSource, DmsProfile as wire-string with [EnumMember] + QaLoopEnumExtensions). Build green.
 

@@ -47,3 +47,49 @@ public sealed class TestCaseInput
     public string Preconditions { get; set; } = "";
     public List<TestCaseStep> Steps { get; set; } = [];
 }
+
+// ── QA Loop agent-output POCOs ────────────────────────────────────────────────
+
+/// <summary>One route in the module's inventory.</summary>
+public sealed record RouteInfo(
+    string Method, string Route,
+    string? RequestDto, string? ResponseDto,
+    List<string> ValidationRules, List<string> AuthRequirements);
+
+public sealed record DtoField(string Name, string Type);
+public sealed record DtoInfo(string Name, List<DtoField> Fields);
+public sealed record WorkflowStep(string Endpoint, string Role);
+public sealed record WorkflowInfo(string Name, List<WorkflowStep> Steps);
+
+/// <summary>Full API inventory emitted by ModuleAnalyzerAgent pass-1.</summary>
+public sealed record InventoryDoc(
+    string Module,
+    List<RouteInfo> Routes,
+    List<DtoInfo> Dtos,
+    List<WorkflowInfo> Workflows);
+
+/// <summary>One testable surface (contract / endpoint / workflow row).</summary>
+public sealed class SurfaceRow
+{
+    public string Id { get; set; } = "";
+    public TestLevel Level { get; set; }
+    public string Label { get; set; } = "";
+    /// <summary>gap | covered</summary>
+    public string Status { get; set; } = "gap";
+    public int? LinkedTestCaseId { get; set; }
+    public bool Selected { get; set; } = true;
+}
+
+/// <summary>Coverage matrix emitted alongside InventoryDoc by ModuleAnalyzerAgent.</summary>
+public sealed record SurfaceMatrix(string Module, List<SurfaceRow> Rows);
+
+/// <summary>Output of ImpactAnalyzerAgent — impacted draft ids + reasoning.</summary>
+public sealed class ImpactAnalysis
+{
+    public List<int> ImpactedDraftIds { get; set; } = [];
+    public string Reasoning { get; set; } = "";
+    /// <summary>high | medium | low</summary>
+    public string Confidence { get; set; } = "low";
+    public string? SkippedReason { get; set; }
+    public bool Fallback { get; set; }
+}
