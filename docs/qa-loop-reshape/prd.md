@@ -60,7 +60,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Namespace QaAutomation.Core.Configuration; compiles
 
 #### QAL-005: Add DmsProfileOptions registry
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-005
 - **Description:** Blueprint → "Configuration: DmsProfileOptions". Four-profile registry; only Infinity credentialed for the MVP. Runner sets AUTOMATION_PROFILE=infinity by default.
 - **File:** `backend/src/QaAutomation.Core/Configuration/DmsProfileOptions.cs`
