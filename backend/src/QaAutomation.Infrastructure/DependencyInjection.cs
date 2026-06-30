@@ -16,7 +16,10 @@ using QaAutomation.Infrastructure.Modules;
 using QaAutomation.Infrastructure.Results;
 using QaAutomation.Infrastructure.Llm;
 using QaAutomation.Infrastructure.Logging;
+using QaAutomation.Infrastructure.Notifications;
 using QaAutomation.Infrastructure.Orchestrators;
+using QaAutomation.Infrastructure.QaPipelines;
+using QaAutomation.Infrastructure.QaRuns;
 using QaAutomation.Infrastructure.Reports;
 using QaAutomation.Infrastructure.Settings;
 
@@ -42,6 +45,7 @@ public static class DependencyInjection
         services.AddPipelineInfrastructure();
         services.AddSettingsLayer();
         services.AddReports();
+        services.AddQaLoop(config);
         return services;
     }
 
@@ -93,9 +97,6 @@ public static class DependencyInjection
             if (rt.Get("claude_cli.timeout_seconds") is { } ts && int.TryParse(ts, out var t))
                 o.TimeoutSeconds = Math.Max(10, t);
         });
-
-        // QaLoopOptions stub registration — PostConfigure + .env bridge added in QAL-043.
-        services.AddOptions<QaLoopOptions>();
 
         services.AddSingleton<IAppSettingsService, AppSettingsService>();
         return services;
@@ -214,6 +215,46 @@ public static class DependencyInjection
                 sp.GetRequiredService<IHttpClientFactory>().CreateClient(AzureDevOpsClient.HttpClientName),
                 sp.GetRequiredService<IOptionsMonitor<AzureDevOpsOptions>>(),
                 sp.GetRequiredService<ILogger<AzureDevOpsClient>>()));
+
+        return services;
+    }
+
+    /// <summary>QA Loop Track B: orchestrator, runner, run-execution, watcher, notifier, agents, options.</summary>
+    private static IServiceCollection AddQaLoop(this IServiceCollection services, IConfiguration config)
+    {
+        static string? Env(string key) => Environment.GetEnvironmentVariable(key);
+
+        // .env bridge → QaLoopOptions, then RuntimeSettings overlay (DB-over-env).
+        services.AddOptions<QaLoopOptions>()
+            .Bind(config.GetSection(QaLoopOptions.SectionName))
+            .PostConfigure(o =>
+            {
+                o.TeamsWebhookUrl = Env("TEAMS_WEBHOOK_URL") ?? o.TeamsWebhookUrl;
+                o.TeamsTemplate = Env("TEAMS_TEMPLATE") ?? o.TeamsTemplate;
+                if (Env("QALOOP_POLL_INTERVAL_MINUTES") is { } pi && int.TryParse(pi, out var piv))
+                    o.PollIntervalMinutes = Math.Max(1, piv);
+                o.ReportProvider = Env("QALOOP_REPORT_PROVIDER") ?? o.ReportProvider;
+                if (Env("QALOOP_ACTIVITY_ENABLED") is { } ae && bool.TryParse(ae, out var aev))
+                    o.ActivityEnabled = aev;
+            })
+            .PostConfigure<RuntimeSettings>((o, rt) =>
+            {
+                o.TeamsWebhookUrl = rt.Get("teams.webhook_url") ?? o.TeamsWebhookUrl;
+                o.TeamsTemplate = rt.Get("teams.template") ?? o.TeamsTemplate;
+                if (rt.Get("qaloop.poll_interval_minutes") is { } pi && int.TryParse(pi, out var piv))
+                    o.PollIntervalMinutes = Math.Max(1, piv);
+                o.ReportProvider = rt.Get("qaloop.report_provider") ?? o.ReportProvider;
+                if (rt.Get("qaloop.activity_enabled") is { } ae && bool.TryParse(ae, out var aev))
+                    o.ActivityEnabled = aev;
+            });
+
+        services.AddSingleton<IQaLoopOrchestrator, QaLoopOrchestrator>();
+        services.AddSingleton<IPlaywrightRunner, PlaywrightRunner>();
+        services.AddScoped<RunExecutionService>();
+        services.AddSingleton<ITeamsNotifier, TeamsNotifier>();
+        services.AddHostedService<PipelineWatcherHostedService>();
+
+        services.AddHttpClient();   // IHttpClientFactory for TeamsNotifier (idempotent if already added)
 
         return services;
     }
