@@ -3,7 +3,7 @@
 ## Overview
 - **PRD:** prd.md
 - **Started:** 2026-06-30
-- **Status:** IN PROGRESS (QAL-043 done — 34 of 61 complete)
+- **Status:** IN PROGRESS (QAL-044 done — 35 of 61 complete)
 
 ---
 
@@ -54,7 +54,7 @@
 | QAL-041 | Implement TeamsNotifier | COMPLETED | 2026-06-30 | 2026-06-30 | TeamsNotifier.cs — singleton, template loading, token substitution, silent on empty webhook, Cancelled skip |
 | QAL-042 | Register 3 settings keys in AppSettingsService | COMPLETED | 2026-06-30 | 2026-06-30 | teams.webhook_url (secret), teams.template, qaloop.poll_interval_minutes, qaloop.report_provider, qaloop.activity_enabled — AllKeys+OptionKeys+SecretKeys; IOptionsMonitor<QaLoopOptions>+cache injected; _qaLoopCache.Clear() on apply |
 | QAL-043 | Add .env bridge + RuntimeSettings overlay + AddQaLoop DI registration | COMPLETED | 2026-06-30 | 2026-06-30 | AddQaLoop in DI.cs — QaLoopOptions .env bridge + RuntimeSettings PostConfigure; IQaLoopOrchestrator, IPlaywrightRunner, RunExecutionService, ITeamsNotifier, PipelineWatcherHostedService registered |
-| QAL-044 | Generalize session types + sessionIdentity helper | NOT STARTED |  |  |  |
+| QAL-044 | Generalize session types + sessionIdentity helper | COMPLETED | 2026-06-30 | 2026-06-30 | workItemId/Title nullable; SessionModuleConfig key+'qa-loop'+renderIdentity?; SessionDetail tolerates module/inventoryJson; sessionIdentity() in shared.tsx |
 | QAL-045 | Apply config-driven identity at the 4 hardcoded sites | NOT STARTED |  |  |  |
 | QAL-046 | Rewrite api/qaLoop.ts | NOT STARTED |  |  |  |
 | QAL-047 | Create api/qaRuns.ts and api/qaPipelines.ts | NOT STARTED |  |  |  |
