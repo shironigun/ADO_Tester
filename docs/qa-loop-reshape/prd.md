@@ -556,7 +556,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - tsc passes
 
 #### QAL-048: Create qaLoopConfig SessionWorkspace config + scan form
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-048
 - **Description:** Blueprint Frontend → session/configs/qaLoop.tsx (new). Mirror configs/authorTests.tsx. Provides qaLoopConfig (key 'qa-loop', route /qa-loop, labels, moduleChip, pipelineSteps Scan→Review→Drafts→Push, activeStepIndex, analyticsColumns, listSessions/getDetail/streamUrl, renderIdentity), plus QaLoopStartForm, QaLoopDetailBody, CoverageMatrix, DraftsByLevel, and the push panel.
 - **File:** `client/src/session/configs/qaLoop.tsx`
