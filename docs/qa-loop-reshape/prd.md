@@ -568,7 +568,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Reuses PageHeader, AgentConsole+useEventStream, AgentPipeline/PipelineStepIcon, StatusChip, LiveActivityIndicator, StatTile/MiniDonut, EmptyState; tsc passes
 
 #### QAL-049: Repoint QaLoopPage + create QaRunsPage and QaPipelinesPage
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-049
 - **Description:** Blueprint Frontend → pages summary. QaLoopPage.tsx becomes a one-liner repoint to SessionWorkspace with qaLoopConfig (old UI removed). QaRunsPage = launcher (module×level×tag×profile + Run) over a paged run-history grid with a per-run drawer (report links, AI reasoning, draft-first Bug filing). QaPipelinesPage = watch cards + Run latest.
 - **File:** `client/src/pages/QaLoopPage.tsx`, `client/src/pages/QaRunsPage.tsx`, `client/src/pages/QaPipelinesPage.tsx`
