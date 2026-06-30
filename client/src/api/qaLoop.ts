@@ -1,171 +1,138 @@
 import { api } from './client'
+import { apiUrl } from '../config/env'
+import type { SessionSummary, SessionDetail } from '../session/types'
 
-// Track A "QA Loop" endpoints: KB extraction, spec generation, results ingest/triage.
-// One module so the QA Loop page has a single import surface.
+// ── QA Loop Track B API — /api/qaloop ────────────────────────────────────────
+// Re-export plan/suite/workitem pickers (module-agnostic, reuse author-tests endpoints).
+export { getPlans, getSuites, searchWorkItems } from './authorTests'
+export type { TestPlan, TestSuite } from './authorTests'
 
-// ── KB extraction (POST /api/knowledgebase/{projectId}/extract) ──────────────
-export interface KbExtractionRequest {
+// ── Request / response types matching backend QaLoopContracts.cs ─────────────
+
+export interface ScanStartRequest {
   module: string
-  repository?: string // Azure Repos repo (which repo); null → configured ado.repository
-  branch?: string // branch (which branch); null → configured ado.default_branch
-  sourceRoot?: string // optional local clone path; when set, reads from disk instead of ADO
-  flows: string[]
+  repository?: string
+  branch?: string
   sourceDirs?: string[]
   extensions?: string[]
-  maxFileChars?: number
-  maxBundleChars?: number
-}
-export interface KbDocResult {
-  fileName: string
-  kind: string // "flow" | "rules"
-  charCount: number
-  documentId: number
-}
-export interface KbExtractionResult {
-  module: string
-  filesRead: number
-  bundleChars: number
-  docs: KbDocResult[]
-}
-export async function extractKb(projectId: number, req: KbExtractionRequest): Promise<KbExtractionResult> {
-  const { data } = await api.post<KbExtractionResult>(`/api/knowledgebase/${projectId}/extract`, req)
-  return data
-}
-
-// ── Spec generation (POST /api/generation/{projectId}/spec) ──────────────────
-export interface GenerateSpecRequest {
-  module: string
-  scenarioTitle: string
-  scenarioIntent?: string
-  kbFileName?: string
-  kbFlowMarkdown?: string
-  adoTestCaseId?: number
-  createAdoTestCase?: boolean
+  workItemId?: number
   testPlanId?: number
   testSuiteId?: number
-  storyId?: number
-  smoke?: boolean
-  outputRoot?: string
-  sourceRoot?: string
-  styleReferencePath?: string
-  write?: boolean
-}
-export interface GenerateSpecResult {
-  testTitle: string
-  fileName: string
-  filePath?: string
-  written: boolean
-  charCount: number
-  code: string
-  adoTestCaseId?: number
-  adoTestCaseCreated: boolean
-}
-export async function generateSpec(projectId: number, req: GenerateSpecRequest): Promise<GenerateSpecResult> {
-  const { data } = await api.post<GenerateSpecResult>(`/api/generation/${projectId}/spec`, req)
-  return data
+  autoHandoff?: boolean
 }
 
-// ── Module analysis (POST /api/modules/{projectId}/analyze) ──────────────────
-// Analyze a whole module: read its source + a plan/suite's existing test cases, discover every flow,
-// and map coverage (covered vs gap). Specs are then generated per flow on demand (generateFlowSpec).
-export interface ModuleAnalyzeRequest {
-  module: string
-  repository?: string
-  branch?: string
-  sourceRoot?: string
-  planId: number
-  suiteId: number
-  recurse?: boolean
-  maxFileChars?: number
-  maxBundleChars?: number
-}
-export interface ModuleFlow {
-  name: string
-  summary: string
-  covered: boolean
-  coveringTestCaseIds: number[]
-  coveringTestCaseTitles: string[]
-}
-export interface ModuleAnalyzeResult {
-  module: string
-  existingTestCaseCount: number
-  filesRead: number
-  flowCount: number
-  coveredCount: number
-  gapCount: number
-  kbDocFileName: string
-  flows: ModuleFlow[]
-}
-export async function analyzeModule(projectId: number, req: ModuleAnalyzeRequest): Promise<ModuleAnalyzeResult> {
-  const { data } = await api.post<ModuleAnalyzeResult>(`/api/modules/${projectId}/analyze`, req)
-  return data
+export interface ScanStartResponse {
+  sessionId: number
+  existingSessionId?: number | null
 }
 
-// ── On-demand flow spec (POST /api/modules/{projectId}/flow-spec) ────────────
-// Generate a Playwright spec for one analyzed flow: build its detailed KB, then emit the spec.
-// Covered flow → tags its existing test case id; gap → creates + tags a new ADO Test Case.
-export interface ModuleFlowSpecRequest {
-  module: string
-  repository?: string
-  branch?: string
-  sourceRoot?: string
-  planId: number
-  suiteId: number
-  flowName: string
-  flowSummary?: string
-  coveringTestCaseIds: number[]
-  coveringTestCaseTitles?: string[]
-  storyId?: number
-  smoke?: boolean
-  outputRoot?: string
-}
-export interface ModuleFlowSpecResult {
-  flowName: string
-  wasGap: boolean
-  kbDocFileName: string
-  spec: GenerateSpecResult
-}
-export async function generateFlowSpec(projectId: number, req: ModuleFlowSpecRequest): Promise<ModuleFlowSpecResult> {
-  const { data } = await api.post<ModuleFlowSpecResult>(`/api/modules/${projectId}/flow-spec`, req)
-  return data
+export interface SurfaceRow {
+  surface: string
+  level: string
+  route: string
+  method?: string
+  status: string
 }
 
-// ── Results ingest + triage (POST /api/results/{projectId}/ingest) ───────────
-export interface IngestResultsRequest {
-  junitXml?: string
-  junitPath?: string
-  artifactsRoot?: string
-  kbFileName?: string
-  storyId?: number
-  fileBugs?: boolean
+/** Wire shape of a QA Loop session summary (GET /api/qaloop). */
+export interface ApiSessionSummary extends SessionSummary {
+  module: string | null
+  draftCount: number
 }
-export interface FailureOutcome {
-  testTitle: string
-  adoTestCaseId?: number
-  classification: string // real_bug | flaky | test_issue | stale_test
-  confidence: string
-  reason: string
-  filed: boolean
-  bugId?: number
-  bugTitle: string
-  severity: string
+
+/** Wire shape of a QA Loop session detail (GET /api/qaloop/{id}). */
+export interface ApiSessionDetail extends SessionDetail {
+  module: string | null
+  testPlanId?: number | null
+  testSuiteId?: number | null
+  inventoryJson?: string | null
+}
+
+export interface ApiTestDraftDto {
+  id: number
+  sessionId: number
+  status: string
+  level: string
+  title: string
   preconditions: string
-  reproSteps: string[]
-  expected: string
-  observations: string[]
-  artifacts: string[]
+  stepsJson: string | null
+  specCode: string | null
+  adoTestCaseId: number | null
+  tags: string[]
+  sourceRoutes: string[]
 }
-export interface IngestResultsResult {
-  totalTests: number
-  failures: number
-  bugsFiled: number
-  outcomes: FailureOutcome[]
+
+export interface UpdateApiDraftRequest {
+  status?: string
+  title?: string
+  preconditions?: string
+  stepsJson?: string
+  specCode?: string
 }
-export async function ingestResults(projectId: number, req: IngestResultsRequest): Promise<IngestResultsResult> {
-  const { data } = await api.post<IngestResultsResult>(`/api/results/${projectId}/ingest`, req)
+
+// ── API methods ───────────────────────────────────────────────────────────────
+
+export async function startScan(req: ScanStartRequest): Promise<ScanStartResponse> {
+  const { data } = await api.post<ScanStartResponse>('/api/qaloop/start', req)
   return data
 }
 
-// Org-level ADO work-item deep link (org redirects to the right project).
+export async function listSessionsPage(
+  take: number, skip: number,
+): Promise<{ total: number; items: ApiSessionSummary[] }> {
+  const { data } = await api.get<{ total: number; items: ApiSessionSummary[] }>(
+    '/api/qaloop', { params: { take, skip } })
+  return data
+}
+
+export async function getSessionDetail(id: number): Promise<ApiSessionDetail> {
+  const { data } = await api.get<ApiSessionDetail>(`/api/qaloop/${id}`)
+  return data
+}
+
+/** Full-replace PATCH: replaces the session's analysis rows. */
+export async function saveAnalysis(id: number, rows: SurfaceRow[]): Promise<void> {
+  await api.patch(`/api/qaloop/${id}/analysis`, { rows })
+}
+
+export async function generateDrafts(id: number): Promise<void> {
+  await api.post(`/api/qaloop/${id}/generate-drafts`)
+}
+
+/** Skip-null PATCH — omit keys to leave them unchanged. */
+export async function patchDraft(
+  sessionId: number, draftId: number, req: UpdateApiDraftRequest,
+): Promise<ApiTestDraftDto> {
+  const { data } = await api.patch<ApiTestDraftDto>(
+    `/api/qaloop/${sessionId}/drafts/${draftId}`, req)
+  return data
+}
+
+export async function approveAllDrafts(id: number): Promise<void> {
+  await api.post(`/api/qaloop/${id}/approve-all`)
+}
+
+export async function pushSession(
+  id: number, body: { testPlanId: number; testSuiteId: number; storyId?: number },
+): Promise<void> {
+  await api.post(`/api/qaloop/${id}/push`, body)
+}
+
+export async function pushDraft(
+  sessionId: number, draftId: number,
+  body: { testPlanId: number; testSuiteId: number; storyId?: number },
+): Promise<ApiTestDraftDto> {
+  const { data } = await api.post<ApiTestDraftDto>(
+    `/api/qaloop/${sessionId}/drafts/${draftId}/push`, body)
+  return data
+}
+
+export async function cancelSession(id: number): Promise<void> {
+  await api.post(`/api/qaloop/${id}/cancel`)
+}
+
+export const sessionStreamUrl = (id: number) => apiUrl(`/api/qaloop/${id}/stream`)
+
+// Org-level ADO work-item deep link (unchanged from old qaLoop.ts).
 export const adoWorkItemUrl = (id: number) =>
   `https://dev.azure.com/your-org/_workitems/edit/${id}`

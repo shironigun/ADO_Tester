@@ -535,7 +535,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - tsc passes
 
 #### QAL-046: Rewrite api/qaLoop.ts
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-046
 - **Description:** Blueprint Frontend → "api/qaLoop.ts (rewritten)". Drop the old extract/generate/ingest surface; target /api/qaloop. One method per route; SSE via apiUrl. Reuse author-tests plan/suite/search pickers (module-agnostic).
 - **File:** `client/src/api/qaLoop.ts`
