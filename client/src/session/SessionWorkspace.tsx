@@ -14,7 +14,7 @@ import EmptyState from '../components/EmptyState'
 import LiveActivityIndicator from '../components/LiveActivityIndicator'
 import RuleIcon from '@mui/icons-material/Rule'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
-import { axiosMessage, SessionTimeline, useSessionDetail, useSessionsLive } from './shared'
+import { axiosMessage, sessionIdentity, SessionTimeline, useSessionDetail, useSessionsLive } from './shared'
 import { EpicRunDialog, EpicRunsTab } from './epicRuns'
 import { paths } from '../routes/paths'
 import type { SessionDetail, SessionModuleConfig, SessionSummary } from './types'
@@ -51,7 +51,7 @@ function SessionCard({ summary, config, onOpenPanel, onOpenFull }: {
           </Tooltip>
         </Stack>
         <Typography variant="body2" sx={{ fontWeight: 500, mb: 1, minHeight: 40, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-          {summary.workItemTitle}
+          {sessionIdentity(config, summary)}
         </Typography>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
           <StatusChip value={summary.status} />
@@ -103,7 +103,7 @@ function SessionDetailPanel({ config, sessionId, onClose, onError, onTerminal, o
           <Box sx={{ p: 2, pb: 0 }}>
             <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
               <Typography variant="subtitle1" sx={{ fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                #{session.workItemId} — {session.workItemTitle}
+                {sessionIdentity(config, session)}
               </Typography>
               <Tooltip title="Open full screen"><IconButton size="small" onClick={() => onOpenFull(session.id)}><OpenInFullIcon fontSize="small" /></IconButton></Tooltip>
               <IconButton size="small" onClick={onClose} aria-label="close"><CloseIcon /></IconButton>
@@ -160,7 +160,7 @@ function AnalyticsTable({ config, summaries }: { config: SessionModuleConfig; su
               <TableRow key={s.id} hover>
                 <TableCell sx={{ maxWidth: 320 }}>
                   <Typography variant="body2" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    #{s.workItemId} — {s.workItemTitle}
+                    {sessionIdentity(config, s)}
                   </Typography>
                 </TableCell>
                 <TableCell>{fmtDate(s.createdAt)}</TableCell>
