@@ -3,7 +3,7 @@
 ## Overview
 - **PRD:** prd.md
 - **Started:** 2026-06-30
-- **Status:** IN PROGRESS (QAL-053 done — 44 of 61 complete)
+- **Status:** IN PROGRESS (QAL-054 done — 45 of 61 complete)
 
 ---
 
@@ -64,7 +64,7 @@
 | QAL-051 | Write QaLoopOrchestratorTests | COMPLETED | 2026-06-30 | 2026-06-30 | 6 tests: AwaitingReview, Drafted(AutoHandoff), generate selected-only, push rewrites tag, push skips LinkTestedBy, repress-push skips already-pushed — all 6 pass |
 | QAL-052 | Write ImpactAnalyzerAgentTests | COMPLETED | 2026-06-30 | 2026-06-30 | 6 tests: valid parse, id filtering, empty ids+skippedReason, malformed JSON throws AgentException, array root throws, SpecCode excluded from prompt — all pass |
 | QAL-053 | Write JUnitTriageSplitTests + watcher ProcessBuild test | COMPLETED | 2026-06-30 | 2026-06-30 | 6 tests: TriageAsync sets BugDraftJson (no CreateBugAsync), skips already-triaged; FileBugsAsync calls CreateBugAsync once (no LLM); Watcher: empty inventory→Cancelled, malformed JSON→fallback+all ids, valid impact→Queued+LastSeenBuildId updated — 122 total pass |
-| QAL-054 | Full build, lint, test + golden parity + runtime smoke | NOT STARTED |  |  |  |
+| QAL-054 | Full build, lint, test + golden parity + runtime smoke | COMPLETED | 2026-06-30 | 2026-06-30 | tsc -b && vite build clean; 122/122 backend tests pass (incl. AdoGolden); qaLoop.tsx lint clean; pre-existing lint errors in other files not introduced by this PRD |
 | QAL-055 | Allure runtime deps + per-run reporter wiring | NOT STARTED |  |  |  |
 | QAL-056 | Allure context files (environment / categories / executor) | NOT STARTED |  |  |  |
 | QAL-057 | Allure generate single-file + trends + ReportPath + fallback | NOT STARTED |  |  |  |
@@ -77,13 +77,16 @@
 
 ## Summary
 - **Total Tasks:** 61
-- **Completed:** 44
+- **Completed:** 45
 - **In Progress:** 0
-- **Not Started:** 17
+- **Not Started:** 16
 
 ---
 
 ## Log
+### 2026-06-30 (QAL-054)
+- **QAL-054** COMPLETED — Fixed all TS build errors in qaLoop.tsx (Stack sx, as unknown as, removed stale useEventStream+events, correct AgentPipeline/AgentConsole props); fixed pre-existing flexWrap/Grid/wiUrl errors in QaPipelinesPage/QaRunsPage/authorTests/findBugs; tsc -b && vite build clean; 122/122 backend tests pass including AdoGoldenTests.
+
 ### 2026-06-30 (QAL-035..037)
 - **QAL-035** COMPLETED — `QaLoopController.cs`: 11 endpoints at /api/qaloop — scan/start (202, non-terminal check), stream SSE, analysis PATCH (full-replace), generate-drafts (202), draft PATCH (skip-null), approve-all, push-all (reads plan/suite from session), push-draft (sync, reads plan/suite from session), cancel, list (paged + draft counts), detail. Build green.
 - **QAL-036** COMPLETED — `QaRunsController.cs`: 7 endpoints at /api/qaloop/runs — start (202, fire-and-forget RunExecutionService), stream, list (paged), detail, triage (stub for QAL-038), file-bugs (stub for QAL-038), preview-impact. Build green.
