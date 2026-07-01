@@ -12,6 +12,9 @@ public sealed class ApiTestSession
     public string? WorkItemTitle { get; set; }
     public int? TestPlanId { get; set; }
     public int? TestSuiteId { get; set; }
+    /// <summary>JSON array of repo-relative directories to scan (e.g. ["Lead/src/.../Deal"]).
+    /// When null/empty, FetchSourceAsync falls back to treating Module as a top-level scopePath.</summary>
+    public string? SourceDirsJson { get; set; }
     public ApiSessionStatus Status { get; set; } = ApiSessionStatus.Analyzing;
     /// <summary>Serialized InventoryDoc JSON.</summary>
     public string? InventoryJson { get; set; }

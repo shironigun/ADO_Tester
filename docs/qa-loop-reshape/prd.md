@@ -806,7 +806,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Re-verify live: `/qa-runs` run-history grid and `/qa-pipelines` watch cards both show real data; Add Watch dialog succeeds end-to-end (depends on QAL-063 also being fixed)
 
 #### QAL-066: Fix ModuleAnalyzerAgent source-fetch for modules not at the repo root
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-066
 - **Description:** `ScanStartRequest.SourceDirs`/`.Extensions` are accepted by the API/DTO but never read anywhere — dead fields, never persisted on `ApiTestSession`, never surfaced in the New Scan UI either. `QaLoopOrchestrator.FetchSourceAsync` instead calls `ListRepoFilePathsAsync(session.Module, …)`, using the literal module name as the ADO Git `scopePath` — this only works if the module is a top-level repo folder. Confirmed live against the real Your Repo repo: scanning `"deals"` 404s (`TF401174: The item 'deals' could not be found`) because Deals code actually lives under `Lead/src/Target.Crm.Lead/Target.Crm.Lead.Api/Target.Crm.Lead.Api/Deal` and `web-app/src/target-crm/src/components/deals`; the fetch silently falls back to a 13-character placeholder and the analyzer returns an empty inventory (0 routes/DTOs/workflows) even though a real API exists.
 - **File:** `backend/src/QaAutomation.Core/Models/ApiTestSession.cs` (+ migration), `backend/src/QaAutomation.Core/Contracts/QaLoopContracts.cs`, `backend/src/QaAutomation.Infrastructure/Orchestrators/QaLoopOrchestrator.cs`, `backend/src/QaAutomation.Api/Controllers/QaLoopController.cs`, `client/src/session/configs/qaLoop.tsx` (`QaLoopStartForm`)

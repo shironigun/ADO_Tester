@@ -64,6 +64,7 @@ public sealed class QaLoopController : ControllerBase
             WorkItemId = req.WorkItemId,
             TestPlanId = req.TestPlanId,
             TestSuiteId = req.TestSuiteId,
+            SourceDirsJson = req.SourceDirs is { Count: > 0 } ? System.Text.Json.JsonSerializer.Serialize(req.SourceDirs) : null,
             AutoHandoff = req.AutoHandoff,
             ActivityEnabled = _opts.Value.ActivityEnabled,
             Status = ApiSessionStatus.Analyzing,

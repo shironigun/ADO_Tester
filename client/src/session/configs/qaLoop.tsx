@@ -62,6 +62,7 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
   const [module, setModule]           = useState('')
   const [repo, setRepo]               = useState('')
   const [branch, setBranch]           = useState('')
+  const [sourceDirs, setSourceDirs]   = useState('')
   const [planId, setPlanId]           = useState<number | null>(null)
   const [suiteId, setSuiteId]         = useState<number | null>(null)
   const [story, setStory]             = useState<WorkItemOption | null>(null)
@@ -87,10 +88,12 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
     if (!module.trim()) return
     setLoading(true)
     try {
+      const dirs = sourceDirs.split(/[,\n]/).map(d => d.trim()).filter(Boolean)
       const req: ScanStartRequest = {
         module: module.trim(),
         repository: repo.trim() || undefined,
         branch: branch.trim() || undefined,
+        sourceDirs: dirs.length > 0 ? dirs : undefined,
         testPlanId: planId ?? undefined,
         testSuiteId: suiteId ?? undefined,
         workItemId: story?.id ?? undefined,
@@ -114,6 +117,10 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
           onChange={e => setRepo(e.target.value)} placeholder="leave blank for default" />
         <TextField label="Branch" size="small" value={branch}
           onChange={e => setBranch(e.target.value)} placeholder="leave blank for default" />
+        <TextField label="Source directories (optional)" size="small" multiline minRows={2}
+          value={sourceDirs} onChange={e => setSourceDirs(e.target.value)}
+          placeholder={'One per line, e.g.\nLead/src/Target.Crm.Lead/Target.Crm.Lead.Api/Target.Crm.Lead.Api/Deal'}
+          helperText="Repo-relative paths to scan when the module isn't a top-level folder. Comma or newline separated." />
         <Autocomplete
           options={plans} getOptionLabel={p => `${p.id} — ${p.name}`}
           onOpen={loadPlans}

@@ -3,7 +3,7 @@
 ## Overview
 - **PRD:** prd.md
 - **Started:** 2026-06-30
-- **Status:** BUILD COMPLETE, E2E-VERIFICATION FIX-UP IN PROGRESS (61 of 61 build tasks done; QAL-062..070 opened 2026-07-01 from live E2E findings, 0 of 9 complete)
+- **Status:** BUILD COMPLETE, E2E-VERIFICATION FIX-UP IN PROGRESS (61 of 61 build tasks done; QAL-062..071 opened 2026-07-01 from live E2E findings, 5 of 10 complete)
 
 ---
 
@@ -76,7 +76,7 @@
 | QAL-063 | Fix QaPipelinesController DI resolution crash | COMPLETED | 2026-07-01 | 2026-07-01 | PipelineWatcherHostedService now registered as singleton + exposed as IHostedService via factory; all 5 endpoints (list/add/patch/delete/run-latest) verified live via curl, no 500s |
 | QAL-064 | Fix api/qaLoop.ts — every method targets the wrong URL | COMPLETED | 2026-07-01 | 2026-07-01 | All 11 routes corrected; also fixed 3 compounding data-shape bugs found live (see log): SurfaceRow field names/PascalCase-casing, DraftsByLevel level-casing, PushPanel's non-existent push-time plan/suite picker. Verified live: session list, detail, coverage save, drafts-by-level counts, push panel all round-trip correctly |
 | QAL-065 | Fix api/qaRuns.ts + api/qaPipelines.ts missing {projectId} segment | COMPLETED | 2026-07-01 | 2026-07-01 | Also fixed 2 wire-shape bugs found live: TestRunSummary had a `reportPath` field that doesn't exist on the real DTO (only TestRunDetail has it) — drawer now reads `detail?.reportPath`; PipelineWatchDto had wrong field names (`lastBuildId`/`lastRunAt` vs real `lastSeenBuildId`/`lastPollAt`/`lastPollError`). Verified live: both pages show real data |
-| QAL-066 | Fix ModuleAnalyzerAgent source-fetch for nested modules | NOT STARTED | | | `SourceDirs`/`Extensions` dead fields; module-name-as-scopePath 404s for any module not at repo root (confirmed against real Your Repo repo) |
+| QAL-066 | Fix ModuleAnalyzerAgent source-fetch for nested modules | COMPLETED | 2026-07-01 | 2026-07-01 | `SourceDirsJson` column + migration; `ScanStartRequest.SourceDirs` persisted at scan start; `FetchSourceAsync` fetches per-dir via `ListRepoFilePathsAsync`, falls back to module-name heuristic only when empty; `QaLoopStartForm` gains a multiline "Source directories" field |
 | QAL-067 | Fix multi-case Endpoint draft tag-rewrite corruption on push | NOT STARTED | | | Confirmed live by pushing real ADO Test Cases #174569-174571: shared spec file ends up with all 3 cases tagged with the FIRST case's id → silent false-pass for 2 of 3 |
 | QAL-068 | Wire a real target base URL + credential for generated specs | NOT STARTED | | | Generated specs read `AUTOMATION_PROFILE` (a profile key, e.g. "infinity") as if it were a URL; no bearer/base-URL wiring exists anywhere |
 | QAL-069 | Isolate the ClaudeCli child process from the host Claude Code session | NOT STARTED | | | No `WorkingDirectory`/permission isolation on the spawned `claude -p` process; confirmed live referencing the operator's own session memory mid-completion |
@@ -87,13 +87,25 @@
 
 ## Summary
 - **Total Tasks:** 71 (61 build + 10 E2E fix-up)
-- **Completed:** 65
+- **Completed:** 66
 - **In Progress:** 0
-- **Not Started:** 6 (QAL-066..071)
+- **Not Started:** 5 (QAL-067..071)
 
 ---
 
 ## Log
+### 2026-07-01 (QAL-066 — Ralph loop resumed, background agents dispatched)
+- **QAL-066** COMPLETED — Picked up mid-flight from a prior interrupted session (uncommitted backend changes already present for `ApiTestSession.SourceDirsJson`, `QaLoopController` persisting `req.SourceDirs`, and `QaLoopOrchestrator.FetchSourceAsync` branching on supplied `SourceDirs`); finished the remaining pieces:
+  - Generated the missing EF migration (`20260701101804_AddSourceDirsJson`) — single additive nullable `TEXT` column on `ApiTestSessions`, no other schema change.
+  - `client/src/session/configs/qaLoop.tsx` (`QaLoopStartForm`): added a multiline "Source directories" `TextField` (comma/newline-separated, placeholder shows the real Deal path as an example), wired into `ScanStartRequest.sourceDirs`.
+  - `dotnet build` + `dotnet test` (130/130) + `npm run build` + `npm run lint` (clean on touched files) all green.
+  - **Live verification against the real ADO org, 3 attempts** (`.claude/launch.json` gained `"autoPort": true` on the `client` config since another session already held :5173; this session's Vite landed on :5174, already an allowed CORS origin per `ConfigurationExtensions.DevOrigins` — no code change needed there):
+    1. First scan left Repository/Branch blank ("leave blank for default" — turns out there's no actual default-substitution anywhere in `QaLoopController`/`QaLoopOrchestrator`, a pre-existing gap outside QAL-066's scope) → `FetchSourceAsync`'s existing empty-repo/branch guard fired → 13-char placeholder → empty inventory, as expected/unrelated to this fix.
+    2. Second scan with Repository="Your Repo"/Branch="main" set correctly still came back with an empty inventory — inconclusive (couldn't confirm from `EventLogJson`, which only persists coarse phase/result events, not the verbose per-token FETCH messages) whether the fetch itself failed or the LLM (independently confirmed flaky today — see QAL-069) ignored real content.
+    3. Third scan, identical inputs, watched the live `AgentConsole` feed directly this time: `[FETCH] Fetched source (89,539 chars)` confirmed real content was pulled, and the analyzer's reasoning correctly enumerated real routes straight out of `DealApiRoutes.cs`/`DealApi.cs`/`DealWebhookApi.cs` (`GetPipelines`, `GetDealDetails`, `AddNewDeal`, etc.). Verified the real nested path via `mcp__ado__repo_list_directory` first (exists, 3 real `.cs` files, well under the code's `.Take(8)` file cap, ruling out truncation as a factor). Final persisted inventory: **33 routes, 26 DTOs, 10 workflows** — populated, not empty, satisfying the acceptance criterion. Cancelled the session immediately after (AutoHandoff had already kicked off drafting all 43 surfaces, which wasn't needed for this verification and would have burned significant time/LLM cost).
+  - Commit: includes the migration, controller/orchestrator/entity/DbContext changes, and the frontend field.
+  - **Ralph loop resumed with a parallel-agents approach per user direction**: rather than continuing single-task-at-a-time, dispatched 3 background agents (git-worktree-isolated) for the remaining QAL-067..071 — grouped by file overlap to avoid concurrent-edit conflicts: Agent A chains QAL-067→071→070 sequentially (all three touch `QaLoopOrchestrator.cs`; 067/071 also share `ContractGeneratorAgent.cs`), Agent B takes QAL-068 alone (disjoint files), Agent C takes QAL-069 alone (disjoint, single file). Each agent implements+tests+commits its own code only; this session merges branches and owns all `prd.md`/`progress.md` updates centrally to avoid doc-merge conflicts across agents.
+
 ### 2026-07-01 (QAL-065)
 - **QAL-065** COMPLETED — `client/src/api/qaRuns.ts`: `listRunsPage`/`getRunDetail` now take `projectId` and hit `/api/qaloop/runs/{projectId}` / `/api/qaloop/runs/detail/{runId}`. `client/src/api/qaPipelines.ts`: `listWatches`/`addWatch` now take `projectId` and hit `/api/qaloop/pipelines/{projectId}`.
 - Found 2 more wire-shape bugs live while verifying (same pattern as QAL-064 — URL fixes alone don't make a screen work if the payload shape is also wrong):
