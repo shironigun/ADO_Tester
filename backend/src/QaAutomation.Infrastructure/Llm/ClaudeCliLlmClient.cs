@@ -15,6 +15,11 @@ namespace QaAutomation.Infrastructure.Llm;
 /// ~32KB argv limit). Token/thinking deltas are coalesced before emit (channel switch / ≥256 chars /
 /// ≥80ms). Faithful to the Python ClaudeCliLlmClient — .NET async process I/O replaces the Python
 /// thread+queue workaround.
+///
+/// The child process's WorkingDirectory is pinned to a neutral scratch folder (never the app's own
+/// repo checkout), because the CLI auto-discovers `.claude/`, `CLAUDE.md`, and project memory from its
+/// cwd — inherited cwd would otherwise leak THIS repo's own dev config/memory into every agent prompt
+/// (QAL-069). `--setting-sources ""` does NOT suppress this (verified empirically); only cwd redirect does.
 /// </summary>
 public sealed class ClaudeCliLlmClient : ILlmClient
 {
@@ -24,11 +29,14 @@ public sealed class ClaudeCliLlmClient : ILlmClient
 
     private readonly ClaudeCliOptions _options;
     private readonly ILogger<ClaudeCliLlmClient> _log;
+    private readonly string _scratchDir;
 
-    public ClaudeCliLlmClient(ClaudeCliOptions options, ILogger<ClaudeCliLlmClient> log)
+    public ClaudeCliLlmClient(ClaudeCliOptions options, StorageOptions storage, ILogger<ClaudeCliLlmClient> log)
     {
         _options = options;
         _log = log;
+        _scratchDir = Path.GetFullPath(Path.Combine(storage.DataDirectory, "llm-scratch"));
+        Directory.CreateDirectory(_scratchDir);
     }
 
     public async Task<string> CompleteAsync(
@@ -71,6 +79,8 @@ public sealed class ClaudeCliLlmClient : ILlmClient
             UseShellExecute = false,
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8,
+            // Neutral cwd so the CLI can't auto-discover this app's OWN .claude/CLAUDE.md/memory (QAL-069).
+            WorkingDirectory = _scratchDir,
         };
         foreach (var a in args)
             psi.ArgumentList.Add(a);

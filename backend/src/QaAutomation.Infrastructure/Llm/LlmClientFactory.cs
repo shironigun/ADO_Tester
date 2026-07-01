@@ -20,6 +20,7 @@ public sealed class LlmClientFactory : ILlmClientFactory
     private readonly IOptionsMonitor<AzureOpenAiOptions> _azure;
     private readonly IOptionsMonitor<OpenAiCompatibleOptions> _openai;
     private readonly IOptionsMonitor<ClaudeCliOptions> _claudeCli;
+    private readonly IOptionsMonitor<StorageOptions> _storage;
     private readonly ILoggerFactory _loggerFactory;
 
     public LlmClientFactory(
@@ -29,6 +30,7 @@ public sealed class LlmClientFactory : ILlmClientFactory
         IOptionsMonitor<AzureOpenAiOptions> azure,
         IOptionsMonitor<OpenAiCompatibleOptions> openai,
         IOptionsMonitor<ClaudeCliOptions> claudeCli,
+        IOptionsMonitor<StorageOptions> storage,
         ILoggerFactory loggerFactory)
     {
         _httpFactory = httpFactory;
@@ -37,6 +39,7 @@ public sealed class LlmClientFactory : ILlmClientFactory
         _azure = azure;
         _openai = openai;
         _claudeCli = claudeCli;
+        _storage = storage;
         _loggerFactory = loggerFactory;
     }
 
@@ -49,7 +52,7 @@ public sealed class LlmClientFactory : ILlmClientFactory
         {
             LlmProvider.AzureOpenAI => BuildAzure(maxTokens),
             LlmProvider.OpenAICompatible => BuildOpenAi(maxTokens),
-            LlmProvider.ClaudeCli => new ClaudeCliLlmClient(_claudeCli.CurrentValue, _loggerFactory.CreateLogger<ClaudeCliLlmClient>()),
+            LlmProvider.ClaudeCli => new ClaudeCliLlmClient(_claudeCli.CurrentValue, _storage.CurrentValue, _loggerFactory.CreateLogger<ClaudeCliLlmClient>()),
             _ => BuildAnthropic(maxTokens),
         };
     }
