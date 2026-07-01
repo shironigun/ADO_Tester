@@ -93,6 +93,9 @@ public static class QaLoopEnumExtensions
         TestLevel.Contract => "contract", TestLevel.Endpoint => "endpoint",
         TestLevel.Workflow => "workflow", _ => "ui",
     };
+    /// <summary>The on-disk scripts subfolder for a level (plural of <see cref="ToWire"/>) — single
+    /// source of truth shared by where generated specs are written and where the runner looks for them.</summary>
+    public static string ToDirName(this TestLevel v) => v.ToWire() + "s";
     public static TestLevel ToTestLevel(string s) => s switch
     {
         "contract" => TestLevel.Contract, "endpoint" => TestLevel.Endpoint,

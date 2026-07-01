@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -32,6 +33,48 @@ public sealed class JUnitTriageSplitTests
     // Valid ImpactAnalysis JSON pointing at a specific draft id.
     private static string ImpactJson(int draftId) =>
         $$$"""{"impactedDraftIds":[{{{draftId}}}],"reasoning":"route changed","confidence":"high"}""";
+
+    // ── DI composition (QAL-063) ─────────────────────────────────────────────
+    // AddHostedService<T>() alone only exposes T as IHostedService, never as itself — the exact gap
+    // that crashed every QaPipelinesController action (it injects the concrete type). Mirrors the
+    // fixed registration in DependencyInjection.AddQaLoop.
+
+    [Fact]
+    public void PipelineWatcherHostedService_resolves_both_as_itself_and_as_the_same_IHostedService_instance()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
+        services.AddSingleton<IAzureDevOpsClient>(new WatcherAdoStub([]));
+        services.AddSingleton<ILlmClientFactory>(new FixedLlmFactory(null!));
+        services.AddSingleton<IEventBus, EventBus>();
+        services.AddSingleton<IOptions<QaLoopOptions>>(Options.Create(new QaLoopOptions()));
+
+        services.AddSingleton<PipelineWatcherHostedService>();
+        services.AddHostedService(sp => sp.GetRequiredService<PipelineWatcherHostedService>());
+
+        using var provider = services.BuildServiceProvider();
+
+        var direct = provider.GetRequiredService<PipelineWatcherHostedService>();
+        var hosted = provider.GetServices<IHostedService>().OfType<PipelineWatcherHostedService>().Single();
+        Assert.Same(direct, hosted);
+    }
+
+    // ── testDir level-folder naming (QAL-062 follow-up) ──────────────────────
+    // PlaywrightRunner.WriteRunConfig resolves a run's testDir from a caller-supplied levelFilter
+    // string of arbitrary casing; it must land on the exact folder QaLoopOrchestrator.PersistDraft
+    // wrote the specs to, or the run silently matches zero test files (no error, no report — a run
+    // that looks "Passed" with 0/0/0 counts and no junit.xml).
+
+    [Theory]
+    [InlineData("Contract", "contracts")]
+    [InlineData("contract", "contracts")]
+    [InlineData("ENDPOINT", "endpoints")]
+    [InlineData("workflow", "workflows")]
+    public void TestLevel_ToDirName_matches_regardless_of_caller_casing(string input, string expectedDir)
+    {
+        Assert.True(Enum.TryParse<TestLevel>(input, ignoreCase: true, out var level));
+        Assert.Equal(expectedDir, level.ToDirName());
+    }
 
     // ── TriageAsync ───────────────────────────────────────────────────────────
 

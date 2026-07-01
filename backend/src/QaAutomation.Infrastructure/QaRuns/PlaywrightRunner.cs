@@ -8,6 +8,7 @@ using Microsoft.Extensions.Options;
 using QaAutomation.Core.Abstractions;
 using QaAutomation.Core.Configuration;
 using QaAutomation.Core.Models;
+using QaAutomation.Infrastructure.Llm;
 using QaAutomation.Infrastructure.Orchestrators;
 
 namespace QaAutomation.Infrastructure.QaRuns;
@@ -73,8 +74,11 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
 
         var grep = BuildGrep(spec.GrepTags);
         // Reporters are declared in playwright.config.ts (allure-playwright + conditional html);
-        // --output sets the artifacts folder; junit/json paths are relative in the config.
-        var args = $"test --grep \"{grep}\" --output={EscPath(runDir)}";
+        // --output must NOT be runDir itself — Playwright wipes its entire outputDir at the start of
+        // every run, which was deleting playwright.config.ts/package.json/the node_modules link before
+        // it could even load them (config load then silently fails → 0 tests found, no error surfaced).
+        var testOutputDir = Path.Combine(runDir, "test-output");
+        var args = $"test --grep \"{grep}\" --output={EscPath(testOutputDir)}";
 
         Pub(eventKey, EventKinds.Phase, "run", $"Playwright run {spec.RunId} starting · grep={grep}");
 
@@ -128,13 +132,35 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
             Pub(eventKey, EventKinds.System, text: "Provisioning shared Playwright runtime (first run)…");
             Directory.CreateDirectory(_runtimeDir);
             WriteRuntimePackageJson(_runtimeDir);
-            await SpawnAsync("npm", "ci", _runtimeDir, profile: null, eventKey, ct);
-            await SpawnAsync("npx", "playwright install --with-deps chromium", _runtimeDir, profile: null, eventKey, ct);
+            // `npm ci` requires a pre-existing package-lock.json (we only ever write a bare
+            // package.json with "latest" ranges) and fails immediately without one; `npm install`
+            // is the correct choice here since there's no lockfile to install exactly from.
+            var installExit = await SpawnAsync("npm", "install", _runtimeDir, profile: null, eventKey, ct);
+            if (installExit != 0)
+                throw new InvalidOperationException($"npm install exited {installExit} — Playwright runtime not provisioned.");
+
+            var pwExit = await SpawnAsync("npx", "playwright install --with-deps chromium", _runtimeDir, profile: null, eventKey, ct);
+            if (pwExit != 0)
+                throw new InvalidOperationException($"playwright install exited {pwExit} — browser binaries not provisioned.");
+
             // Allure capability check — log version; a non-zero exit here only warns (generate handled later)
             // ponytail: fallback if @allurereport/cli lacks --single-file: ship allure-commandline + bundled JRE
             var allureExit = await SpawnAsync("npx", "allure --version", _runtimeDir, profile: null, eventKey, ct);
             if (allureExit != 0)
                 Pub(eventKey, EventKinds.System, text: "WARNING: allure --version check failed; report generation may be unavailable.", level: EventLevels.Warn);
+
+            // Generated specs live under _scriptsDir (module/level subfolders), NOT under the run
+            // directory — Node resolves each spec's "@playwright/test" import by walking UP from the
+            // spec file itself, so the run directory's own node_modules link is unreachable from there.
+            // One link at the scripts root satisfies every module/level file underneath it.
+            Directory.CreateDirectory(_scriptsDir);
+            var scriptsNm = Path.Combine(_scriptsDir, "node_modules");
+            if (!Directory.Exists(scriptsNm))
+            {
+                try { LinkDirectory(scriptsNm, Path.Combine(_runtimeDir, "node_modules")); }
+                catch (Exception ex) { _log.LogWarning(ex, "Could not link node_modules under scripts dir; specs may fail to resolve @playwright/test"); }
+            }
+
             _runtimeReady = true;
             Pub(eventKey, EventKinds.System, text: "Playwright runtime ready.", level: EventLevels.Success);
         }
@@ -148,12 +174,14 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
 
     private void WriteRunConfig(string runDir, PlaywrightRunSpec spec)
     {
-        var levelSubdir = spec.LevelFilter is { Length: > 0 }
-            ? spec.LevelFilter
-            : "*"; // all levels
-
-        var testDir = Path.Combine(_scriptsDir, spec.Module, levelSubdir)
-            .Replace('\\', '/');
+        // Match the exact folder PersistDraft wrote to (level.ToDirName(), e.g. "contracts") — a bare
+        // level name/casing mismatch here silently matches zero test files (Playwright's testDir is a
+        // literal path, not a glob, so "*" for "all levels" never resolves either). No filter → point
+        // at the module root; Playwright recursively scans all level subfolders under it by default.
+        var testDir = spec.LevelFilter is { Length: > 0 } lf && Enum.TryParse<TestLevel>(lf, ignoreCase: true, out var level)
+            ? Path.Combine(_scriptsDir, spec.Module, level.ToDirName())
+            : Path.Combine(_scriptsDir, spec.Module);
+        testDir = testDir.Replace('\\', '/');
 
         // package.json — resolves node_modules at the shared read-only runtime
         var pkgJson = $$"""
@@ -181,14 +209,40 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
             """;
         File.WriteAllText(Path.Combine(runDir, "playwright.config.ts"), config);
 
-        // node_modules symlink → shared runtime (read-only)
+        // node_modules link → shared runtime (read-only)
         var nmLink = Path.Combine(runDir, "node_modules");
         var nmTarget = Path.Combine(_runtimeDir, "node_modules");
         if (!Directory.Exists(nmLink) && Directory.Exists(nmTarget))
         {
-            try { Directory.CreateSymbolicLink(nmLink, nmTarget); }
-            catch (Exception ex) { _log.LogWarning(ex, "Could not symlink node_modules; Playwright may re-install"); }
+            try { LinkDirectory(nmLink, nmTarget); }
+            catch (Exception ex) { _log.LogWarning(ex, "Could not link node_modules; Playwright may re-install"); }
         }
+    }
+
+    /// <summary><c>Directory.CreateSymbolicLink</c> requires elevation or Developer Mode on Windows and
+    /// fails silently under a normal user account — confirmed live: every run's own node_modules link
+    /// never got created, so `npx playwright` fell back to an unrelated global npx cache and couldn't
+    /// find `@playwright/test`. An NTFS junction (`mklink /J`) gives the same directory-link behavior
+    /// with no special privileges required.</summary>
+    private static void LinkDirectory(string link, string target)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Directory.CreateSymbolicLink(link, target);
+            return;
+        }
+
+        var psi = new ProcessStartInfo("cmd.exe", $"/c mklink /J \"{link}\" \"{target}\"")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        using var p = Process.Start(psi) ?? throw new InvalidOperationException("Could not start mklink.");
+        p.WaitForExit();
+        if (p.ExitCode != 0)
+            throw new InvalidOperationException($"mklink /J exited {p.ExitCode}: {p.StandardError.ReadToEnd().Trim()}");
     }
 
     // ── Allure generate + history (QAL-057) ─────────────────────────────────
@@ -343,8 +397,10 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
 
     private static void WriteRuntimePackageJson(string dir)
     {
-        // @allurereport/cli: Node-native Allure 3 CLI (no JRE). allure-playwright: Playwright reporter.
-        // ponytail: if @allurereport/cli --single-file is unsupported, fallback = allure-commandline + bundled JRE
+        // "allure" (unscoped) is the real published Node-native Allure 3 CLI (no JRE) — confirmed
+        // against the npm registry; "@allurereport/cli" never existed (404) and silently broke every
+        // provisioning attempt. allure-playwright is the Playwright reporter.
+        // ponytail: if "allure" generate --single-file is ever unsupported, fallback = allure-commandline + bundled JRE
         const string json = """
             {
               "name": "qa-playwright-runtime",
@@ -352,7 +408,7 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
               "devDependencies": {
                 "@playwright/test": "latest",
                 "allure-playwright": "latest",
-                "@allurereport/cli": "latest"
+                "allure": "latest"
               }
             }
             """;
@@ -365,7 +421,11 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
         string exe, string args, string workDir, string? profile, string eventKey, CancellationToken ct,
         bool suppressOutput = false)
     {
-        var psi = new ProcessStartInfo(exe, args)
+        // npm/npx are .cmd shims on Windows — bare ProcessStartInfo (UseShellExecute=false) can't
+        // resolve them via PATHEXT the way a real shell does, and fails with "cannot find the file
+        // specified". Resolve the real path first, same PATHEXT-aware lookup the Claude CLI uses.
+        var resolvedExe = ClaudeCli.Which(exe) ?? exe;
+        var psi = new ProcessStartInfo(resolvedExe, args)
         {
             WorkingDirectory = workDir,
             RedirectStandardOutput = true,

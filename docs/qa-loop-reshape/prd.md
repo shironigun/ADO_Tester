@@ -757,3 +757,115 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
 - Phase order is dependency-correct (Foundation → Data → Agents → Orchestrator → Runner → Watcher → API → Notifications/Settings/DI → Frontend → Testing → Build/Verify); work one task per iteration in phase order, update progress.md after each verified task, never leave a failing build. Note: IAzureDevOpsClient + AzureDevOpsClient are each edited in TWO phases (RUNNER adds 3 test-run/test-point methods, WATCHER adds 2 build-read methods) — both additive; each method's only consumer lives in its own phase. AdoBuild/AdoBuildChange are defined in FOUNDATION and first used in WATCHER (definition-before-use, do not defer the Foundation task).
 - Two manifest files live outside the main Project Structure block but are required and covered here: AdoModels.cs (+AdoBuild/AdoBuildChange) and the second EmbeddedResource glob in the Infrastructure .csproj for Notifications/Templates/*.json.template. Verify the existing Prompts/*.txt glob covers the 7 new prompt files.
 - Deferred/out-of-scope (do NOT build): UI-level tests (ui/ folder reserved, TestLevel.Ui reserved), modules other than Deals, pipelines other than #175, DMS profiles other than INFINITY (registry only), sync-to-product-repo, run cancellation, and converting agents to Claude-CLI skills (agents stay provider-portable single-shot completion calls).
+
+### E2E VERIFICATION FIX-UP (amendment)
+
+> Additive amendment phase. A full API- and UI-level end-to-end verification pass (2026-07-01) was run against the real Azure DevOps org (YourOrg / Your Project), the real "Your Repo" repo, real boards (Your Team's plan 57868 "YourProduct", suites 173473/174566), and real ticket #171740. Every finding below was reproduced live — via curl against the real backend, a real Chromium session driving each page, or a direct file/DB read — not inferred from the (green) unit-test suite, which never boots the real DI container, hits a live repo, or exercises a real browser click. Full findings write-up: `docs/qa-loop-reshape/` conversation report (session 2026-07-01). Phase order: fix blocking defects first (QAL-062/063/064/065), then correctness gaps (QAL-066/067/068), then architectural/minor (QAL-069/070). Re-run the same live verification methodology after each fix — a passing `dotnet test`/`npm run build` is necessary but not sufficient proof.
+
+#### QAL-062: Fix Playwright runtime npm/npx spawn failure on Windows
+- **Status:** [x]
+- **ID:** QAL-062
+- **Description:** `PlaywrightRunner.SpawnAsync` launches `"npm"` / `"npx"` via `new ProcessStartInfo(exe, args)` with `UseShellExecute = false`. On Windows, `npm`/`npx` are `.cmd` shims; `Process.Start` does not resolve `PATHEXT` the way a shell does, so the spawn fails immediately with `Win32Exception: The system cannot find the file specified.` Confirmed live: 3 real pipeline-watcher-triggered runs (builds 59908/60317/60336) all landed in `TestRun.Status=Error` with this exact message — the shared runtime's `package.json` gets written but `npm ci` never runs, so `node_modules`/browsers never install and NO run (manual or pipeline-triggered) can ever complete on this machine. Resolve the executable cross-platform (mirror the existing `ClaudeCli.Which()` PATHEXT-aware resolution pattern already used elsewhere in this codebase, or invoke via `cmd /c npm ci` on Windows).
+- **File:** `backend/src/QaAutomation.Infrastructure/QaRuns/PlaywrightRunner.cs` (`SpawnAsync`, `EnsureRuntimeAsync`)
+- **Acceptance Criteria:**
+  - `SpawnAsync` resolves `npm`/`npx` to a real, launchable executable on Windows (and stays correct on macOS/Linux where bare `npm` already works)
+  - `EnsureRuntimeAsync` completes end-to-end on a clean machine: `npm ci` + `npx playwright install --with-deps chromium` + `npx allure --version` all actually run (not just get spawned-and-fail)
+  - A manual `POST /api/qaloop/runs/start` against real Pushed drafts reaches `junit.xml`/`results.json` output, not an immediate `Status=Error`
+  - Re-verify live: trigger `run-latest` (once QAL-063 unblocks it) against a real impacted Lead QA build and confirm the run no longer dies at the provisioning step
+
+#### QAL-063: Fix QaPipelinesController DI resolution crash
+- **Status:** [x]
+- **ID:** QAL-063
+- **Description:** `QaPipelinesController`'s constructor takes `PipelineWatcherHostedService` by concrete type, but it is registered only via `services.AddHostedService<PipelineWatcherHostedService>()` (Infrastructure/DependencyInjection.cs:255), which exposes it as `IHostedService` only — never as itself. ASP.NET must construct the whole controller before invoking any action, so **every** endpoint (list/add/patch/delete/run-latest) throws a 500 `InvalidOperationException: Unable to resolve service for type 'PipelineWatcherHostedService'`. Confirmed live via `curl -X POST /api/qaloop/pipelines/1`. This is why Mode B (pipeline watches) has no working front door at all, via either the API or the UI — confirmed the underlying poll engine itself is sound (a watch row inserted directly into SQLite got polled correctly, fetched 5 real Lead QA builds, and produced correct `TestRun` rows), so this is purely a composition-root fix.
+- **File:** `backend/src/QaAutomation.Infrastructure/DependencyInjection.cs` (`AddQaLoop`)
+- **Acceptance Criteria:**
+  - `PipelineWatcherHostedService` is resolvable BOTH as `IHostedService` (so the background poll loop still starts) AND as its own concrete type (so the controller can inject it) — e.g. register as singleton first, then `AddHostedService(sp => sp.GetRequiredService<PipelineWatcherHostedService>())`
+  - `GET/POST/PATCH/DELETE /api/qaloop/pipelines/*` all resolve without a 500 (verify live via curl, not just `dotnet build`)
+  - Add-watch/list/enable-disable/delete/run-latest all work end-to-end through the real `/qa-pipelines` UI page
+  - No change needed to `QaPipelinesController.cs` itself if the DI fix is applied correctly — confirm by leaving the controller untouched
+
+#### QAL-064: Fix api/qaLoop.ts — every method targets the wrong URL
+- **Status:** [ ]
+- **ID:** QAL-064
+- **Description:** `client/src/api/qaLoop.ts` (rewritten in QAL-046) does not match `QaLoopController`'s real routes at all — e.g. `getSessionDetail` calls `GET /api/qaloop/{id}` but the real route is `GET /api/qaloop/sessions/detail/{id}`; `startScan` calls `POST /api/qaloop/start` but the real route is `POST /api/qaloop/{projectId}/scan/start`. Every one of the 11 methods (list, detail, start, save-analysis, generate-drafts, patch-draft, approve-all, push, push-draft, cancel, stream) has the same class of mismatch. This file is wired directly into `qaLoopConfig` (session/configs/qaLoop.tsx:24-27, 421-422), which drives the entire `/qa-loop` screen. Confirmed live in a real browser: the session list always shows "No sessions yet" even with real sessions in the DB, opening a session hangs forever on "Loading session…", and "Start Scan" 404s silently with no visible error toast.
+- **File:** `client/src/api/qaLoop.ts`
+- **Acceptance Criteria:**
+  - Every method's URL matches `QaLoopController.cs` exactly: `POST /api/qaloop/{projectId}/scan/start`, `GET /api/qaloop/sessions/{projectId}`, `GET /api/qaloop/sessions/detail/{sessionId}`, `PATCH /api/qaloop/sessions/{sessionId}/analysis`, `POST /api/qaloop/sessions/{sessionId}/generate-drafts`, `PATCH /api/qaloop/drafts/{draftId}`, `POST /api/qaloop/sessions/{sessionId}/approve-all`, `POST /api/qaloop/sessions/{sessionId}/push`, `POST /api/qaloop/drafts/{draftId}/push`, `POST /api/qaloop/sessions/{sessionId}/cancel`, `GET /api/qaloop/sessions/{sessionId}/stream`
+  - `saveAnalysis`'s body matches `ApiAnalysisUpdate` (`{ module, rows }`, full-replace) — not just `{ rows }`
+  - Re-verify live in a real browser: session list shows real sessions, New Scan creates one, the coverage matrix saves, generate-drafts/approve-all/push/cancel all round-trip with visible success/error feedback — no silent 404s
+  - A toast or inline error surfaces on any failed mutation going forward (currently a 404 fails silently — worth a small UX guard alongside the URL fix)
+
+#### QAL-065: Fix api/qaRuns.ts + api/qaPipelines.ts missing {projectId} path segment
+- **Status:** [ ]
+- **ID:** QAL-065
+- **Description:** A milder version of QAL-064: single-id action endpoints (`triage`, `fileBugs`, `previewImpact`, `runStreamUrl`, `updateWatch`, `deleteWatch`, `runLatest`) happen to hit the correct URL, but `listRunsPage` (`GET /api/qaloop/runs` instead of `GET /api/qaloop/runs/{projectId}`), `getRunDetail` (`GET /api/qaloop/runs/{id}` instead of `GET /api/qaloop/runs/detail/{id}`), `listWatches` (`GET /api/qaloop/pipelines` instead of `GET /api/qaloop/pipelines/{projectId}`), and `addWatch` (same miss) are all missing a path segment. Confirmed live: `/qa-runs` shows "No runs yet" and `/qa-pipelines` shows "No pipeline watchers" via 404s that fail silently, independent of whether any data exists.
+- **File:** `client/src/api/qaRuns.ts`, `client/src/api/qaPipelines.ts`
+- **Acceptance Criteria:**
+  - `listRunsPage` → `GET /api/qaloop/runs/{projectId}`; `getRunDetail` → `GET /api/qaloop/runs/detail/{runId}`
+  - `listWatches` → `GET /api/qaloop/pipelines/{projectId}`; `addWatch` → `POST /api/qaloop/pipelines/{projectId}`
+  - Re-verify live: `/qa-runs` run-history grid and `/qa-pipelines` watch cards both show real data; Add Watch dialog succeeds end-to-end (depends on QAL-063 also being fixed)
+
+#### QAL-066: Fix ModuleAnalyzerAgent source-fetch for modules not at the repo root
+- **Status:** [ ]
+- **ID:** QAL-066
+- **Description:** `ScanStartRequest.SourceDirs`/`.Extensions` are accepted by the API/DTO but never read anywhere — dead fields, never persisted on `ApiTestSession`, never surfaced in the New Scan UI either. `QaLoopOrchestrator.FetchSourceAsync` instead calls `ListRepoFilePathsAsync(session.Module, …)`, using the literal module name as the ADO Git `scopePath` — this only works if the module is a top-level repo folder. Confirmed live against the real Your Repo repo: scanning `"deals"` 404s (`TF401174: The item 'deals' could not be found`) because Deals code actually lives under `Lead/src/Target.Crm.Lead/Target.Crm.Lead.Api/Target.Crm.Lead.Api/Deal` and `web-app/src/target-crm/src/components/deals`; the fetch silently falls back to a 13-character placeholder and the analyzer returns an empty inventory (0 routes/DTOs/workflows) even though a real API exists.
+- **File:** `backend/src/QaAutomation.Core/Models/ApiTestSession.cs` (+ migration), `backend/src/QaAutomation.Core/Contracts/QaLoopContracts.cs`, `backend/src/QaAutomation.Infrastructure/Orchestrators/QaLoopOrchestrator.cs`, `backend/src/QaAutomation.Api/Controllers/QaLoopController.cs`, `client/src/session/configs/qaLoop.tsx` (`QaLoopStartForm`)
+- **Acceptance Criteria:**
+  - `ApiTestSession` gains a `SourceDirsJson` column (nullable, additive migration); `ScanStartRequest.SourceDirs` is persisted at session creation
+  - `FetchSourceAsync` fetches files per supplied `SourceDirs` entry (via `ListRepoFilePathsAsync` per dir or `SearchCodeAsync`) when present; falls back to today's module-name heuristic only when `SourceDirs` is empty (documented limitation, not silently wrong)
+  - `QaLoopStartForm` gains a "Source directories" input (comma/newline-separated) so a user can point a scan at the real nested path without an API-only workaround
+  - Re-verify live: scanning `deals` with `sourceDirs: ["Lead/src/Target.Crm.Lead/Target.Crm.Lead.Api/Target.Crm.Lead.Api/Deal"]` against the real repo returns a populated inventory (real routes from `DealApiRoutes.cs`), not an empty one
+
+#### QAL-067: Fix multi-case Endpoint draft tag-rewrite corruption on push
+- **Status:** [ ]
+- **ID:** QAL-067
+- **Description:** `EndpointGeneratorAgent` deliberately writes all 3 cases of one route (200/401/400) into a single shared `.spec.ts` file (`SpecCode = i == 0 ? specCode : ""`), but only the first case's `ApiTestDraft` gets a `SpecFilePath`. `QaLoopOrchestrator.RewriteSpecOnDisk` does a **global string replace** of the literal `[<tcId-pending>]` placeholder, and only the first case's push event ever triggers it. Confirmed live by pushing a real 3-case endpoint: ADO now holds 3 distinct Test Cases (#174569/174570/174571), but the physical file shows `[174569]` on **all three** `test(...)` blocks. Effect: the JUnit `\[(\d+)\]` regex can never find cases 401/400's real ids anywhere in the file, so `RunExecutionService.PostAdoResultsAsync` will report those two Test Cases as **Passed by default** regardless of their actual outcome — a silent false-pass, not a missing result.
+- **File:** `backend/src/QaAutomation.Infrastructure/Agents/ContractGeneratorAgent.cs` (`TitleTag` helper), `backend/src/QaAutomation.Infrastructure/Agents/EndpointGeneratorAgent.cs`, `backend/src/QaAutomation.Infrastructure/Orchestrators/QaLoopOrchestrator.cs` (`RewriteSpecOnDisk`/`RewriteTag`)
+- **Acceptance Criteria:**
+  - Each case in a shared spec file carries a distinguishable placeholder (e.g. `[<tcId-pending:0>]`, `[<tcId-pending:1>]`, `[<tcId-pending:2>]` keyed by case index) instead of one shared literal
+  - `RewriteSpecOnDisk` rewrites only the placeholder matching its OWN draft's case index, regardless of push order
+  - Re-verify live: push all 3 cases of a real endpoint (in any order, including out-of-order via `PushDraftAsync`) and confirm the physical file ends up with each case's own correct real ADO Test Case id on its own `test(...)` block
+  - A synthetic Playwright/JUnit run against the rewritten file maps each case's Pass/Fail back to its own distinct Test Case (no shared-id collisions)
+
+#### QAL-068: Wire a real target base URL + credential for generated specs
+- **Status:** [ ]
+- **ID:** QAL-068
+- **Description:** Every generated spec resolves its target via `const BASE_URL = process.env.AUTOMATION_PROFILE ?? 'http://localhost:5000'` — but `PlaywrightRunner` only ever sets `AUTOMATION_PROFILE` to the DMS profile *key* (the literal string `"infinity"`), never a URL, confirmed by reading `SpawnAsync`'s only environment assignment (`psi.Environment["AUTOMATION_PROFILE"] = profile`). There is no `AUTOMATION_BEARER_TOKEN` or base-URL mapping anywhere in the runner or `.env`; `DmsProfileOptions.Infinity.Credentialed = true` is a registry flag with no actual secret or URL behind it. Even with QAL-062 fixed, every generated spec would try to fetch a malformed URL like `infinity/lead/deal/…` and fail before ever reaching a real endpoint.
+- **File:** `backend/src/QaAutomation.Core/Configuration/DmsProfileOptions.cs`, `backend/src/QaAutomation.Infrastructure/QaRuns/PlaywrightRunner.cs`, `backend/src/QaAutomation.Infrastructure/Agents/Prompts/contract_generator_system.txt`, `endpoint_generator_system.txt`, `workflow_generator_system.txt`, `.env.example`
+- **Acceptance Criteria:**
+  - `DmsProfileEntry` gains a `BaseUrl` (and, for Infinity, a way to mint or read a bearer token — e.g. `AUTOMATION_BEARER_TOKEN` env var, or a documented token-mint step) per profile
+  - `PlaywrightRunner` sets `AUTOMATION_BASE_URL` (and bearer, where available) on the child process env, alongside the existing `AUTOMATION_PROFILE` key
+  - The 3 generator prompts are amended to read `AUTOMATION_BASE_URL` for the target URL, `AUTOMATION_PROFILE` stays the profile key only (no naming collision)
+  - Re-verify live: a freshly generated spec's `BASE_URL` resolves to a real, reachable INFINITY QA endpoint and a live Playwright call gets a real HTTP response (any status), not a DNS/protocol error
+
+#### QAL-069: Isolate the ClaudeCli child process from the host Claude Code session
+- **Status:** [ ]
+- **ID:** QAL-069
+- **Description:** `ClaudeCliLlmClient.RunStreamAsync` spawns `claude -p …` with no `WorkingDirectory` set on `ProcessStartInfo` and no `--permission-mode`/isolation flag. The child inherits the parent .NET process's working directory (inside this very repo) and therefore this machine's project-level Claude Code configuration — confirmed live: mid-completion, the `ModuleAnalyzerAgent`'s own "thinking" stream referenced the operator's own session memory by name ("Looking at the memory, there's a `hackathon-ai-qa-automation` memory that…") while trying to answer a scoped "analyze this module" prompt, and took 80+ seconds of open-ended exploration instead of returning a quick JSON answer. This affects every agent that uses the ClaudeCli provider app-wide, not just QA Loop, and is the most likely root cause behind the pre-existing "CLI exit 1 on large tickets" issue already tracked in project memory.
+- **File:** `backend/src/QaAutomation.Infrastructure/Llm/ClaudeCliLlmClient.cs`
+- **Acceptance Criteria:**
+  - Child process `WorkingDirectory` is set to a neutral directory with no `.claude/`/`CLAUDE.md` of its own (e.g. a dedicated scratch folder under `StorageOptions.DataDirectory`), OR an appropriate CLI isolation flag is added — whichever the installed Claude Code CLI version actually supports for this purpose
+  - A scoped single-shot completion (e.g. `ModuleAnalyzerAgent` against a small, self-contained prompt) returns without referencing any host-machine project/session content
+  - Latency for a small prompt drops to single-digit seconds, measured before/after
+  - Existing ClaudeCli golden/parity tests still pass unchanged
+
+#### QAL-070: Populate WorkItemTitle for QA Loop sessions
+- **Status:** [ ]
+- **ID:** QAL-070
+- **Description:** Unlike `AgentOrchestrator`/`BugOrchestrator`, which fetch and store the linked work item's title at session creation (`WorkItemTitle = wi.Title`), `QaLoopOrchestrator` never does — confirmed live: `ApiSessionDetail.workItemTitle` stayed `null` for a session created with `workItemId=171740`. Cosmetic (today's `qaLoopConfig.renderIdentity` doesn't display it, and `LinkTestedByAsync` correctly uses the numeric id, not the title) but a real gap against the DTO's documented shape.
+- **File:** `backend/src/QaAutomation.Infrastructure/Orchestrators/QaLoopOrchestrator.cs`
+- **Acceptance Criteria:**
+  - When `WorkItemId` is set at scan start, the background pipeline fetches the work item via `IAzureDevOpsClient` and persists `session.WorkItemTitle` alongside the existing inventory/analysis writes
+  - A failed title fetch degrades gracefully (session proceeds, `WorkItemTitle` stays null) — never fails the scan
+  - `ApiSessionDetail.workItemTitle` reflects the real ADO title for a session tagged to a real work item (verify live against #171740)
+
+#### QAL-071: Write the Contract generator's schema file alongside its spec
+- **Status:** [ ]
+- **ID:** QAL-071
+- **Description:** Discovered live while re-verifying QAL-062 end-to-end (not in the original 9 findings). `ContractGeneratorAgent`'s spec prompt has the generated `.spec.ts` `import` a sibling schema module by relative path (e.g. `import { DealDetailsDtoSchema } from './get-lead-deal-dealId.schema'`), but `ContractGeneratorAgent`/`QaLoopOrchestrator.PersistDraft` only ever writes `spec.SchemaJson` into the `ApiTestDraft.SchemaJson` DB column — the companion `.schema.ts` file the import expects is never written to the `contracts/` folder on disk. Confirmed live: `npx playwright test --list` on a real pushed Contract-level spec fails with `Error: Cannot find module './get-lead-deal-dealId.schema'`, and because Playwright aborts the ENTIRE run on any single spec file that fails to load (not just that file), this one missing file blocks every OTHER level's tests too whenever a run spans more than one level (confirmed: Endpoint-only and Workflow-only runs execute fine in isolation; a full module-wide run does not, purely because of this one file). This is the one remaining thing standing between "Playwright can execute" (QAL-062, done) and "a real end-to-end module run finishes for real."
+- **File:** `backend/src/QaAutomation.Infrastructure/Agents/ContractGeneratorAgent.cs`, `backend/src/QaAutomation.Infrastructure/Orchestrators/QaLoopOrchestrator.cs` (`PersistDraft`)
+- **Acceptance Criteria:**
+  - The Contract generator's `SchemaJson` is written to a `.schema.ts` (or `.ts` module of whatever shape the spec's `import` expects) file alongside its `.spec.ts` in the same `contracts/` folder, using the same slug so the relative import resolves
+  - The push-time `[<tcId-pending>]` tag rewrite (QAL-067, if done first) or any other on-disk rewrite does not need to touch the schema file — only the spec's own tag
+  - Re-verify live: `npx playwright test --list` against a real pushed Contract-level draft resolves its schema import with no error
+  - Re-verify live: a full module-wide run (all three levels together) reaches real per-test pass/fail counts, not an abort at file-load time
