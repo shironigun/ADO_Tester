@@ -75,7 +75,7 @@
 | QAL-062 | Fix Playwright runtime npm/npx spawn failure on Windows | COMPLETED | 2026-07-01 | 2026-07-01 | 6 compounding layers found+fixed live (see log): npm/npx PATHEXT resolution, Which() extension-ordering, testDir level-name casing, npm ci→install (no lockfile) + exit-code checks, wrong Allure package name, node_modules junction (2 locations). Real run now shows genuine Failed/Passed counts from real Playwright execution |
 | QAL-063 | Fix QaPipelinesController DI resolution crash | COMPLETED | 2026-07-01 | 2026-07-01 | PipelineWatcherHostedService now registered as singleton + exposed as IHostedService via factory; all 5 endpoints (list/add/patch/delete/run-latest) verified live via curl, no 500s |
 | QAL-064 | Fix api/qaLoop.ts — every method targets the wrong URL | COMPLETED | 2026-07-01 | 2026-07-01 | All 11 routes corrected; also fixed 3 compounding data-shape bugs found live (see log): SurfaceRow field names/PascalCase-casing, DraftsByLevel level-casing, PushPanel's non-existent push-time plan/suite picker. Verified live: session list, detail, coverage save, drafts-by-level counts, push panel all round-trip correctly |
-| QAL-065 | Fix api/qaRuns.ts + api/qaPipelines.ts missing {projectId} segment | NOT STARTED | | | `/qa-runs` and `/qa-pipelines` list views show false-empty states |
+| QAL-065 | Fix api/qaRuns.ts + api/qaPipelines.ts missing {projectId} segment | COMPLETED | 2026-07-01 | 2026-07-01 | Also fixed 2 wire-shape bugs found live: TestRunSummary had a `reportPath` field that doesn't exist on the real DTO (only TestRunDetail has it) — drawer now reads `detail?.reportPath`; PipelineWatchDto had wrong field names (`lastBuildId`/`lastRunAt` vs real `lastSeenBuildId`/`lastPollAt`/`lastPollError`). Verified live: both pages show real data |
 | QAL-066 | Fix ModuleAnalyzerAgent source-fetch for nested modules | NOT STARTED | | | `SourceDirs`/`Extensions` dead fields; module-name-as-scopePath 404s for any module not at repo root (confirmed against real CRM Project repo) |
 | QAL-067 | Fix multi-case Endpoint draft tag-rewrite corruption on push | NOT STARTED | | | Confirmed live by pushing real ADO Test Cases #174569-174571: shared spec file ends up with all 3 cases tagged with the FIRST case's id → silent false-pass for 2 of 3 |
 | QAL-068 | Wire a real target base URL + credential for generated specs | NOT STARTED | | | Generated specs read `AUTOMATION_PROFILE` (a profile key, e.g. "infinity") as if it were a URL; no bearer/base-URL wiring exists anywhere |
@@ -87,13 +87,21 @@
 
 ## Summary
 - **Total Tasks:** 71 (61 build + 10 E2E fix-up)
-- **Completed:** 64
+- **Completed:** 65
 - **In Progress:** 0
-- **Not Started:** 7 (QAL-065..071)
+- **Not Started:** 6 (QAL-066..071)
 
 ---
 
 ## Log
+### 2026-07-01 (QAL-065)
+- **QAL-065** COMPLETED — `client/src/api/qaRuns.ts`: `listRunsPage`/`getRunDetail` now take `projectId` and hit `/api/qaloop/runs/{projectId}` / `/api/qaloop/runs/detail/{runId}`. `client/src/api/qaPipelines.ts`: `listWatches`/`addWatch` now take `projectId` and hit `/api/qaloop/pipelines/{projectId}`.
+- Found 2 more wire-shape bugs live while verifying (same pattern as QAL-064 — URL fixes alone don't make a screen work if the payload shape is also wrong):
+  - `TestRunSummary`'s FE type had a `reportPath` field that doesn't exist on the real `TestRunSummary.cs` (only `TestRunDetail` carries it) — `QaRunsPage`'s drawer was reading `run.reportPath` (always undefined) instead of `detail?.reportPath`. Fixed the type split and the read site; also added the real-but-missing `levelFilter`/`errorMessage` (Summary) and `projectId`/`testPlanId`/`testSuiteId`/`junitPath` (Detail) fields.
+  - `PipelineWatchDto`'s FE type used `lastBuildId`/`lastRunAt`, which don't exist on the real DTO (`lastSeenBuildId`/`lastPollAt`/`lastPollError`) — `WatchCard` always showed "Never" and no build chip regardless of real poll history. Fixed the field names and surfaced `lastPollError` inline.
+- Live verification: `/qa-runs` now shows the full real run history table (previously "No runs yet"); `/qa-pipelines` shows the real "Lead QA" card with the correct last-poll timestamp and build number (previously "No pipeline watchers").
+- `npm run build` + `npm run lint` clean on touched files.
+
 ### 2026-07-01 (QAL-064)
 - **QAL-064** COMPLETED — `client/src/api/qaLoop.ts`: all 11 methods now target the real `QaLoopController` routes (`startScan`/`listSessionsPage` take a `projectId` param matching the `authorTests.ts` convention; `patchDraft`/`pushDraft` no longer take a phantom `sessionId` path segment; `pushSession` takes no body — the real endpoint reads Plan/Suite/Story from the session itself). `saveAnalysis` now sends `{module, rows}` (full-replace) instead of a bare row array.
 - Fixing the URLs alone wasn't enough to make the screen work — found and fixed 3 more compounding bugs live in `qaLoop.tsx` while verifying:

@@ -796,7 +796,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - A toast or inline error surfaces on any failed mutation going forward (currently a 404 fails silently — worth a small UX guard alongside the URL fix)
 
 #### QAL-065: Fix api/qaRuns.ts + api/qaPipelines.ts missing {projectId} path segment
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-065
 - **Description:** A milder version of QAL-064: single-id action endpoints (`triage`, `fileBugs`, `previewImpact`, `runStreamUrl`, `updateWatch`, `deleteWatch`, `runLatest`) happen to hit the correct URL, but `listRunsPage` (`GET /api/qaloop/runs` instead of `GET /api/qaloop/runs/{projectId}`), `getRunDetail` (`GET /api/qaloop/runs/{id}` instead of `GET /api/qaloop/runs/detail/{id}`), `listWatches` (`GET /api/qaloop/pipelines` instead of `GET /api/qaloop/pipelines/{projectId}`), and `addWatch` (same miss) are all missing a path segment. Confirmed live: `/qa-runs` shows "No runs yet" and `/qa-pipelines` shows "No pipeline watchers" via 404s that fail silently, independent of whether any data exists.
 - **File:** `client/src/api/qaRuns.ts`, `client/src/api/qaPipelines.ts`

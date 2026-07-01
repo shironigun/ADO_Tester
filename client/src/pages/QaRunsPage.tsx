@@ -22,6 +22,7 @@ import {
   startRun, listRunsPage, getRunDetail, triage, fileBugs, runStreamUrl,
   type TestRunSummary, type TestRunDetail, type TestFailureDto,
 } from '../api/qaRuns'
+import { PROJECT_ID } from '../config/env'
 
 const IN_FLIGHT: string[] = ['Queued', 'Running']
 
@@ -120,8 +121,10 @@ function RunDrawer({ run, onClose }: { run: TestRunSummary; onClose: () => void 
           </Stack>
           <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: 'wrap' }}>
             {adoRunUrl && <Button size="small" startIcon={<OpenInNewIcon />} href={adoRunUrl} target="_blank" rel="noopener">ADO Test Run</Button>}
-            {!IN_FLIGHT.includes(run.status) && (
-              run.reportPath
+            {/* reportPath only exists on TestRunDetail, not the list-row TestRunSummary — must read
+                from the fetched detail, not the `run` prop. */}
+            {!IN_FLIGHT.includes(run.status) && !detailQ.isLoading && (
+              detail?.reportPath
                 ? <>
                     <Button size="small" startIcon={<OpenInNewIcon />} component="a" href={`/api/qaloop/runs/${run.id}/report`} target="_blank" rel="noopener">Report ↗</Button>
                     <Button size="small" startIcon={<DownloadIcon />} component="a" href={`/api/qaloop/runs/${run.id}/report?dl=true`} download={`qa-run-${run.id}-report.html`}>Download</Button>
@@ -235,7 +238,7 @@ export default function QaRunsPage() {
   const TAKE = 20
   const runsQ = useQuery({
     queryKey: ['qa-runs', page],
-    queryFn: () => listRunsPage(TAKE, page * TAKE),
+    queryFn: () => listRunsPage(PROJECT_ID, TAKE, page * TAKE),
     refetchInterval: (q) => {
       const items = q.state.data?.items ?? []
       return items.some(r => IN_FLIGHT.includes(r.status)) ? 3000 : false

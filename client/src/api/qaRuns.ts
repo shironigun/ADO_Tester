@@ -5,21 +5,25 @@ import { apiUrl } from '../config/env'
 
 export type RunStatus = 'Queued' | 'Running' | 'Passed' | 'Failed' | 'Error' | 'Cancelled'
 
+// Matches TestRunSummary.cs exactly — NOTE reportPath/errorMessage only exist on TestRunDetail
+// (the list endpoint's DTO genuinely doesn't carry them; using run.reportPath from a list row is a
+// silent no-op, not a missing-data bug).
 export interface TestRunSummary {
   id: number
   module: string | null
+  levelFilter: string | null
   profile: string
+  triggerSource: string
   status: RunStatus
   passed: number
   failed: number
   skipped: number
   durationMs: number
-  triggerSource: string
-  createdAt: string
+  adoTestRunId: number | null
+  errorMessage: string | null
   startedAt: string | null
   finishedAt: string | null
-  adoTestRunId: number | null
-  reportPath: string | null
+  createdAt: string
   activityEnabled: boolean
 }
 
@@ -36,13 +40,16 @@ export interface TestFailureDto {
 }
 
 export interface TestRunDetail extends TestRunSummary {
-  levelFilter: string | null
+  projectId: number
   tagFilter: string | null
+  testPlanId: number | null
+  testSuiteId: number | null
   triggerPipelineId: number | null
   triggerBuildId: number | null
   triggerCommitSha: string | null
   impactAnalysisJson: string | null
-  errorMessage: string | null
+  junitPath: string | null
+  reportPath: string | null
   failures: TestFailureDto[]
 }
 
@@ -72,15 +79,15 @@ export async function startRun(req: StartRunRequest): Promise<{ runId: number }>
 }
 
 export async function listRunsPage(
-  take: number, skip: number,
+  projectId: number, take: number, skip: number,
 ): Promise<{ total: number; items: TestRunSummary[] }> {
   const { data } = await api.get<{ total: number; items: TestRunSummary[] }>(
-    '/api/qaloop/runs', { params: { take, skip } })
+    `/api/qaloop/runs/${projectId}`, { params: { take, skip } })
   return data
 }
 
 export async function getRunDetail(id: number): Promise<TestRunDetail> {
-  const { data } = await api.get<TestRunDetail>(`/api/qaloop/runs/${id}`)
+  const { data } = await api.get<TestRunDetail>(`/api/qaloop/runs/detail/${id}`)
   return data
 }
 
