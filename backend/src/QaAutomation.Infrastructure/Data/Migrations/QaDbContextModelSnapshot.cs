@@ -28,6 +28,10 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                         .HasColumnType("INTEGER")
                         .HasColumnName("AdoTestCaseId");
 
+                    b.Property<int?>("CaseIndex")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("CaseIndex");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT")
                         .HasColumnName("CreatedAt");

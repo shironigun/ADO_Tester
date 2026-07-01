@@ -259,6 +259,7 @@ public sealed class QaDbContext : DbContext
             e.Property(x => x.SchemaJson).HasColumnName("SchemaJson");
             e.Property(x => x.SpecCode).HasColumnName("SpecCode").IsRequired();
             e.Property(x => x.SpecFilePath).HasColumnName("SpecFilePath");
+            e.Property(x => x.CaseIndex).HasColumnName("CaseIndex");
             e.Property(x => x.Tags).HasColumnName("Tags");
             e.Property(x => x.SourceRoutesJson).HasColumnName("SourceRoutesJson");
             e.Property(x => x.ErrorMessage).HasColumnName("ErrorMessage");

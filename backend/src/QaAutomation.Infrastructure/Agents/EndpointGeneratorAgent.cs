@@ -24,11 +24,11 @@ public sealed class EndpointGeneratorAgent
             _llm, AgentPrompts.EndpointGeneratorSystem, userPrompt, '{', progress, emit,
             label: "EndpointGenerator", cancellationToken: ct);
 
-        var specCode = "";
+        var rawSpecCode = "";
         var cases = new List<(string Label, int StatusCode)>();
         if (specData is JsonObject so)
         {
-            specCode = TitleTag.EnsureInSpec(JsonUtils.StrOr(so, "spec"), $"Endpoint: {route.Method} {route.Route}");
+            rawSpecCode = JsonUtils.StrOr(so, "spec");
             if (so["cases"] is JsonArray ca)
                 foreach (var c in ca)
                     if (c is JsonObject co)
@@ -36,6 +36,11 @@ public sealed class EndpointGeneratorAgent
         }
         if (cases.Count == 0)
             cases = [("200 happy path", 200), ("401 without bearer", 401), ("400 on invalid input", 400)];
+
+        // QAL-067: tag each case's test( block with its own [<tcId-pending:N>] placeholder (in source
+        // order) BEFORE splitting into per-case GeneratedSpecs — the file is shared, so this must happen
+        // once against the whole spec, not per-case against an already-scattered copy.
+        var specCode = TitleTag.EnsureIndexedInSpec(rawSpecCode, cases.Count);
 
         // Pass 2: ADO Test Cases for each case
         var tcData = await JsonUtils.CompleteJsonAsync(
@@ -48,14 +53,17 @@ public sealed class EndpointGeneratorAgent
         for (var i = 0; i < cases.Count; i++)
         {
             var tc = i < tcs.Count ? tcs[i] : FallbackTestCase(route, cases[i].Label, cases[i].StatusCode);
-            tc.Title = TitleTag.EnsureTitle(tc.Title, $"Endpoint: {route.Method} {route.Route} - {cases[i].Label}");
+            tc.Title = TitleTag.EnsureTitle(tc.Title, $"Endpoint: {route.Method} {route.Route} - {cases[i].Label}", caseIndex: i);
             specs.Add(new GeneratedSpec
             {
                 Level = "endpoint",
                 Title = tc.Title,
-                SpecCode = i == 0 ? specCode : "",  // one spec file groups all cases
+                // QAL-067: ALL cases carry the same shared file's code (not just case 0) so PersistDraft
+                // can give every case a SpecFilePath — case index is what disambiguates them on push.
+                SpecCode = specCode,
                 SourceRoutes = [$"{route.Method} {route.Route}"],
                 TestCase = tc,
+                CaseIndex = i,
             });
         }
         return specs;
@@ -93,7 +101,9 @@ public sealed class EndpointGeneratorAgent
 
     private static GeneratedTestCase FallbackTestCase(RouteInfo route, string label, int statusCode) => new()
     {
-        Title = $"{TitleTag.Pending} Endpoint: {route.Method} {route.Route} - {label}",
+        // No tag embedded here — the caller's EnsureTitle(..., caseIndex: i) adds the correct
+        // per-case [<tcId-pending:N>] tag; pre-embedding the bare Pending tag would double-tag it.
+        Title = $"Endpoint: {route.Method} {route.Route} - {label}",
         Preconditions = "",
         Steps =
         [

@@ -117,6 +117,77 @@ public sealed class QaLoopOrchestratorTests
     }
 
     [Fact]
+    public async Task Push_of_shared_multicase_spec_in_scrambled_order_rewrites_each_cases_own_tag_only()
+    {
+        // QAL-067: a shared Endpoint spec file has 3 test( ) blocks, one per case, each carrying its
+        // own INDEXED placeholder. Pushing case 1 before case 0 before case 2 must still land each
+        // case's real ADO id on its own line — a global unscoped string replace would let whichever
+        // case pushes FIRST stomp every other case's still-pending placeholder in the shared file.
+        using var h = Harness.Create(new StubLlmClient());
+        var sid = await h.SeedSessionAsync(module: "Deals", workItemId: null);
+
+        var specPath = Path.Combine(Path.GetTempPath(), $"qal067_shared_{Guid.NewGuid():N}.spec.ts");
+        const string sharedSpec = """
+            import { test, expect } from '@playwright/test';
+
+            test('[<tcId-pending:0>] Endpoint: GET /deals - 200 happy path', async () => {
+              expect(200).toBe(200);
+            });
+
+            test('[<tcId-pending:1>] Endpoint: GET /deals - 401 without bearer', async () => {
+              expect(401).toBe(401);
+            });
+
+            test('[<tcId-pending:2>] Endpoint: GET /deals - 400 on invalid input', async () => {
+              expect(400).toBe(400);
+            });
+            """;
+        File.WriteAllText(specPath, sharedSpec);
+        try
+        {
+            var d0 = await h.SeedDraftAsync(sid, "[<tcId-pending:0>] Endpoint: GET /deals - 200 happy path",
+                ApiDraftStatus.Approved, caseIndex: 0, specFilePath: specPath);
+            var d1 = await h.SeedDraftAsync(sid, "[<tcId-pending:1>] Endpoint: GET /deals - 401 without bearer",
+                ApiDraftStatus.Approved, caseIndex: 1, specFilePath: specPath);
+            var d2 = await h.SeedDraftAsync(sid, "[<tcId-pending:2>] Endpoint: GET /deals - 400 on invalid input",
+                ApiDraftStatus.Approved, caseIndex: 2, specFilePath: specPath);
+
+            // Scrambled push order: 1, 0, 2.
+            var pushed1 = await h.Orchestrator.PushDraftAsync(d1, testPlanId: 10, testSuiteId: 20);
+            var pushed0 = await h.Orchestrator.PushDraftAsync(d0, testPlanId: 10, testSuiteId: 20);
+            var pushed2 = await h.Orchestrator.PushDraftAsync(d2, testPlanId: 10, testSuiteId: 20);
+
+            var ids = new[] { pushed0.AdoTestCaseId, pushed1.AdoTestCaseId, pushed2.AdoTestCaseId };
+            Assert.All(ids, id => Assert.NotNull(id));
+            Assert.Equal(3, ids.Distinct().Count());   // three distinct real ADO ids, one per case
+
+            // Each draft's own title carries only ITS id — never another case's placeholder or id.
+            Assert.Contains($"[{pushed0.AdoTestCaseId}]", pushed0.Title);
+            Assert.Contains($"[{pushed1.AdoTestCaseId}]", pushed1.Title);
+            Assert.Contains($"[{pushed2.AdoTestCaseId}]", pushed2.Title);
+            Assert.DoesNotContain("[<tcId-pending", pushed0.Title);
+            Assert.DoesNotContain("[<tcId-pending", pushed1.Title);
+            Assert.DoesNotContain("[<tcId-pending", pushed2.Title);
+
+            // The physical file (read once, after all 3 pushes) must show each case's OWN id on its
+            // OWN test( ) line, with no leftover placeholders and no cross-contamination.
+            var finalText = File.ReadAllText(specPath);
+            var lines = finalText.Split('\n');
+            var line0 = Assert.Single(lines, l => l.Contains("200 happy path"));
+            var line1 = Assert.Single(lines, l => l.Contains("401 without bearer"));
+            var line2 = Assert.Single(lines, l => l.Contains("400 on invalid input"));
+            Assert.Contains($"[{pushed0.AdoTestCaseId}]", line0);
+            Assert.Contains($"[{pushed1.AdoTestCaseId}]", line1);
+            Assert.Contains($"[{pushed2.AdoTestCaseId}]", line2);
+            Assert.DoesNotContain("tcId-pending", finalText);   // no placeholder survives
+        }
+        finally
+        {
+            try { File.Delete(specPath); } catch { }
+        }
+    }
+
+    [Fact]
     public async Task Push_skips_LinkTestedBy_when_no_WorkItemId()
     {
         using var h = Harness.Create(new StubLlmClient());
@@ -208,12 +279,13 @@ public sealed class QaLoopOrchestratorTests
             return session.Id;
         }
 
-        public async Task SeedDraftAsync(
-            int sessionId, string title, ApiDraftStatus status, int? adoId = null)
+        public async Task<int> SeedDraftAsync(
+            int sessionId, string title, ApiDraftStatus status, int? adoId = null,
+            int? caseIndex = null, string? specFilePath = null)
         {
             using var scope = Provider.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
-            db.ApiTestDrafts.Add(new ApiTestDraft
+            var draft = new ApiTestDraft
             {
                 SessionId = sessionId,
                 Title = title,
@@ -222,10 +294,14 @@ public sealed class QaLoopOrchestratorTests
                 Status = status,
                 AdoTestCaseId = adoId,
                 Level = TestLevel.Contract,
+                CaseIndex = caseIndex,
+                SpecFilePath = specFilePath,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
-            });
+            };
+            db.ApiTestDrafts.Add(draft);
             await db.SaveChangesAsync();
+            return draft.Id;
         }
 
         public async Task<ApiTestSession> WaitForTerminalAsync(
