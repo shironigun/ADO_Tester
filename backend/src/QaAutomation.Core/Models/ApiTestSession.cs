@@ -13,8 +13,13 @@ public sealed class ApiTestSession
     public int? TestPlanId { get; set; }
     public int? TestSuiteId { get; set; }
     /// <summary>JSON array of repo-relative directories to scan (e.g. ["Lead/src/.../Deal"]).
-    /// When null/empty, FetchSourceAsync falls back to treating Module as a top-level scopePath.</summary>
+    /// When null/empty, FetchSourceAsync falls back to treating Module as a top-level scopePath.
+    /// For frontend-module-driven scans this is DERIVED (backend dirs traced from the frontend apis/).</summary>
     public string? SourceDirsJson { get; set; }
+    /// <summary>Selected frontend module route (e.g. "/deals"), when the scan was module-driven.</summary>
+    public string? FrontendModule { get; set; }
+    /// <summary>Repo-relative frontend component folder whose apis/ the scan traces to the backend.</summary>
+    public string? FrontendPath { get; set; }
     public ApiSessionStatus Status { get; set; } = ApiSessionStatus.Analyzing;
     /// <summary>Serialized InventoryDoc JSON.</summary>
     public string? InventoryJson { get; set; }

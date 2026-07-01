@@ -22,8 +22,9 @@ import { axiosMessage } from '../../common/errors'
 
 import {
   startScan, listSessionsPage, getSessionDetail, saveAnalysis, generateDrafts, patchDraft,
-  approveAllDrafts, pushSession, cancelSession, sessionStreamUrl, LEVEL_NAMES,
+  approveAllDrafts, pushSession, cancelSession, sessionStreamUrl, listFrontendModules, LEVEL_NAMES,
   type ApiSessionDetail, type ApiTestDraftDto, type ScanStartRequest, type SurfaceRow,
+  type FrontendModule,
 } from '../../api/qaLoop'
 import { getPlans, getSuites, searchWorkItems } from '../../api/authorTests'
 import type { TestPlan, TestSuite } from '../../api/authorTests'
@@ -60,7 +61,9 @@ const ANALYTICS_COLUMNS: AnalyticsColumn[] = [
 // ── Start form ────────────────────────────────────────────────────────────────
 
 export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps) {
-  const [module, setModule]           = useState('')
+  const [fmodule, setFmodule]         = useState<FrontendModule | null>(null)
+  const [fmodules, setFmodules]       = useState<FrontendModule[]>([])
+  const [fmLoading, setFmLoading]     = useState(false)
   const [repo, setRepo]               = useState<string | null>(null)
   const [branch, setBranch]           = useState<string | null>(null)
   const [sourceDirs, setSourceDirs]   = useState('')
@@ -77,6 +80,12 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
   const [branchesLoading, setBranchesLoading] = useState(false)
   const [loading, setLoading]         = useState(false)
 
+  async function loadFrontendModules() {
+    if (fmodules.length > 0) return
+    setFmLoading(true)
+    try { setFmodules(await listFrontendModules()) } catch { /* ignore */ }
+    finally { setFmLoading(false) }
+  }
   async function loadRepos() {
     if (repos.length > 0) return
     setReposLoading(true)
@@ -105,12 +114,14 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!module.trim()) return
+    if (!fmodule) return
     setLoading(true)
     try {
       const dirs = sourceDirs.split(/[,\n]/).map(d => d.trim()).filter(Boolean)
       const req: ScanStartRequest = {
-        module: module.trim(),
+        module: fmodule.moduleName,               // derived from the frontend module
+        frontendModule: fmodule.routePath,
+        frontendPath: fmodule.componentPath,
         repository: repo || undefined,
         branch: branch || undefined,
         sourceDirs: dirs.length > 0 ? dirs : undefined,
@@ -131,8 +142,17 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
   return (
     <Box component="form" onSubmit={handleSubmit}>
       <Stack spacing={2}>
-        <TextField required label="Module" size="small" value={module}
-          onChange={e => setModule(e.target.value)} placeholder="e.g. deals" />
+        <Autocomplete
+          options={fmodules} value={fmodule} loading={fmLoading}
+          getOptionLabel={m => `${m.moduleName} — ${m.routePath}`}
+          isOptionEqualToValue={(a, b) => a.componentPath === b.componentPath}
+          onOpen={loadFrontendModules}
+          onChange={(_, v) => setFmodule(v)}
+          renderInput={p => <TextField {...p} required label="Frontend module" size="small"
+            helperText={fmLoading ? 'Loading modules…'
+              : fmodule ? fmodule.url
+              : 'Pick a product module — the scan traces its frontend to the backend API'} />}
+        />
         <Autocomplete
           options={repos} value={repo} loading={reposLoading}
           onOpen={loadRepos}
@@ -172,7 +192,7 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
         />
         <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
           <Button onClick={onClose} disabled={loading}>Cancel</Button>
-          <Button type="submit" variant="contained" disabled={loading || !module.trim()}
+          <Button type="submit" variant="contained" disabled={loading || !fmodule}
             startIcon={loading ? <CircularProgress size={16} /> : undefined}>
             Start Scan
           </Button>

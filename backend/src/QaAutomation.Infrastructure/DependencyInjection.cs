@@ -236,6 +236,9 @@ public static class DependencyInjection
                 o.ReportProvider = Env("QALOOP_REPORT_PROVIDER") ?? o.ReportProvider;
                 if (Env("QALOOP_ACTIVITY_ENABLED") is { } ae && bool.TryParse(ae, out var aev))
                     o.ActivityEnabled = aev;
+                o.FrontendRepo = Env("QALOOP_FRONTEND_REPO") ?? o.FrontendRepo;
+                o.FrontendRoot = Env("QALOOP_FRONTEND_ROOT") ?? o.FrontendRoot;
+                o.FrontendBaseUrl = Env("QALOOP_FRONTEND_BASE_URL") ?? o.FrontendBaseUrl;
             })
             .PostConfigure<RuntimeSettings>((o, rt) =>
             {
@@ -246,6 +249,9 @@ public static class DependencyInjection
                 o.ReportProvider = rt.Get("qaloop.report_provider") ?? o.ReportProvider;
                 if (rt.Get("qaloop.activity_enabled") is { } ae && bool.TryParse(ae, out var aev))
                     o.ActivityEnabled = aev;
+                o.FrontendRepo = rt.Get("qaloop.frontend_repo") ?? o.FrontendRepo;
+                o.FrontendRoot = rt.Get("qaloop.frontend_root") ?? o.FrontendRoot;
+                o.FrontendBaseUrl = rt.Get("qaloop.frontend_base_url") ?? o.FrontendBaseUrl;
             });
 
         services.AddSingleton<IQaLoopOrchestrator, QaLoopOrchestrator>();

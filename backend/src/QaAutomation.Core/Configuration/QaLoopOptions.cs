@@ -23,4 +23,14 @@ public sealed class QaLoopOptions
 
     /// <summary>When false, verbose SSE streaming + EventLogJson are suppressed for new rows.</summary>
     public bool ActivityEnabled { get; set; } = true;
+
+    // ── Frontend-module-driven scan (QA Loop) ────────────────────────────────
+    /// <summary>Repo holding the product SPA; the New Scan module dropdown parses its route file.</summary>
+    public string FrontendRepo { get; set; } = "Your Repo";
+
+    /// <summary>Repo-relative SPA source root (holds routes/ and components/).</summary>
+    public string FrontendRoot { get; set; } = "web-app/src/target-crm/src";
+
+    /// <summary>Deployed base URL; each module's reference URL is FrontendBaseUrl + its route path.</summary>
+    public string FrontendBaseUrl { get; set; } = "https://your-frontend-qa.example.net";
 }

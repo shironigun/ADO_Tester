@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using QaAutomation.Api.Streaming;
 using QaAutomation.Core;
 using QaAutomation.Core.Abstractions;
+using QaAutomation.Core.Agents;
 using QaAutomation.Core.Configuration;
 using QaAutomation.Core.Contracts;
 using QaAutomation.Core.Models;
@@ -22,18 +23,43 @@ public sealed class QaLoopController : ControllerBase
     private readonly IQaLoopOrchestrator _orchestrator;
     private readonly IEventBus _bus;
     private readonly QaDbContext _db;
+    private readonly IAzureDevOpsClient _ado;
     private readonly IOptions<QaLoopOptions> _opts;
     private readonly ILogger<QaLoopController> _log;
 
     public QaLoopController(
-        IQaLoopOrchestrator orchestrator, IEventBus bus, QaDbContext db,
+        IQaLoopOrchestrator orchestrator, IEventBus bus, QaDbContext db, IAzureDevOpsClient ado,
         IOptions<QaLoopOptions> opts, ILogger<QaLoopController> log)
     {
         _orchestrator = orchestrator;
         _bus = bus;
         _db = db;
+        _ado = ado;
         _opts = opts;
         _log = log;
+    }
+
+    /// <summary>Product frontend modules parsed from the SPA route file — the strict source for the
+    /// New Scan module dropdown. Reuses GetFileContentAsync + the pure FrontendModuleParser.</summary>
+    [HttpGet("frontend-modules")]
+    public async Task<IActionResult> FrontendModules(
+        [FromQuery] string? repository, [FromQuery] string? branch, CancellationToken ct)
+    {
+        var opts = _opts.Value;
+        var repo = string.IsNullOrWhiteSpace(repository) ? opts.FrontendRepo : repository;
+        var root = opts.FrontendRoot.Trim('/');
+        try
+        {
+            var content = await _ado.GetFileContentAsync(
+                $"{root}/routes/Routes.tsx", @ref: branch, repoId: repo, ct: ct);
+            var modules = FrontendModuleParser.Parse(content, root, opts.FrontendBaseUrl);
+            return Ok(modules);
+        }
+        catch (Exception e)
+        {
+            _log.LogWarning("Frontend module discovery failed: {Error}", e.Message);
+            return StatusCode(502, new { detail = e.Message });
+        }
     }
 
     // ── Session CRUD ──────────────────────────────────────────────────────────
@@ -65,6 +91,8 @@ public sealed class QaLoopController : ControllerBase
             TestPlanId = req.TestPlanId,
             TestSuiteId = req.TestSuiteId,
             SourceDirsJson = req.SourceDirs is { Count: > 0 } ? System.Text.Json.JsonSerializer.Serialize(req.SourceDirs) : null,
+            FrontendModule = req.FrontendModule,
+            FrontendPath = req.FrontendPath,
             AutoHandoff = req.AutoHandoff,
             ActivityEnabled = _opts.Value.ActivityEnabled,
             Status = ApiSessionStatus.Analyzing,
