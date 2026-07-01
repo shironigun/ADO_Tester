@@ -16,6 +16,10 @@ public sealed class GeneratedSpec
     public string? SchemaJson { get; init; }
     public List<string> SourceRoutes { get; init; } = [];
     public GeneratedTestCase? TestCase { get; init; }
+    /// <summary>QAL-067: index of this case within a shared multi-case spec file (Endpoint's 200/401/400
+    /// cases all live in ONE physical file). Null for Contract/Workflow, which are always single-case.
+    /// Drives which of the file's several [<tcId-pending:N>] placeholders this draft's push may rewrite.</summary>
+    public int? CaseIndex { get; init; }
 }
 
 /// <summary>
@@ -26,15 +30,45 @@ public static partial class TitleTag
 {
     public const string Pending = "[<tcId-pending>]";
 
-    /// <summary>Returns spec text guaranteed to contain a [<tcId-pending>] tag in the test title line.
-    /// If the model omitted it, injects it at the start of the first test/describe title found.</summary>
-    public static string EnsureInSpec(string specCode, string title)
+    /// <summary>QAL-067: the per-case placeholder for case <paramref name="caseIndex"/> of a shared
+    /// multi-case spec file, e.g. "[<tcId-pending:1>]". Null index returns the plain <see cref="Pending"/>
+    /// tag used by single-case levels (Contract/Workflow).</summary>
+    public static string PendingFor(int? caseIndex) =>
+        caseIndex is { } i ? $"[<tcId-pending:{i}>]" : Pending;
+
+    /// <summary>Returns spec text guaranteed to contain a pending tag in the test title line. If the
+    /// model omitted it, injects it at the start of the first test/describe title found.</summary>
+    public static string EnsureInSpec(string specCode, string title, int? caseIndex = null)
     {
-        if (specCode.Contains(Pending) || System.Text.RegularExpressions.Regex.IsMatch(specCode, @"\[\d+\]"))
+        var tag = PendingFor(caseIndex);
+        if (specCode.Contains(tag) || System.Text.RegularExpressions.Regex.IsMatch(specCode, @"\[\d+\]"))
             return specCode;
         // Inject into the first test( or describe( title string.
         var pattern = new System.Text.RegularExpressions.Regex(@"(test|describe)\s*\(\s*(['""])");
-        return pattern.Replace(specCode, m => $"{m.Groups[1].Value}({m.Groups[2].Value}{Pending} ", 1);
+        return pattern.Replace(specCode, m => $"{m.Groups[1].Value}({m.Groups[2].Value}{tag} ", 1);
+    }
+
+    /// <summary>QAL-067: same as <see cref="EnsureInSpec"/> but for a shared multi-case spec file — tags
+    /// the Nth untagged test(/describe( occurrence with [<tcId-pending:N>], in source order, for N in
+    /// [0, caseCount). If the model already tagged some/all titles (any [<tcId-pending...] or [\d+] tag),
+    /// those occurrences are left alone and only the remaining untagged ones get indexed tags, so this is
+    /// safe to call even when the model partially followed instructions.</summary>
+    public static string EnsureIndexedInSpec(string specCode, int caseCount)
+    {
+        var pattern = new System.Text.RegularExpressions.Regex(@"(test|describe)\s*\(\s*(['""])");
+        var nextIndex = 0;
+        return pattern.Replace(specCode, m =>
+        {
+            // Peek at the text right after the opening quote — if it's already tagged, skip it untouched.
+            var tailStart = m.Index + m.Length;
+            var tail = specCode.Substring(tailStart, Math.Min(64, specCode.Length - tailStart));
+            if (tail.Contains("[<tcId-pending") || System.Text.RegularExpressions.Regex.IsMatch(tail, @"^\[\d+\]"))
+                return m.Value;
+            if (nextIndex >= caseCount)
+                return m.Value;
+            var tag = PendingFor(nextIndex++);
+            return $"{m.Groups[1].Value}({m.Groups[2].Value}{tag} ";
+        });
     }
 }
 
@@ -143,11 +177,19 @@ public sealed class ContractGeneratorAgent
 // Extension for TitleTag used by all three generators
 public static partial class TitleTag
 {
-    /// <summary>Ensures the title starts with [<tcId-pending>]; if not, prepends it.</summary>
-    public static string EnsureTitle(string title, string fallbackSuffix)
+    /// <summary>Ensures the title starts with its pending tag; if not, prepends it. If the title already
+    /// carries the WRONG pending tag (e.g. the model emitted the bare tag but this case needs an indexed
+    /// one), swaps it for the correct one instead of double-tagging. A real numeric tag (already pushed)
+    /// is left untouched.</summary>
+    public static string EnsureTitle(string title, string fallbackSuffix, int? caseIndex = null)
     {
-        if (title.Contains(Pending) || System.Text.RegularExpressions.Regex.IsMatch(title, @"^\[.*\d+.*\]"))
+        var tag = PendingFor(caseIndex);
+        if (title.Contains(tag))
             return title;
-        return title.Length > 0 ? $"{Pending} {title}" : $"{Pending} {fallbackSuffix}";
+        if (System.Text.RegularExpressions.Regex.IsMatch(title, @"^\[.*\d+.*\]"))
+            return title;   // already has a real numeric tag — leave it alone
+        if (title.Contains(Pending))
+            return title.Replace(Pending, tag);   // wrong (bare) pending tag present — fix it up
+        return title.Length > 0 ? $"{tag} {title}" : $"{tag} {fallbackSuffix}";
     }
 }

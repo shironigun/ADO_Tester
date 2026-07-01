@@ -108,7 +108,7 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
 
         draft.AdoTestCaseId = tcId;
         draft.Status = ApiDraftStatus.Pushed;
-        draft.Title = RewriteTag(draft.Title, tcId);
+        draft.Title = RewriteTag(draft.Title, tcId, draft.CaseIndex);
         draft.UpdatedAt = DateTime.UtcNow;
         RewriteSpecOnDisk(draft, tcId);
 
@@ -440,7 +440,7 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
                 // Rewrite [<tcId-pending>] → [id] on both the draft title and the spec file on disk
                 draft.AdoTestCaseId = tcId;
                 draft.Status = ApiDraftStatus.Pushed;
-                draft.Title = RewriteTag(draft.Title, tcId);
+                draft.Title = RewriteTag(draft.Title, tcId, draft.CaseIndex);
                 draft.UpdatedAt = DateTime.UtcNow;
                 RewriteSpecOnDisk(draft, tcId);
                 pushed++;
@@ -557,6 +557,7 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
             SourceRoutesJson = spec.SourceRoutes.Count > 0
                 ? JsonSerializer.Serialize(spec.SourceRoutes)
                 : null,
+            CaseIndex = spec.CaseIndex,
             Status = ApiDraftStatus.Draft,
             SortOrder = sortOrder,
             CreatedAt = now,
@@ -569,12 +570,22 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
             {
                 var levelDir = Path.Combine(_scriptsDir, session.Module, level.ToDirName());
                 Directory.CreateDirectory(levelDir);
-                var slug = Slug(spec.TestCase?.Title ?? spec.Title);
+                // QAL-067: a multi-case spec (Endpoint's 200/401/400) is ONE shared physical file for
+                // all its cases — slug it from something identical across those cases (the route), not
+                // from the per-case title, or only case 0's write would ever "stick" as the group's file.
+                var slug = spec.CaseIndex is not null && spec.SourceRoutes.Count > 0
+                    ? Slug(spec.SourceRoutes[0])
+                    : Slug(spec.TestCase?.Title ?? spec.Title);
                 var specPath = Path.Combine(levelDir, $"{slug}.spec.ts");
-                File.WriteAllText(specPath, spec.SpecCode);
+                // Only case 0 actually needs to write the (identical) shared file to disk; cases 1..N
+                // still get SpecFilePath pointed at it so their push-time rewrite isn't a silent no-op.
+                if (spec.CaseIndex is null or 0)
+                {
+                    File.WriteAllText(specPath, spec.SpecCode);
+                    Pub(SessionKey(session.Id), EventKinds.Result, EventPhases.Generate,
+                        $"Spec written: {Path.GetFileName(specPath)}");
+                }
                 draft.SpecFilePath = specPath;
-                Pub(SessionKey(session.Id), EventKinds.Result, EventPhases.Generate,
-                    $"Spec written: {Path.GetFileName(specPath)}");
             }
             catch (Exception ex)
             {
@@ -601,10 +612,23 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
         }
     }
 
-    private static string RewriteTag(string title, int tcId) =>
-        title.Contains(TitleTag.Pending)
-            ? title.Replace(TitleTag.Pending, $"[{tcId}]")
-            : $"[{tcId}] {title}";
+    private static string RewriteTag(string title, int tcId, int? caseIndex) =>
+        RewriteTagText(title, tcId, caseIndex, out var rewritten) ? rewritten : $"[{tcId}] {title}";
+
+    /// <summary>QAL-067: replaces ONLY this draft's own placeholder ([<tcId-pending:N>] for a case-indexed
+    /// draft, or the plain [<tcId-pending>] for Contract/Workflow). A global/unscoped replace would let
+    /// case 0 pushing first stomp every other case's still-pending placeholder in a shared spec file.</summary>
+    private static bool RewriteTagText(string text, int tcId, int? caseIndex, out string rewritten)
+    {
+        var tag = TitleTag.PendingFor(caseIndex);
+        if (text.Contains(tag))
+        {
+            rewritten = text.Replace(tag, $"[{tcId}]");
+            return true;
+        }
+        rewritten = text;
+        return false;
+    }
 
     private static void RewriteSpecOnDisk(ApiTestDraft draft, int tcId)
     {
@@ -612,8 +636,8 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
         try
         {
             var text = File.ReadAllText(draft.SpecFilePath);
-            var updated = text.Replace(TitleTag.Pending, $"[{tcId}]");
-            if (updated != text) File.WriteAllText(draft.SpecFilePath, updated);
+            if (RewriteTagText(text, tcId, draft.CaseIndex, out var updated) && updated != text)
+                File.WriteAllText(draft.SpecFilePath, updated);
         }
         catch { /* best-effort disk rewrite */ }
     }
