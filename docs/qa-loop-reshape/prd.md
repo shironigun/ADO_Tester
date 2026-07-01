@@ -828,7 +828,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - A synthetic Playwright/JUnit run against the rewritten file maps each case's Pass/Fail back to its own distinct Test Case (no shared-id collisions)
 
 #### QAL-068: Wire a real target base URL + credential for generated specs
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-068
 - **Description:** Every generated spec resolves its target via `const BASE_URL = process.env.AUTOMATION_PROFILE ?? 'http://localhost:5000'` — but `PlaywrightRunner` only ever sets `AUTOMATION_PROFILE` to the DMS profile *key* (the literal string `"infinity"`), never a URL, confirmed by reading `SpawnAsync`'s only environment assignment (`psi.Environment["AUTOMATION_PROFILE"] = profile`). There is no `AUTOMATION_BEARER_TOKEN` or base-URL mapping anywhere in the runner or `.env`; `DmsProfileOptions.Infinity.Credentialed = true` is a registry flag with no actual secret or URL behind it. Even with QAL-062 fixed, every generated spec would try to fetch a malformed URL like `infinity/lead/deal/…` and fail before ever reaching a real endpoint.
 - **File:** `backend/src/QaAutomation.Core/Configuration/DmsProfileOptions.cs`, `backend/src/QaAutomation.Infrastructure/QaRuns/PlaywrightRunner.cs`, `backend/src/QaAutomation.Infrastructure/Agents/Prompts/contract_generator_system.txt`, `endpoint_generator_system.txt`, `workflow_generator_system.txt`, `.env.example`

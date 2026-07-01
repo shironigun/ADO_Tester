@@ -3,7 +3,7 @@
 ## Overview
 - **PRD:** prd.md
 - **Started:** 2026-06-30
-- **Status:** BUILD COMPLETE, E2E-VERIFICATION FIX-UP IN PROGRESS (61 of 61 build tasks done; QAL-062..071 opened 2026-07-01 from live E2E findings, 5 of 10 complete)
+- **Status:** BUILD COMPLETE, E2E-VERIFICATION FIX-UP IN PROGRESS (61 of 61 build tasks done; QAL-062..071 opened 2026-07-01 from live E2E findings, 6 of 10 complete)
 
 ---
 
@@ -78,7 +78,7 @@
 | QAL-065 | Fix api/qaRuns.ts + api/qaPipelines.ts missing {projectId} segment | COMPLETED | 2026-07-01 | 2026-07-01 | Also fixed 2 wire-shape bugs found live: TestRunSummary had a `reportPath` field that doesn't exist on the real DTO (only TestRunDetail has it) — drawer now reads `detail?.reportPath`; PipelineWatchDto had wrong field names (`lastBuildId`/`lastRunAt` vs real `lastSeenBuildId`/`lastPollAt`/`lastPollError`). Verified live: both pages show real data |
 | QAL-066 | Fix ModuleAnalyzerAgent source-fetch for nested modules | COMPLETED | 2026-07-01 | 2026-07-01 | `SourceDirsJson` column + migration; `ScanStartRequest.SourceDirs` persisted at scan start; `FetchSourceAsync` fetches per-dir via `ListRepoFilePathsAsync`, falls back to module-name heuristic only when empty; `QaLoopStartForm` gains a multiline "Source directories" field |
 | QAL-067 | Fix multi-case Endpoint draft tag-rewrite corruption on push | NOT STARTED | | | Confirmed live by pushing real ADO Test Cases #174569-174571: shared spec file ends up with all 3 cases tagged with the FIRST case's id → silent false-pass for 2 of 3 |
-| QAL-068 | Wire a real target base URL + credential for generated specs | NOT STARTED | | | Generated specs read `AUTOMATION_PROFILE` (a profile key, e.g. "infinity") as if it were a URL; no bearer/base-URL wiring exists anywhere |
+| QAL-068 | Wire a real target base URL + credential for generated specs | COMPLETED | 2026-07-01 | 2026-07-01 | (background agent) `DmsProfileEntry` gains `BaseUrl`/`BearerToken` from `*_BASE_URL`/`INFINITY_BEARER_TOKEN` env vars; `PlaywrightRunner.ApplyAutomationEnv` sets `AUTOMATION_BASE_URL`/`AUTOMATION_BEARER_TOKEN` on child env; all 3 generator prompts standardized on `AUTOMATION_BASE_URL` (no hardcoded hostname fallback); `.env.example` documents the new keys |
 | QAL-069 | Isolate the ClaudeCli child process from the host Claude Code session | NOT STARTED | | | No `WorkingDirectory`/permission isolation on the spawned `claude -p` process; confirmed live referencing the operator's own session memory mid-completion |
 | QAL-070 | Populate WorkItemTitle for QA Loop sessions | NOT STARTED | | | `QaLoopOrchestrator` never fetches the linked work item's title, unlike `AgentOrchestrator`/`BugOrchestrator`; cosmetic |
 | QAL-071 | Write Contract generator's schema file to disk | NOT STARTED | | | Newly discovered while verifying QAL-062 live: spec imports a sibling `.schema` file that's never written, aborting the whole Playwright run whenever a Contract-level draft is included |
@@ -87,13 +87,21 @@
 
 ## Summary
 - **Total Tasks:** 71 (61 build + 10 E2E fix-up)
-- **Completed:** 66
+- **Completed:** 67
 - **In Progress:** 0
-- **Not Started:** 5 (QAL-067..071)
+- **Not Started:** 4 (QAL-067, QAL-069, QAL-070, QAL-071)
 
 ---
 
 ## Log
+### 2026-07-01 (QAL-068 — background Agent B)
+- **QAL-068** COMPLETED — Implemented by a background agent (git-worktree-isolated), merged clean (`88537f5`, merge commit on `dev`), no conflicts.
+- `DmsProfileEntry` (`DmsProfileOptions.cs`) gains `BaseUrl`/`BearerToken`, read from `IDEAL_BASE_URL`/`INFINITY_BASE_URL`/`ASPEN_BASE_URL`/`QUANTUM_BASE_URL` + `INFINITY_BEARER_TOKEN` env vars at class-load (same `Env(key)` idiom as `DependencyInjection.cs`) — deliberately kept as a plain static registry rather than a full `IOptions<T>`/RuntimeSettings round-trip (marked `ponytail:` with the upgrade path noted) since only one profile needs a secret today.
+- `PlaywrightRunner.RunAsync` resolves `spec.Profile` to its registry entry and passes `BaseUrl`/`BearerToken` through to a new `internal static ApplyAutomationEnv(env, profile, baseUrl, bearerToken)` (extracted for unit-testability, same pattern as `ClaudeCli.Which`), which sets `AUTOMATION_BASE_URL`/`AUTOMATION_BEARER_TOKEN` on the child process env alongside the existing `AUTOMATION_PROFILE` key.
+- All 3 generator prompts (`contract_generator_system.txt`/`endpoint_generator_system.txt`/`workflow_generator_system.txt`) standardized on `process.env.AUTOMATION_BASE_URL` for the target URL, replacing the previous 3-way-inconsistent mess confirmed live in real generated specs (Contract read `AUTOMATION_API_BASE_URL` with a hallucinated hostname fallback baked in; Endpoint/Workflow both literally read the profile-key string `AUTOMATION_PROFILE` as if it were a URL). No hardcoded hostname guess added anywhere — `.env.example` documents the new keys with `INFINITY_BASE_URL`/`INFINITY_BEARER_TOKEN` blank by default (a human must fill in the real INFINITY QA endpoint + token).
+- Tests: new `PlaywrightRunnerTests.cs`, 6 tests covering `ApplyAutomationEnv`'s null/empty-omission behavior and the registry's shape (4 profiles, only Infinity credentialed, no hardcoded `BaseUrl` when env unset). Full suite **136/136 green** (started at 130, +6) after merge; verified independently post-merge with a fresh `dotnet build`+`dotnet test` on `dev`.
+- Reviewed the agent's diff directly (not just its self-report): `DmsProfileOptions.cs`/`PlaywrightRunner.cs`/all 3 prompts read clean, comments correctly use the codebase's existing `QAL-0XX` section-header convention (matches `QaLoopOrchestrator.cs`'s own style), `.env.example` addition is well-documented. No changes needed.
+
 ### 2026-07-01 (QAL-066 — Ralph loop resumed, background agents dispatched)
 - **QAL-066** COMPLETED — Picked up mid-flight from a prior interrupted session (uncommitted backend changes already present for `ApiTestSession.SourceDirsJson`, `QaLoopController` persisting `req.SourceDirs`, and `QaLoopOrchestrator.FetchSourceAsync` branching on supplied `SourceDirs`); finished the remaining pieces:
   - Generated the missing EF migration (`20260701101804_AddSourceDirsJson`) — single additive nullable `TEXT` column on `ApiTestSessions`, no other schema change.
