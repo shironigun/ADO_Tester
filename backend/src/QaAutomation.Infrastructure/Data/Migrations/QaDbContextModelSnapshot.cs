@@ -156,6 +156,10 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("Repository");
 
+                    b.Property<string>("SourceDirsJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("SourceDirsJson");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("TEXT")

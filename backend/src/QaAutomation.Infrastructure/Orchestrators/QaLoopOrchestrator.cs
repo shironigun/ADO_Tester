@@ -491,10 +491,30 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
         if (string.IsNullOrEmpty(session.Repository) || string.IsNullOrEmpty(session.Branch))
             return $"Module: {session.Module}";
 
+        var sourceDirs = ParseSourceDirs(session.SourceDirsJson);
+
         try
         {
-            var paths = await _ado.ListRepoFilePathsAsync(
-                session.Module, branch: session.Branch, repoId: session.Repository, ct);
+            var paths = new List<string>();
+            if (sourceDirs.Count > 0)
+            {
+                // Fetch each supplied directory — this is the only reliable way to find a module
+                // that isn't a top-level repo folder (e.g. Lead/src/.../Deal nested several levels in).
+                foreach (var dir in sourceDirs)
+                {
+                    try
+                    {
+                        paths.AddRange(await _ado.ListRepoFilePathsAsync(dir, branch: session.Branch, repoId: session.Repository, ct));
+                    }
+                    catch (Exception ex) { _log.LogDebug(ex, "Skipping unreadable source dir {Dir}", dir); }
+                }
+            }
+            else
+            {
+                // Fallback: treat the module name itself as a top-level scopePath. Only correct when
+                // the module happens to live at the repo root — supply SourceDirs for anything nested.
+                paths.AddRange(await _ado.ListRepoFilePathsAsync(session.Module, branch: session.Branch, repoId: session.Repository, ct));
+            }
 
             if (paths.Count == 0)
                 return $"Module: {session.Module}";
@@ -518,6 +538,13 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
             _log.LogWarning(ex, "Source fetch failed for module '{Module}'", session.Module);
             return $"Module: {session.Module}";
         }
+    }
+
+    private static List<string> ParseSourceDirs(string? json)
+    {
+        if (string.IsNullOrEmpty(json)) return [];
+        try { return JsonSerializer.Deserialize<List<string>>(json) ?? []; }
+        catch { return []; }
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
