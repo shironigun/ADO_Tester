@@ -48,6 +48,10 @@ public sealed class ApiTestDraft
     public string SpecCode { get; set; } = string.Empty;
     /// <summary>Absolute path where SpecCode was written; null if write failed.</summary>
     public string? SpecFilePath { get; set; }
+    /// <summary>QAL-067: index of this draft's case within a shared multi-case spec file (Endpoint's
+    /// 200/401/400 cases share ONE physical file). Null for Contract/Workflow (always single-case).
+    /// Lets push-time rewrite find and replace only THIS case's [<tcId-pending:N>] placeholder.</summary>
+    public int? CaseIndex { get; set; }
     public string? Tags { get; set; }
     /// <summary>JSON array of "METHOD /route" strings this draft covers.</summary>
     public string? SourceRoutesJson { get; set; }

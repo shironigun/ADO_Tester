@@ -56,6 +56,40 @@ public sealed class QaLoopOrchestratorTests
     }
 
     [Fact]
+    public async Task Analyze_populates_WorkItemTitle_from_the_linked_work_item()
+    {
+        // QAL-070: mirrors AgentOrchestrator/BugOrchestrator, which fetch and store WorkItemTitle at
+        // session creation — QaLoopOrchestrator's session is pre-seeded by the controller instead, so
+        // the fetch has to happen in the background pipeline itself.
+        using var h = Harness.Create(new StubLlmClient(EmptyAnalyzerJson));
+        h.Ado.WorkItemToReturn = new AdoWorkItem { Id = 171740, Title = "Deals: add lead endpoint" };
+
+        var sid = await h.SeedSessionAsync(module: "Deals", autoHandoff: false, workItemId: 171740);
+        await h.Orchestrator.StartAsync(sid);
+        var session = await h.WaitForTerminalAsync(sid);
+
+        Assert.Equal(ApiSessionStatus.AwaitingReview, session.Status);
+        Assert.Equal("Deals: add lead endpoint", session.WorkItemTitle);
+    }
+
+    [Fact]
+    public async Task Analyze_leaves_WorkItemTitle_null_and_still_completes_when_the_ADO_fetch_throws()
+    {
+        // A failed work-item fetch must degrade gracefully: catch-log, leave WorkItemTitle null,
+        // never fail the scan.
+        using var h = Harness.Create(new StubLlmClient(EmptyAnalyzerJson));
+        h.Ado.ThrowOnGetWorkItem = true;
+
+        var sid = await h.SeedSessionAsync(module: "Deals", autoHandoff: false, workItemId: 171740);
+        await h.Orchestrator.StartAsync(sid);
+        var session = await h.WaitForTerminalAsync(sid);
+
+        Assert.Equal(ApiSessionStatus.AwaitingReview, session.Status);   // scan still completed
+        Assert.Null(session.WorkItemTitle);
+        Assert.Null(session.ErrorMessage);   // the failure never bubbled up as a scan error
+    }
+
+    [Fact]
     public async Task Analyze_with_AutoHandoff_reaches_Drafted()
     {
         using var h = Harness.Create(new StubLlmClient(EmptyAnalyzerJson));
@@ -93,6 +127,45 @@ public sealed class QaLoopOrchestratorTests
     }
 
     [Fact]
+    public async Task GenerateDrafts_writes_Contract_schema_file_under_the_models_own_import_name()
+    {
+        // QAL-071: the model invents its OWN relative import path for the schema — unrelated to our
+        // spec-filename slug (which comes from the TEST CASE TITLE, not the route). Ground-truth
+        // example from a real generated file: `import { X } from './get-lead-deal-dealId.schema';` —
+        // that must resolve to a real get-lead-deal-dealId.schema.ts sitting next to the .spec.ts.
+        const string specWithSchemaImport = """
+            import { test, expect } from '@playwright/test';
+            import { DealDetailsDtoSchema } from './get-lead-deal-dealId.schema';
+
+            test('[<tcId-pending>] Contract: GET /deals/{dealId} - response shape matches schema', async () => {
+              expect(DealDetailsDtoSchema).toBeDefined();
+            });
+            """;
+        var specJson = System.Text.Json.JsonSerializer.Serialize(
+            new { spec = specWithSchemaImport, schema = "{\"type\":\"object\"}" });
+
+        using var h = Harness.Create(new StubLlmClient(OneGapAnalyzerJson, specJson, ContractTcJson));
+
+        var sid = await h.SeedSessionAsync(module: "Deals", autoHandoff: false);
+        await h.Orchestrator.StartAsync(sid);
+        await h.WaitForTerminalAsync(sid);    // AwaitingReview
+
+        await h.Orchestrator.GenerateDraftsAsync(sid);
+        await h.WaitForTerminalAsync(sid, ApiSessionStatus.Drafted);
+
+        using var scope = h.Provider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+        var draft = db.ApiTestDrafts.Single(d => d.SessionId == sid);
+        Assert.NotNull(draft.SpecFilePath);
+
+        var schemaPath = Path.Combine(Path.GetDirectoryName(draft.SpecFilePath)!, "get-lead-deal-dealId.schema.ts");
+        Assert.True(File.Exists(schemaPath), $"expected schema file at {schemaPath}");
+        Assert.Equal("{\"type\":\"object\"}", File.ReadAllText(schemaPath));
+        // Same directory as the spec — resolves the model's own `./get-lead-deal-dealId.schema` import.
+        Assert.Equal(Path.GetDirectoryName(draft.SpecFilePath), Path.GetDirectoryName(schemaPath));
+    }
+
+    [Fact]
     public async Task Push_rewrites_pending_tag_and_sets_AdoTestCaseId()
     {
         using var h = Harness.Create(new StubLlmClient());
@@ -114,6 +187,77 @@ public sealed class QaLoopOrchestratorTests
         Assert.NotNull(draft.AdoTestCaseId);
         Assert.DoesNotContain("[<tcId-pending>]", draft.Title);    // tag rewritten
         Assert.Contains($"[{draft.AdoTestCaseId}]", draft.Title);  // replaced with real id
+    }
+
+    [Fact]
+    public async Task Push_of_shared_multicase_spec_in_scrambled_order_rewrites_each_cases_own_tag_only()
+    {
+        // QAL-067: a shared Endpoint spec file has 3 test( ) blocks, one per case, each carrying its
+        // own INDEXED placeholder. Pushing case 1 before case 0 before case 2 must still land each
+        // case's real ADO id on its own line — a global unscoped string replace would let whichever
+        // case pushes FIRST stomp every other case's still-pending placeholder in the shared file.
+        using var h = Harness.Create(new StubLlmClient());
+        var sid = await h.SeedSessionAsync(module: "Deals", workItemId: null);
+
+        var specPath = Path.Combine(Path.GetTempPath(), $"qal067_shared_{Guid.NewGuid():N}.spec.ts");
+        const string sharedSpec = """
+            import { test, expect } from '@playwright/test';
+
+            test('[<tcId-pending:0>] Endpoint: GET /deals - 200 happy path', async () => {
+              expect(200).toBe(200);
+            });
+
+            test('[<tcId-pending:1>] Endpoint: GET /deals - 401 without bearer', async () => {
+              expect(401).toBe(401);
+            });
+
+            test('[<tcId-pending:2>] Endpoint: GET /deals - 400 on invalid input', async () => {
+              expect(400).toBe(400);
+            });
+            """;
+        File.WriteAllText(specPath, sharedSpec);
+        try
+        {
+            var d0 = await h.SeedDraftAsync(sid, "[<tcId-pending:0>] Endpoint: GET /deals - 200 happy path",
+                ApiDraftStatus.Approved, caseIndex: 0, specFilePath: specPath);
+            var d1 = await h.SeedDraftAsync(sid, "[<tcId-pending:1>] Endpoint: GET /deals - 401 without bearer",
+                ApiDraftStatus.Approved, caseIndex: 1, specFilePath: specPath);
+            var d2 = await h.SeedDraftAsync(sid, "[<tcId-pending:2>] Endpoint: GET /deals - 400 on invalid input",
+                ApiDraftStatus.Approved, caseIndex: 2, specFilePath: specPath);
+
+            // Scrambled push order: 1, 0, 2.
+            var pushed1 = await h.Orchestrator.PushDraftAsync(d1, testPlanId: 10, testSuiteId: 20);
+            var pushed0 = await h.Orchestrator.PushDraftAsync(d0, testPlanId: 10, testSuiteId: 20);
+            var pushed2 = await h.Orchestrator.PushDraftAsync(d2, testPlanId: 10, testSuiteId: 20);
+
+            var ids = new[] { pushed0.AdoTestCaseId, pushed1.AdoTestCaseId, pushed2.AdoTestCaseId };
+            Assert.All(ids, id => Assert.NotNull(id));
+            Assert.Equal(3, ids.Distinct().Count());   // three distinct real ADO ids, one per case
+
+            // Each draft's own title carries only ITS id — never another case's placeholder or id.
+            Assert.Contains($"[{pushed0.AdoTestCaseId}]", pushed0.Title);
+            Assert.Contains($"[{pushed1.AdoTestCaseId}]", pushed1.Title);
+            Assert.Contains($"[{pushed2.AdoTestCaseId}]", pushed2.Title);
+            Assert.DoesNotContain("[<tcId-pending", pushed0.Title);
+            Assert.DoesNotContain("[<tcId-pending", pushed1.Title);
+            Assert.DoesNotContain("[<tcId-pending", pushed2.Title);
+
+            // The physical file (read once, after all 3 pushes) must show each case's OWN id on its
+            // OWN test( ) line, with no leftover placeholders and no cross-contamination.
+            var finalText = File.ReadAllText(specPath);
+            var lines = finalText.Split('\n');
+            var line0 = Assert.Single(lines, l => l.Contains("200 happy path"));
+            var line1 = Assert.Single(lines, l => l.Contains("401 without bearer"));
+            var line2 = Assert.Single(lines, l => l.Contains("400 on invalid input"));
+            Assert.Contains($"[{pushed0.AdoTestCaseId}]", line0);
+            Assert.Contains($"[{pushed1.AdoTestCaseId}]", line1);
+            Assert.Contains($"[{pushed2.AdoTestCaseId}]", line2);
+            Assert.DoesNotContain("tcId-pending", finalText);   // no placeholder survives
+        }
+        finally
+        {
+            try { File.Delete(specPath); } catch { }
+        }
     }
 
     [Fact]
@@ -208,12 +352,13 @@ public sealed class QaLoopOrchestratorTests
             return session.Id;
         }
 
-        public async Task SeedDraftAsync(
-            int sessionId, string title, ApiDraftStatus status, int? adoId = null)
+        public async Task<int> SeedDraftAsync(
+            int sessionId, string title, ApiDraftStatus status, int? adoId = null,
+            int? caseIndex = null, string? specFilePath = null)
         {
             using var scope = Provider.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
-            db.ApiTestDrafts.Add(new ApiTestDraft
+            var draft = new ApiTestDraft
             {
                 SessionId = sessionId,
                 Title = title,
@@ -222,10 +367,14 @@ public sealed class QaLoopOrchestratorTests
                 Status = status,
                 AdoTestCaseId = adoId,
                 Level = TestLevel.Contract,
+                CaseIndex = caseIndex,
+                SpecFilePath = specFilePath,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
-            });
+            };
+            db.ApiTestDrafts.Add(draft);
             await db.SaveChangesAsync();
+            return draft.Id;
         }
 
         public async Task<ApiTestSession> WaitForTerminalAsync(
@@ -268,13 +417,16 @@ public sealed class QaLoopOrchestratorTests
         public Task<ILlmClient> CreateAsync(CancellationToken ct = default) => Task.FromResult(_client);
     }
 
-    /// <summary>Stub ADO client for QA Loop push tests: records write calls; reads throw.</summary>
+    /// <summary>Stub ADO client for QA Loop push tests: records write calls; reads throw unless
+    /// configured (GetWorkItemAsync — QAL-070 — returns WorkItemToReturn, or throws if configured to).</summary>
     internal sealed class QaLoopAdoStub : IAzureDevOpsClient
     {
         private int _nextTcId = 7000;
         public List<string> CreatedTestCases { get; } = [];
         public List<(int PlanId, int SuiteId, int TcId)> SuiteAdds { get; } = [];
         public List<(int StoryId, int TcId)> TestedByLinks { get; } = [];
+        public AdoWorkItem? WorkItemToReturn { get; set; }
+        public bool ThrowOnGetWorkItem { get; set; }
 
         public Task<int> CreateTestCaseAsync(
             string title, string preconditions, IReadOnlyList<TestCaseStep> steps, CancellationToken ct = default)
@@ -298,8 +450,12 @@ public sealed class QaLoopOrchestratorTests
         public Task<IReadOnlyList<LinkedTestCase>> GetSuiteTestCasesAsync(int planId, int suiteId, bool recurse = true, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<LinkedTestCase>>([]);
 
+        public Task<AdoWorkItem> GetWorkItemAsync(int workItemId, bool forceRefresh = false, CancellationToken ct = default) =>
+            ThrowOnGetWorkItem
+                ? throw new InvalidOperationException("simulated ADO failure")
+                : Task.FromResult(WorkItemToReturn ?? throw new NotImplementedException());
+
         // ── unused ──
-        public Task<AdoWorkItem> GetWorkItemAsync(int workItemId, bool forceRefresh = false, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<string>> DiscoverOrganizationsAsync(CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<AdoNamedRef>> DiscoverProjectsAsync(string organization, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<string>> DiscoverAreaPathsAsync(string organization, string project, CancellationToken ct = default) => throw new NotImplementedException();
