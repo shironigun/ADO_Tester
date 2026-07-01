@@ -208,16 +208,25 @@ function CoverageMatrix({ session, onSaved }: { session: ApiSessionDetail; onSav
   })()
   const [selected, setSelected] = useState<Set<string>>(() => new Set(rows.filter(r => r.Selected).map(r => r.Id)))
   const [saving, setSaving] = useState(false)
+  const [justSaved, setJustSaved] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  // Clears the "Saved" confirmation the moment the selection changes again.
+  function toggle(id: string, checked: boolean) {
+    setJustSaved(false)
+    setSelected(prev => { const s = new Set(prev); if (checked) s.add(id); else s.delete(id); return s })
+  }
 
   async function save() {
-    setSaving(true)
+    setSaving(true); setSaveError(null); setJustSaved(false)
     try {
       // Full-replace: resend EVERY row with its current Selected flag, not just the checked ones —
       // omitting a row here deletes it from the matrix.
       const updated = rows.map(r => ({ ...r, Selected: selected.has(r.Id) }))
       await saveAnalysis(session.id, module, updated)
+      setJustSaved(true)   // visible confirmation — the save is otherwise invisible (selection unchanged)
       onSaved()
-    } catch { /* user sees nothing — non-blocking */ }
+    } catch (e) { setSaveError(axiosMessage(e)) }
     finally { setSaving(false) }
   }
 
@@ -234,9 +243,12 @@ function CoverageMatrix({ session, onSaved }: { session: ApiSessionDetail; onSav
         <Box sx={{ flex: 1 }} />
         {covered.length > 0 && (
           <Button size="small" onClick={() => {
+            setJustSaved(false)
             setSelected(new Set(rows.filter(r => r.Status !== 'covered').map(r => r.Id)))
           }}>Deselect all covered</Button>
         )}
+        {justSaved && <Typography variant="body2" color="success.main">Saved ✓</Typography>}
+        {saveError && <Typography variant="body2" color="error.main">{saveError}</Typography>}
         <Button size="small" variant="contained" disabled={saving} onClick={save}
           startIcon={saving ? <CircularProgress size={14} /> : undefined}>Save</Button>
       </Stack>
@@ -244,7 +256,7 @@ function CoverageMatrix({ session, onSaved }: { session: ApiSessionDetail; onSav
         {rows.map(r => (
           <Stack key={r.Id} direction="row" spacing={1} sx={{ alignItems: 'center' }}>
             <Checkbox size="small" checked={selected.has(r.Id)}
-              onChange={e => setSelected(prev => { const s = new Set(prev); if (e.target.checked) s.add(r.Id); else s.delete(r.Id); return s })} />
+              onChange={e => toggle(r.Id, e.target.checked)} />
             <Chip size="small" label={LEVEL_NAMES[r.Level] ?? r.Level} />
             <Chip size="small" label={r.Status === 'covered' ? 'covered' : 'gap'} color={r.Status === 'covered' ? 'success' : 'warning'} variant="outlined" />
             <Typography variant="body2" sx={{ fontFamily: 'monospace', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
