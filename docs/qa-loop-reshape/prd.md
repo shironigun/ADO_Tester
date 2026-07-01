@@ -817,7 +817,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Re-verify live: scanning `deals` with `sourceDirs: ["Lead/src/Target.Crm.Lead/Target.Crm.Lead.Api/Target.Crm.Lead.Api/Deal"]` against the real repo returns a populated inventory (real routes from `DealApiRoutes.cs`), not an empty one
 
 #### QAL-067: Fix multi-case Endpoint draft tag-rewrite corruption on push
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-067
 - **Description:** `EndpointGeneratorAgent` deliberately writes all 3 cases of one route (200/401/400) into a single shared `.spec.ts` file (`SpecCode = i == 0 ? specCode : ""`), but only the first case's `ApiTestDraft` gets a `SpecFilePath`. `QaLoopOrchestrator.RewriteSpecOnDisk` does a **global string replace** of the literal `[<tcId-pending>]` placeholder, and only the first case's push event ever triggers it. Confirmed live by pushing a real 3-case endpoint: ADO now holds 3 distinct Test Cases (#174569/174570/174571), but the physical file shows `[174569]` on **all three** `test(...)` blocks. Effect: the JUnit `\[(\d+)\]` regex can never find cases 401/400's real ids anywhere in the file, so `RunExecutionService.PostAdoResultsAsync` will report those two Test Cases as **Passed by default** regardless of their actual outcome — a silent false-pass, not a missing result.
 - **File:** `backend/src/QaAutomation.Infrastructure/Agents/ContractGeneratorAgent.cs` (`TitleTag` helper), `backend/src/QaAutomation.Infrastructure/Agents/EndpointGeneratorAgent.cs`, `backend/src/QaAutomation.Infrastructure/Orchestrators/QaLoopOrchestrator.cs` (`RewriteSpecOnDisk`/`RewriteTag`)
@@ -839,7 +839,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Re-verify live: a freshly generated spec's `BASE_URL` resolves to a real, reachable INFINITY QA endpoint and a live Playwright call gets a real HTTP response (any status), not a DNS/protocol error
 
 #### QAL-069: Isolate the ClaudeCli child process from the host Claude Code session
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-069
 - **Description:** `ClaudeCliLlmClient.RunStreamAsync` spawns `claude -p …` with no `WorkingDirectory` set on `ProcessStartInfo` and no `--permission-mode`/isolation flag. The child inherits the parent .NET process's working directory (inside this very repo) and therefore this machine's project-level Claude Code configuration — confirmed live: mid-completion, the `ModuleAnalyzerAgent`'s own "thinking" stream referenced the operator's own session memory by name ("Looking at the memory, there's a `hackathon-ai-qa-automation` memory that…") while trying to answer a scoped "analyze this module" prompt, and took 80+ seconds of open-ended exploration instead of returning a quick JSON answer. This affects every agent that uses the ClaudeCli provider app-wide, not just QA Loop, and is the most likely root cause behind the pre-existing "CLI exit 1 on large tickets" issue already tracked in project memory.
 - **File:** `backend/src/QaAutomation.Infrastructure/Llm/ClaudeCliLlmClient.cs`
@@ -850,7 +850,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - Existing ClaudeCli golden/parity tests still pass unchanged
 
 #### QAL-070: Populate WorkItemTitle for QA Loop sessions
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-070
 - **Description:** Unlike `AgentOrchestrator`/`BugOrchestrator`, which fetch and store the linked work item's title at session creation (`WorkItemTitle = wi.Title`), `QaLoopOrchestrator` never does — confirmed live: `ApiSessionDetail.workItemTitle` stayed `null` for a session created with `workItemId=171740`. Cosmetic (today's `qaLoopConfig.renderIdentity` doesn't display it, and `LinkTestedByAsync` correctly uses the numeric id, not the title) but a real gap against the DTO's documented shape.
 - **File:** `backend/src/QaAutomation.Infrastructure/Orchestrators/QaLoopOrchestrator.cs`
@@ -860,7 +860,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - `ApiSessionDetail.workItemTitle` reflects the real ADO title for a session tagged to a real work item (verify live against #171740)
 
 #### QAL-071: Write the Contract generator's schema file alongside its spec
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-071
 - **Description:** Discovered live while re-verifying QAL-062 end-to-end (not in the original 9 findings). `ContractGeneratorAgent`'s spec prompt has the generated `.spec.ts` `import` a sibling schema module by relative path (e.g. `import { DealDetailsDtoSchema } from './get-lead-deal-dealId.schema'`), but `ContractGeneratorAgent`/`QaLoopOrchestrator.PersistDraft` only ever writes `spec.SchemaJson` into the `ApiTestDraft.SchemaJson` DB column — the companion `.schema.ts` file the import expects is never written to the `contracts/` folder on disk. Confirmed live: `npx playwright test --list` on a real pushed Contract-level spec fails with `Error: Cannot find module './get-lead-deal-dealId.schema'`, and because Playwright aborts the ENTIRE run on any single spec file that fails to load (not just that file), this one missing file blocks every OTHER level's tests too whenever a run spans more than one level (confirmed: Endpoint-only and Workflow-only runs execute fine in isolation; a full module-wide run does not, purely because of this one file). This is the one remaining thing standing between "Playwright can execute" (QAL-062, done) and "a real end-to-end module run finishes for real."
 - **File:** `backend/src/QaAutomation.Infrastructure/Agents/ContractGeneratorAgent.cs`, `backend/src/QaAutomation.Infrastructure/Orchestrators/QaLoopOrchestrator.cs` (`PersistDraft`)
