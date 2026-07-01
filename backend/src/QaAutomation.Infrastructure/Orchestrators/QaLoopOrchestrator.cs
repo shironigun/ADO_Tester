@@ -168,6 +168,21 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
             var llm = await _llmFactory.CreateAsync(ct);
             Pub(key, EventKinds.System, text: $"QA Loop pipeline started · provider {llm.ProviderName}");
 
+            // QAL-070: mirror AgentOrchestrator/BugOrchestrator — fetch the linked work item's title so
+            // the session displays it. Best-effort: a failed fetch never fails the scan, leaves it null.
+            if (session.WorkItemId.HasValue)
+            {
+                try
+                {
+                    var wi = await _ado.GetWorkItemAsync(session.WorkItemId.Value, ct: ct);
+                    session.WorkItemTitle = wi.Title;
+                }
+                catch (Exception ex)
+                {
+                    _log.LogWarning(ex, "Could not fetch work item {Id} title", session.WorkItemId);
+                }
+            }
+
             // Fetch source from ADO repo
             Pub(key, EventKinds.Phase, EventPhases.Fetch, $"Fetching source for module '{session.Module}'");
             var source = await FetchSourceAsync(session, ct);
