@@ -24,7 +24,7 @@ Rules for spec:
     allure.epic(module), allure.feature('Endpoint'), allure.story('<METHOD> <route>'),
     allure.severity('critical'/'normal'/'minor' per case), allure.tag('endpoint'),
     allure.link('<tcId-pending>', { name: 'ADO Test Case' })
-- Use AUTOMATION_PROFILE env var for base URL; AUTOMATION_BEARER_TOKEN for auth.
+- Use AUTOMATION_BASE_URL env var for base URL (const BASE_URL = process.env.AUTOMATION_BASE_URL ?? '';); AUTOMATION_BEARER_TOKEN for auth.
 - 200 case: assert status and validate core response fields.
 - 401 case: omit Authorization header; assert status 401.
 - 400 case: send the most easily invalid required field; assert status 400 and error message shape.

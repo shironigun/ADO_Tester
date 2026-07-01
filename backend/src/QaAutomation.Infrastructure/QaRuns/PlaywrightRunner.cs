@@ -16,7 +16,8 @@ namespace QaAutomation.Infrastructure.QaRuns;
 /// <summary>
 /// Runs Playwright specs in a child process. Provisions the shared runtime once on first call
 /// (npm ci + npx playwright install); all subsequent runs are read-only against that runtime.
-/// AUTOMATION_PROFILE is set on the child process environment, not a CLI flag.
+/// AUTOMATION_PROFILE (profile key), AUTOMATION_BASE_URL (target host), and AUTOMATION_BEARER_TOKEN
+/// (credentialed profiles only) are set on the child process environment, not CLI flags (QAL-068).
 /// </summary>
 public sealed class PlaywrightRunner : IPlaywrightRunner
 {
@@ -85,11 +86,17 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
         var sw = Stopwatch.StartNew();
         int exitCode;
 
+        // Resolve the profile key (e.g. "infinity") to its registry entry so the child process gets
+        // a real target URL/token, not just the key string (QAL-068 — AUTOMATION_PROFILE alone is
+        // not a URL; every generated spec was silently falling back to a hardcoded/localhost guess).
+        var profileEntry = DmsProfileOptions.All.FirstOrDefault(p => p.Key == spec.Profile);
+
         await _concurrency.Gate.WaitAsync(ct);
         try
         {
             exitCode = await SpawnAsync("npx", $"playwright {args}", runDir, spec.Profile, eventKey, ct,
-                suppressOutput: !spec.ActivityEnabled);
+                suppressOutput: !spec.ActivityEnabled,
+                baseUrl: profileEntry?.BaseUrl, bearerToken: profileEntry?.BearerToken);
         }
         finally
         {
@@ -419,7 +426,7 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
 
     private async Task<int> SpawnAsync(
         string exe, string args, string workDir, string? profile, string eventKey, CancellationToken ct,
-        bool suppressOutput = false)
+        bool suppressOutput = false, string? baseUrl = null, string? bearerToken = null)
     {
         // npm/npx are .cmd shims on Windows — bare ProcessStartInfo (UseShellExecute=false) can't
         // resolve them via PATHEXT the way a real shell does, and fails with "cannot find the file
@@ -433,8 +440,7 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
             UseShellExecute = false,
             CreateNoWindow = true,
         };
-        if (!string.IsNullOrEmpty(profile))
-            psi.Environment["AUTOMATION_PROFILE"] = profile;
+        ApplyAutomationEnv(psi.Environment, profile, baseUrl, bearerToken);
 
         using var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
 
@@ -456,6 +462,20 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
 
         await using var reg = ct.Register(() => { try { proc.Kill(entireProcessTree: true); } catch { } });
         return await tcs.Task;
+    }
+
+    /// <summary>Sets AUTOMATION_PROFILE/AUTOMATION_BASE_URL/AUTOMATION_BEARER_TOKEN on the child
+    /// process environment (QAL-068). Extracted from <see cref="SpawnAsync"/> so the mapping is
+    /// unit-testable against a plain dictionary without spawning a real process.</summary>
+    internal static void ApplyAutomationEnv(
+        IDictionary<string, string?> env, string? profile, string? baseUrl, string? bearerToken)
+    {
+        if (!string.IsNullOrEmpty(profile))
+            env["AUTOMATION_PROFILE"] = profile;
+        if (!string.IsNullOrEmpty(baseUrl))
+            env["AUTOMATION_BASE_URL"] = baseUrl;
+        if (!string.IsNullOrEmpty(bearerToken))
+            env["AUTOMATION_BEARER_TOKEN"] = bearerToken;
     }
 
     // ── Grep builder ────────────────────────────────────────────────────────

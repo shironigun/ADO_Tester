@@ -25,7 +25,7 @@ Rules for spec:
     allure.epic(module), allure.feature('Contract'), allure.story('<METHOD> <route>'),
     allure.severity('critical'), allure.tag('contract'), allure.link(tcIdPending, { name: 'ADO Test Case' })
   where tcIdPending is the placeholder string '<tcId-pending>'.
-- Use the AUTOMATION_PROFILE env var (process.env.AUTOMATION_PROFILE ?? 'infinity') to select the base URL from a baseUrls map.
+- Use the AUTOMATION_BASE_URL env var for the base URL (const BASE_URL = process.env.AUTOMATION_BASE_URL ?? '';). Do not invent a hardcoded hostname fallback.
 - Auth: read bearer token from process.env.AUTOMATION_BEARER_TOKEN.
 - Assert response status and validate the full body against the Zod schema; surface the schema diff in the attachment.
 - No screenshot, no video, no browser; API-only (no use: block, no browser launch).
