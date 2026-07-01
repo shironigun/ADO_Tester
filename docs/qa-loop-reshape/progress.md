@@ -74,7 +74,7 @@
 | QAL-061 | FE Allure report + activity swap + Settings UI | COMPLETED | 2026-06-30 | 2026-06-30 | BE: GET {id}/report endpoint (serves HTML, ?dl=true for download); FE: activityEnabled on run+session DTOs; QaRunsPage drawer: Report↗/Download/unavailable + Console tab with AgentConsole or LinearProgress; qaLoop.tsx activity swap; Settings QA Loop tab with Teams/poll/report-provider/activity-switch |
 | QAL-062 | Fix Playwright runtime npm/npx spawn failure on Windows | COMPLETED | 2026-07-01 | 2026-07-01 | 6 compounding layers found+fixed live (see log): npm/npx PATHEXT resolution, Which() extension-ordering, testDir level-name casing, npm ci→install (no lockfile) + exit-code checks, wrong Allure package name, node_modules junction (2 locations). Real run now shows genuine Failed/Passed counts from real Playwright execution |
 | QAL-063 | Fix QaPipelinesController DI resolution crash | COMPLETED | 2026-07-01 | 2026-07-01 | PipelineWatcherHostedService now registered as singleton + exposed as IHostedService via factory; all 5 endpoints (list/add/patch/delete/run-latest) verified live via curl, no 500s |
-| QAL-064 | Fix api/qaLoop.ts — every method targets the wrong URL | NOT STARTED | | | Entire `/qa-loop` UI non-functional for data (list/detail/start/analysis/generate/push/cancel all 404 live) |
+| QAL-064 | Fix api/qaLoop.ts — every method targets the wrong URL | COMPLETED | 2026-07-01 | 2026-07-01 | All 11 routes corrected; also fixed 3 compounding data-shape bugs found live (see log): SurfaceRow field names/PascalCase-casing, DraftsByLevel level-casing, PushPanel's non-existent push-time plan/suite picker. Verified live: session list, detail, coverage save, drafts-by-level counts, push panel all round-trip correctly |
 | QAL-065 | Fix api/qaRuns.ts + api/qaPipelines.ts missing {projectId} segment | NOT STARTED | | | `/qa-runs` and `/qa-pipelines` list views show false-empty states |
 | QAL-066 | Fix ModuleAnalyzerAgent source-fetch for nested modules | NOT STARTED | | | `SourceDirs`/`Extensions` dead fields; module-name-as-scopePath 404s for any module not at repo root (confirmed against real Your Repo repo) |
 | QAL-067 | Fix multi-case Endpoint draft tag-rewrite corruption on push | NOT STARTED | | | Confirmed live by pushing real ADO Test Cases #174569-174571: shared spec file ends up with all 3 cases tagged with the FIRST case's id → silent false-pass for 2 of 3 |
@@ -87,13 +87,22 @@
 
 ## Summary
 - **Total Tasks:** 71 (61 build + 10 E2E fix-up)
-- **Completed:** 63
+- **Completed:** 64
 - **In Progress:** 0
-- **Not Started:** 8 (QAL-064..071)
+- **Not Started:** 7 (QAL-065..071)
 
 ---
 
 ## Log
+### 2026-07-01 (QAL-064)
+- **QAL-064** COMPLETED — `client/src/api/qaLoop.ts`: all 11 methods now target the real `QaLoopController` routes (`startScan`/`listSessionsPage` take a `projectId` param matching the `authorTests.ts` convention; `patchDraft`/`pushDraft` no longer take a phantom `sessionId` path segment; `pushSession` takes no body — the real endpoint reads Plan/Suite/Story from the session itself). `saveAnalysis` now sends `{module, rows}` (full-replace) instead of a bare row array.
+- Fixing the URLs alone wasn't enough to make the screen work — found and fixed 3 more compounding bugs live in `qaLoop.tsx` while verifying:
+  - `SurfaceRow`'s fields (`surface`/`route`/`method`) don't exist on the backend model at all, and the raw `analysisJson` string is produced by an internal `JsonSerializer.Serialize` call (not the API's camelCase MVC pipeline), so it's genuinely PascalCase (`Id`/`Level`/`Label`/`Status`/`LinkedTestCaseId`/`Selected`) with `Level` as a bare ordinal (0=Contract/1=Endpoint/2=Workflow/3=Ui). `CoverageMatrix` rewritten to parse the real shape, added `LEVEL_NAMES` lookup, and fixed the checkbox/save logic to key off the real `Id` (previously `surface+route` collapsed to the same string for every row) and to full-replace-resend every row (previously it only sent the selected subset, which would have deleted every unselected/covered row from the matrix).
+  - `DraftsByLevel` compared `d.level` (the wire value, lowercase via `TestLevel.ToWire()`) against capitalized tab labels — never matched, so every level tab always showed 0 drafts. Now compares case-insensitively.
+  - `PushPanel` let the user pick a Test Plan/Suite/Story via Autocomplete at push time, but `PushAllAsync` takes no body and only ever uses what's stored on the session from scan time — the picker was pure UI theater that silently did nothing. Replaced with a read-only display of the session's actual Plan/Suite/Story (or a clear "set them at scan time" message when missing).
+  - Live verification via real browser network trace: `GET sessions/1` (list) → 200 with real sessions, `GET sessions/detail/1` → 200 with full activity log, `PATCH sessions/1/analysis` → 200 (save round-trip), Coverage tab renders real labels/levels, Drafts tab shows correct non-zero per-level counts (`Contract (1)`, `Endpoint (3)`, `Workflow (1)`), Push tab shows the real Plan #57868/Suite #173473/Story #171740.
+- `npm run build` (tsc -b + vite) and `npm run lint` both clean on the touched files (pre-existing errors in `findBugs.tsx`/`epicRuns.tsx`/`shared.tsx` untouched, not introduced by this change).
+
 ### 2026-07-01 (QAL-062, QAL-063 — Ralph loop resumed)
 - **QAL-063** COMPLETED — `DependencyInjection.AddQaLoop`: `PipelineWatcherHostedService` now `services.AddSingleton<PipelineWatcherHostedService>()` + `services.AddHostedService(sp => sp.GetRequiredService<PipelineWatcherHostedService>())` (was `AddHostedService<T>()` alone, which never registers T as itself). Verified live: `GET/POST/PATCH/DELETE /api/qaloop/pipelines/*` all resolve (previously 500 on every call); added `add-watch → list → delete` round-trip via curl. Regression test added: `JUnitTriageSplitTests.PipelineWatcherHostedService_resolves_both_as_itself_and_as_the_same_IHostedService_instance` (builds a minimal ServiceCollection mirroring the real registration, asserts `GetRequiredService<PipelineWatcherHostedService>()` and the `IHostedService` resolution are the SAME instance).
 - **QAL-062** COMPLETED — turned out to be 6 compounding, previously-hidden layers, each only surfacing once the prior one was fixed and a real run was actually attempted live:

@@ -22,12 +22,13 @@ import { axiosMessage } from '../../common/errors'
 
 import {
   startScan, listSessionsPage, getSessionDetail, saveAnalysis, generateDrafts, patchDraft,
-  approveAllDrafts, pushSession, cancelSession, sessionStreamUrl,
+  approveAllDrafts, pushSession, cancelSession, sessionStreamUrl, LEVEL_NAMES,
   type ApiSessionDetail, type ApiTestDraftDto, type ScanStartRequest, type SurfaceRow,
 } from '../../api/qaLoop'
 import { getPlans, getSuites, searchWorkItems } from '../../api/authorTests'
 import type { TestPlan, TestSuite } from '../../api/authorTests'
 import type { WorkItemOption } from '../types'
+import { PROJECT_ID } from '../../config/env'
 
 // ── Pipeline ──────────────────────────────────────────────────────────────────
 
@@ -95,7 +96,7 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
         workItemId: story?.id ?? undefined,
         autoHandoff: true,
       }
-      const { sessionId } = await startScan(req)
+      const { sessionId } = await startScan(PROJECT_ID, req)
       onStarted(sessionId)
     } catch (err) {
       onError(err, 'Failed to start scan')
@@ -147,18 +148,24 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
 // ── Coverage matrix ───────────────────────────────────────────────────────────
 
 function CoverageMatrix({ session, onSaved }: { session: ApiSessionDetail; onSaved: () => void }) {
+  const module = (() => {
+    try { return JSON.parse(session.analysisJson ?? '')?.Module ?? session.module ?? '' }
+    catch { return session.module ?? '' }
+  })()
   const rows: SurfaceRow[] = (() => {
-    try { const p = JSON.parse(session.analysisJson ?? ''); return Array.isArray(p?.rows) ? p.rows : [] }
+    try { const p = JSON.parse(session.analysisJson ?? ''); return Array.isArray(p?.Rows) ? p.Rows : [] }
     catch { return [] }
   })()
-  const [selected, setSelected] = useState<Set<string>>(() => new Set(rows.map(r => r.surface + r.route)))
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(rows.filter(r => r.Selected).map(r => r.Id)))
   const [saving, setSaving] = useState(false)
 
   async function save() {
     setSaving(true)
     try {
-      const filtered = rows.filter(r => selected.has(r.surface + r.route))
-      await saveAnalysis(session.id, filtered)
+      // Full-replace: resend EVERY row with its current Selected flag, not just the checked ones —
+      // omitting a row here deletes it from the matrix.
+      const updated = rows.map(r => ({ ...r, Selected: selected.has(r.Id) }))
+      await saveAnalysis(session.id, module, updated)
       onSaved()
     } catch { /* user sees nothing — non-blocking */ }
     finally { setSaving(false) }
@@ -167,8 +174,8 @@ function CoverageMatrix({ session, onSaved }: { session: ApiSessionDetail; onSav
   if (rows.length === 0)
     return <EmptyState icon={<QrCode2Icon />} title="No coverage data yet" hint="Wait for the scan to complete." />
 
-  const covered = rows.filter(r => r.status === 'covered')
-  const selCount = rows.filter(r => selected.has(r.surface + r.route)).length
+  const covered = rows.filter(r => r.Status === 'covered')
+  const selCount = selected.size
 
   return (
     <Box>
@@ -177,28 +184,27 @@ function CoverageMatrix({ session, onSaved }: { session: ApiSessionDetail; onSav
         <Box sx={{ flex: 1 }} />
         {covered.length > 0 && (
           <Button size="small" onClick={() => {
-            const gaps = new Set(rows.filter(r => r.status !== 'covered').map(r => r.surface + r.route))
-            setSelected(gaps)
+            setSelected(new Set(rows.filter(r => r.Status !== 'covered').map(r => r.Id)))
           }}>Deselect all covered</Button>
         )}
         <Button size="small" variant="contained" disabled={saving} onClick={save}
           startIcon={saving ? <CircularProgress size={14} /> : undefined}>Save</Button>
       </Stack>
       <Stack spacing={0.5}>
-        {rows.map(r => {
-          const key = r.surface + r.route
-          return (
-            <Stack key={key} direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-              <Checkbox size="small" checked={selected.has(key)}
-                onChange={e => setSelected(prev => { const s = new Set(prev); if (e.target.checked) s.add(key); else s.delete(key); return s })} />
-              <Chip size="small" label={r.level} />
-              <Chip size="small" label={r.status === 'covered' ? 'covered' : 'gap'} color={r.status === 'covered' ? 'success' : 'warning'} variant="outlined" />
-              <Typography variant="body2" sx={{ fontFamily: 'monospace', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {r.method ? `${r.method} ` : ''}{r.route}
-              </Typography>
-            </Stack>
-          )
-        })}
+        {rows.map(r => (
+          <Stack key={r.Id} direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+            <Checkbox size="small" checked={selected.has(r.Id)}
+              onChange={e => setSelected(prev => { const s = new Set(prev); if (e.target.checked) s.add(r.Id); else s.delete(r.Id); return s })} />
+            <Chip size="small" label={LEVEL_NAMES[r.Level] ?? r.Level} />
+            <Chip size="small" label={r.Status === 'covered' ? 'covered' : 'gap'} color={r.Status === 'covered' ? 'success' : 'warning'} variant="outlined" />
+            <Typography variant="body2" sx={{ fontFamily: 'monospace', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {r.Label}
+            </Typography>
+            {r.LinkedTestCaseId && (
+              <Chip size="small" variant="outlined" label={`TC #${r.LinkedTestCaseId}`} />
+            )}
+          </Stack>
+        ))}
       </Stack>
     </Box>
   )
@@ -208,23 +214,25 @@ function CoverageMatrix({ session, onSaved }: { session: ApiSessionDetail; onSav
 
 function DraftsByLevel({ session, refetch }: { session: ApiSessionDetail; refetch: () => void }) {
   const drafts = (session.drafts ?? []) as unknown as ApiTestDraftDto[]
+  // ApiTestDraftDto.level is TestLevel.ToWire() — lowercase ("contract"/"endpoint"/"workflow") — not
+  // the capitalized tab labels; compare case-insensitively rather than assuming either casing.
   const levels = ['Contract', 'Endpoint', 'Workflow']
   const [tab, setTab] = useState(0)
   const [editId, setEditId] = useState<number | null>(null)
   const [editTitle, setEditTitle] = useState('')
   const [saving, setSaving] = useState(false)
 
-  const byLevel = (l: string) => drafts.filter(d => d.level === l)
+  const byLevel = (l: string) => drafts.filter(d => d.level.toLowerCase() === l.toLowerCase())
 
   async function doApprove(id: number) {
-    try { await patchDraft(session.id, id, { status: 'Approved' }); refetch() } catch { /* ignore */ }
+    try { await patchDraft(id, { status: 'Approved' }); refetch() } catch { /* ignore */ }
   }
   async function doReject(id: number) {
-    try { await patchDraft(session.id, id, { status: 'Rejected' }); refetch() } catch { /* ignore */ }
+    try { await patchDraft(id, { status: 'Rejected' }); refetch() } catch { /* ignore */ }
   }
   async function doSaveTitle(d: ApiTestDraftDto) {
     setSaving(true)
-    try { await patchDraft(session.id, d.id, { title: editTitle }); setEditId(null); refetch() }
+    try { await patchDraft(d.id, { title: editTitle }); setEditId(null); refetch() }
     catch { /* ignore */ }
     finally { setSaving(false) }
   }
@@ -289,24 +297,20 @@ function DraftsByLevel({ session, refetch }: { session: ApiSessionDetail; refetc
 
 // ── Push panel ────────────────────────────────────────────────────────────────
 
+// Push reads Plan/Suite/Story from the session itself (set at scan time) — the endpoint takes no
+// body at all, so there is nothing to pick here. Show what will be used and let the user push,
+// or point them back at a new scan if the session was never given a Plan/Suite.
 function PushPanel({ session, refetch }: { session: ApiSessionDetail; refetch: () => void }) {
-  const [plans, setPlans]   = useState<TestPlan[]>([])
-  const [suites, setSuites] = useState<TestSuite[]>([])
-  const [planId, setPlanId] = useState<number | null>(session.testPlanId ?? null)
-  const [suiteId, setSuiteId] = useState<number | null>(session.testSuiteId ?? null)
-  const [storyOpts, setStoryOpts] = useState<WorkItemOption[]>([])
-  const [story, setStory]   = useState<WorkItemOption | null>(null)
-  const [storyInput, setStoryInput] = useState('')
   const [pushing, setPushing] = useState(false)
   const [error, setError]   = useState('')
 
   const drafts = (session.drafts ?? []) as unknown as ApiTestDraftDto[]
   const approved = drafts.filter(d => d.status === 'Approved').length
+  const canPush = Boolean(session.testPlanId && session.testSuiteId)
 
   async function doPush() {
-    if (!planId || !suiteId) { setError('Pick a Test Plan and Suite.'); return }
     setPushing(true); setError('')
-    try { await pushSession(session.id, { testPlanId: planId, testSuiteId: suiteId, storyId: story?.id }); refetch() }
+    try { await pushSession(session.id); refetch() }
     catch (err) { setError(axiosMessage(err)) }
     finally { setPushing(false) }
   }
@@ -319,27 +323,20 @@ function PushPanel({ session, refetch }: { session: ApiSessionDetail; refetch: (
     <Stack spacing={2}>
       {error && <Alert severity="error">{error}</Alert>}
       <Typography variant="body2">{approved} approved draft{approved !== 1 ? 's' : ''} will be pushed.</Typography>
-      <Autocomplete
-        options={plans} getOptionLabel={p => `${p.id} — ${p.name}`} value={plans.find(p => p.id === planId) ?? null}
-        onOpen={async () => { try { setPlans(await getPlans()) } catch { /* ignore */ } }}
-        onChange={(_, v) => { setPlanId(v?.id ?? null); setSuiteId(null); if (v?.id) getSuites(v.id).then(setSuites).catch(() => {}) }}
-        renderInput={p => <TextField {...p} label="Test Plan" size="small" required />}
-      />
-      {planId && (
-        <Autocomplete
-          options={suites} getOptionLabel={s => `${s.id} — ${s.name}`} value={suites.find(s => s.id === suiteId) ?? null}
-          onChange={(_, v) => setSuiteId(v?.id ?? null)}
-          renderInput={p => <TextField {...p} label="Test Suite" size="small" required />}
-        />
+      {canPush ? (
+        <Stack direction="row" spacing={1}>
+          <Chip size="small" label={`Plan #${session.testPlanId}`} />
+          <Chip size="small" label={`Suite #${session.testSuiteId}`} />
+          {session.workItemId && <Chip size="small" label={`Story #${session.workItemId}`} />}
+        </Stack>
+      ) : (
+        <Alert severity="warning">
+          This session has no Test Plan/Suite — set them on the New Scan form to push. (Plan/Suite are
+          chosen once at scan time, not per push.)
+        </Alert>
       )}
-      <Autocomplete
-        options={storyOpts} getOptionLabel={o => `#${o.id} — ${o.title}`} inputValue={storyInput}
-        onInputChange={(_, v) => { setStoryInput(v); if (v.length >= 2) searchWorkItems(v).then(setStoryOpts).catch(() => {}) }}
-        onChange={(_, v) => setStory(v)} value={story}
-        renderInput={p => <TextField {...p} label="Link to Story (optional)" size="small" />}
-      />
       <Stack direction="row" spacing={1}>
-        <Button variant="contained" disabled={pushing || !planId || !suiteId || approved === 0} onClick={doPush}
+        <Button variant="contained" disabled={pushing || !canPush || approved === 0} onClick={doPush}
           startIcon={pushing ? <CircularProgress size={16} /> : <PushPinIcon />}>
           Push {approved > 0 ? `(${approved})` : ''}
         </Button>
@@ -418,7 +415,7 @@ export const qaLoopConfig: SessionModuleConfig = {
     const draftCount = d.drafts?.length ?? 0
     return `${module} · ${d.status}${draftCount > 0 ? ` · ${draftCount} draft${draftCount !== 1 ? 's' : ''}` : ''}`
   },
-  listSessions: (take, skip) => listSessionsPage(take, skip) as Promise<{ total: number; items: SessionSummary[] }>,
+  listSessions: (take, skip) => listSessionsPage(PROJECT_ID, take, skip) as Promise<{ total: number; items: SessionSummary[] }>,
   getDetail: (id) => getSessionDetail(id) as Promise<SessionDetail>,
   streamUrl: sessionStreamUrl,
   StartForm: QaLoopStartForm,

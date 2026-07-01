@@ -785,7 +785,7 @@ The QA Loop Re-shape carves the existing single-page QA Loop into a 3-level API-
   - No change needed to `QaPipelinesController.cs` itself if the DI fix is applied correctly — confirm by leaving the controller untouched
 
 #### QAL-064: Fix api/qaLoop.ts — every method targets the wrong URL
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** QAL-064
 - **Description:** `client/src/api/qaLoop.ts` (rewritten in QAL-046) does not match `QaLoopController`'s real routes at all — e.g. `getSessionDetail` calls `GET /api/qaloop/{id}` but the real route is `GET /api/qaloop/sessions/detail/{id}`; `startScan` calls `POST /api/qaloop/start` but the real route is `POST /api/qaloop/{projectId}/scan/start`. Every one of the 11 methods (list, detail, start, save-analysis, generate-drafts, patch-draft, approve-all, push, push-draft, cancel, stream) has the same class of mismatch. This file is wired directly into `qaLoopConfig` (session/configs/qaLoop.tsx:24-27, 421-422), which drives the entire `/qa-loop` screen. Confirmed live in a real browser: the session list always shows "No sessions yet" even with real sessions in the DB, opening a session hangs forever on "Loading session…", and "Start Scan" 404s silently with no visible error toast.
 - **File:** `client/src/api/qaLoop.ts`
