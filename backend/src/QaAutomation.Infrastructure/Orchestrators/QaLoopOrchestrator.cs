@@ -205,16 +205,36 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
                 }
             }
 
-            // fetchFile delegate for one-shot refinement requested by the model
+            // fetchFile delegate for the analyzer's one-shot refinement. Resolves each request as EITHER an
+            // exact repo path OR (for frontend-driven scans) a search term - an endpoint route string or a
+            // backend class name - via code search, so the analyzer can pull backend handlers it can't
+            // path-guess from the frontend apis/. Resolved paths are recorded as the derived source dirs.
+            var resolvedBackendPaths = new List<string>();
             Func<string, CancellationToken, Task<string?>>? fetchFile = null;
             if (!string.IsNullOrEmpty(session.Repository) && !string.IsNullOrEmpty(session.Branch))
             {
                 var repo = session.Repository;
                 var branch = session.Branch;
-                fetchFile = async (path, fct) =>
+                fetchFile = async (pathOrTerm, fct) =>
                 {
-                    try { return await _ado.GetFileContentAsync(path, @ref: branch, repoId: repo, ct: fct); }
-                    catch { return null; }
+                    try
+                    {
+                        var direct = await _ado.GetFileContentAsync(pathOrTerm, @ref: branch, repoId: repo, ct: fct);
+                        if (!string.IsNullOrEmpty(direct)) { resolvedBackendPaths.Add(pathOrTerm); return direct; }
+                    }
+                    catch { /* not a direct path — try search */ }
+                    try
+                    {
+                        // ponytail: SearchCodeAsync searches the configured ado.repository (single product repo).
+                        var hit = (await _ado.SearchCodeAsync(pathOrTerm, top: 1, ct: fct)).FirstOrDefault();
+                        if (!string.IsNullOrEmpty(hit))
+                        {
+                            var content = await _ado.GetFileContentAsync(hit, @ref: branch, repoId: repo, ct: fct);
+                            if (!string.IsNullOrEmpty(content)) { resolvedBackendPaths.Add(hit); return content; }
+                        }
+                    }
+                    catch (Exception ex) { _log.LogDebug(ex, "fetchFile search fallback failed for '{Term}'", pathOrTerm); }
+                    return null;
                 };
             }
 
@@ -234,6 +254,19 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
 
             session.InventoryJson = JsonSerializer.Serialize(analysis.Inventory);
             session.AnalysisJson = JsonSerializer.Serialize(analysis.Surface);
+
+            // Record the backend dirs the frontend-trace actually resolved, for display + reproducibility.
+            if (resolvedBackendPaths.Count > 0)
+            {
+                var dirs = resolvedBackendPaths
+                    .Select(p => p.TrimStart('/'))
+                    .Select(p => p.LastIndexOf('/') is var i && i > 0 ? p[..i] : p)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                session.SourceDirsJson = JsonSerializer.Serialize(dirs);
+                Pub(key, EventKinds.Result, EventPhases.Analyze,
+                    $"Traced {dirs.Count} backend source dir(s) from the frontend module");
+            }
 
             var selectedCount = analysis.Surface.Rows.Count(r => r.Selected);
             Pub(key, EventKinds.Result, EventPhases.Analyze,
@@ -506,6 +539,15 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
         if (string.IsNullOrEmpty(session.Repository) || string.IsNullOrEmpty(session.Branch))
             return $"Module: {session.Module}";
 
+        // Frontend-module-driven scan: seed with the module's frontend apis/ so the analyzer can read the
+        // backend endpoints it calls and request the backend handlers via additionalFilesNeeded. Falls
+        // back to the SourceDirs / module-name path below if the module has no apis/ folder.
+        if (!string.IsNullOrEmpty(session.FrontendPath))
+        {
+            var seeded = await FetchFrontendApisAsync(session, ct);
+            if (seeded is not null) return seeded;
+        }
+
         var sourceDirs = ParseSourceDirs(session.SourceDirsJson);
 
         try
@@ -560,6 +602,46 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
         if (string.IsNullOrEmpty(json)) return [];
         try { return JsonSerializer.Deserialize<List<string>>(json) ?? []; }
         catch { return []; }
+    }
+
+    /// <summary>Builds the analyzer seed from the selected frontend module's apis/ folder (the axios/fetch
+    /// calls that name the backend endpoints). Returns null when there's no apis/ folder so the caller
+    /// falls back to the SourceDirs/module-name path. The analyzer then requests the backend handlers via
+    /// additionalFilesNeeded (resolved by the search-aware fetchFile in RunPipelineInnerAsync).</summary>
+    private async Task<string?> FetchFrontendApisAsync(ApiTestSession session, CancellationToken ct)
+    {
+        try
+        {
+            var apisDir = $"{session.FrontendPath!.TrimEnd('/')}/apis";
+            var paths = (await _ado.ListRepoFilePathsAsync(apisDir, branch: session.Branch, repoId: session.Repository, ct))
+                .Where(p => p.EndsWith(".ts", StringComparison.OrdinalIgnoreCase)
+                         || p.EndsWith(".tsx", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (paths.Count == 0) return null;   // no apis/ folder — fall back to legacy fetch
+
+            var sb = new StringBuilder();
+            sb.Append($"# Frontend module: {session.Module} (route {session.FrontendModule})\n");
+            sb.Append($"# Repository: {session.Repository} Branch: {session.Branch}\n\n");
+            sb.Append("These are the FRONTEND API-client files for this module - they call the backend REST\n");
+            sb.Append("endpoints under test. Identify every backend endpoint (METHOD + path) they call, then\n");
+            sb.Append("use additionalFilesNeeded (endpoint route strings and/or handler class names as search\n");
+            sb.Append("terms) to fetch the backend implementation and build the full inventory.\n\n");
+            foreach (var path in paths.Take(8))
+            {
+                try
+                {
+                    var content = await _ado.GetFileContentAsync(path, @ref: session.Branch, repoId: session.Repository, ct: ct);
+                    sb.Append($"## {path}\n```\n{content}\n```\n\n");
+                }
+                catch (Exception ex) { _log.LogDebug(ex, "Skipping unreadable frontend file {Path}", path); }
+            }
+            return sb.ToString();
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Frontend apis fetch failed for module '{Module}'", session.Module);
+            return null;
+        }
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
