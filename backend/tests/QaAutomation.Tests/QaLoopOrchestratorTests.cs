@@ -56,6 +56,40 @@ public sealed class QaLoopOrchestratorTests
     }
 
     [Fact]
+    public async Task Analyze_populates_WorkItemTitle_from_the_linked_work_item()
+    {
+        // QAL-070: mirrors AgentOrchestrator/BugOrchestrator, which fetch and store WorkItemTitle at
+        // session creation — QaLoopOrchestrator's session is pre-seeded by the controller instead, so
+        // the fetch has to happen in the background pipeline itself.
+        using var h = Harness.Create(new StubLlmClient(EmptyAnalyzerJson));
+        h.Ado.WorkItemToReturn = new AdoWorkItem { Id = 171740, Title = "Deals: add lead endpoint" };
+
+        var sid = await h.SeedSessionAsync(module: "Deals", autoHandoff: false, workItemId: 171740);
+        await h.Orchestrator.StartAsync(sid);
+        var session = await h.WaitForTerminalAsync(sid);
+
+        Assert.Equal(ApiSessionStatus.AwaitingReview, session.Status);
+        Assert.Equal("Deals: add lead endpoint", session.WorkItemTitle);
+    }
+
+    [Fact]
+    public async Task Analyze_leaves_WorkItemTitle_null_and_still_completes_when_the_ADO_fetch_throws()
+    {
+        // A failed work-item fetch must degrade gracefully: catch-log, leave WorkItemTitle null,
+        // never fail the scan.
+        using var h = Harness.Create(new StubLlmClient(EmptyAnalyzerJson));
+        h.Ado.ThrowOnGetWorkItem = true;
+
+        var sid = await h.SeedSessionAsync(module: "Deals", autoHandoff: false, workItemId: 171740);
+        await h.Orchestrator.StartAsync(sid);
+        var session = await h.WaitForTerminalAsync(sid);
+
+        Assert.Equal(ApiSessionStatus.AwaitingReview, session.Status);   // scan still completed
+        Assert.Null(session.WorkItemTitle);
+        Assert.Null(session.ErrorMessage);   // the failure never bubbled up as a scan error
+    }
+
+    [Fact]
     public async Task Analyze_with_AutoHandoff_reaches_Drafted()
     {
         using var h = Harness.Create(new StubLlmClient(EmptyAnalyzerJson));
@@ -383,13 +417,16 @@ public sealed class QaLoopOrchestratorTests
         public Task<ILlmClient> CreateAsync(CancellationToken ct = default) => Task.FromResult(_client);
     }
 
-    /// <summary>Stub ADO client for QA Loop push tests: records write calls; reads throw.</summary>
+    /// <summary>Stub ADO client for QA Loop push tests: records write calls; reads throw unless
+    /// configured (GetWorkItemAsync — QAL-070 — returns WorkItemToReturn, or throws if configured to).</summary>
     internal sealed class QaLoopAdoStub : IAzureDevOpsClient
     {
         private int _nextTcId = 7000;
         public List<string> CreatedTestCases { get; } = [];
         public List<(int PlanId, int SuiteId, int TcId)> SuiteAdds { get; } = [];
         public List<(int StoryId, int TcId)> TestedByLinks { get; } = [];
+        public AdoWorkItem? WorkItemToReturn { get; set; }
+        public bool ThrowOnGetWorkItem { get; set; }
 
         public Task<int> CreateTestCaseAsync(
             string title, string preconditions, IReadOnlyList<TestCaseStep> steps, CancellationToken ct = default)
@@ -413,8 +450,12 @@ public sealed class QaLoopOrchestratorTests
         public Task<IReadOnlyList<LinkedTestCase>> GetSuiteTestCasesAsync(int planId, int suiteId, bool recurse = true, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<LinkedTestCase>>([]);
 
+        public Task<AdoWorkItem> GetWorkItemAsync(int workItemId, bool forceRefresh = false, CancellationToken ct = default) =>
+            ThrowOnGetWorkItem
+                ? throw new InvalidOperationException("simulated ADO failure")
+                : Task.FromResult(WorkItemToReturn ?? throw new NotImplementedException());
+
         // ── unused ──
-        public Task<AdoWorkItem> GetWorkItemAsync(int workItemId, bool forceRefresh = false, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<string>> DiscoverOrganizationsAsync(CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<AdoNamedRef>> DiscoverProjectsAsync(string organization, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<string>> DiscoverAreaPathsAsync(string organization, string project, CancellationToken ct = default) => throw new NotImplementedException();
