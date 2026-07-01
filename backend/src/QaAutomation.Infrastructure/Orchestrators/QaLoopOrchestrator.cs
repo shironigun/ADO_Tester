@@ -379,37 +379,49 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
         var endpointRoutes = MatchRoutes(selected.Where(r => r.Level == TestLevel.Endpoint), analysis.Inventory.Routes);
         var workflowItems  = MatchWorkflows(selected.Where(r => r.Level == TestLevel.Workflow), analysis.Inventory.Workflows);
 
-        // All generators run in parallel (Task.WhenAll across all three levels)
+        // Generators fan out concurrently, but CAPPED: each generator spawns claude CLI child process(es),
+        // and firing all selected surfaces at once (a module can have 40+) starves the thread pool so the
+        // stdin-writer can't feed a spawned `claude -p` within its 3s window → every call dies with
+        // "no stdin data received in 3s". Gate the fan-out to a handful at a time.
+        using var genGate = new System.Threading.SemaphoreSlim(4, 4);
+        Task<List<GeneratedSpec>?> Gated(Func<Task<List<GeneratedSpec>?>> factory) =>
+            GenerateSafeAsync(async () =>
+            {
+                await genGate.WaitAsync(ct);
+                try { return await factory(); }
+                finally { genGate.Release(); }
+            }, key);
+
         var allTasks = new List<Task<List<GeneratedSpec>?>>();
 
         foreach (var r in contractRoutes)
         {
             var route = r;
-            allTasks.Add(GenerateSafeAsync(async () =>
+            allTasks.Add(Gated(async () =>
             {
                 var spec = await new ContractGeneratorAgent(llm).GenerateAsync(
                     session.Module, route, emit: EmitClosure(key, EventPhases.Generate, session.ActivityEnabled), ct: ct);
                 return new List<GeneratedSpec> { spec };
-            }, key));
+            }));
         }
 
         foreach (var r in endpointRoutes)
         {
             var route = r;
-            allTasks.Add(GenerateSafeAsync(async () =>
+            allTasks.Add(Gated(async () =>
                 (List<GeneratedSpec>?) await new EndpointGeneratorAgent(llm).GenerateAsync(
-                    session.Module, route, emit: EmitClosure(key, EventPhases.Generate, session.ActivityEnabled), ct: ct), key));
+                    session.Module, route, emit: EmitClosure(key, EventPhases.Generate, session.ActivityEnabled), ct: ct)));
         }
 
         foreach (var w in workflowItems)
         {
             var workflow = w;
-            allTasks.Add(GenerateSafeAsync(async () =>
+            allTasks.Add(Gated(async () =>
             {
                 var spec = await new WorkflowGeneratorAgent(llm).GenerateAsync(
                     session.Module, workflow, analysis.Inventory, emit: EmitClosure(key, EventPhases.Generate, session.ActivityEnabled), ct: ct);
                 return new List<GeneratedSpec> { spec };
-            }, key));
+            }));
         }
 
         var results = await Task.WhenAll(allTasks);
