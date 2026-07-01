@@ -93,6 +93,45 @@ public sealed class QaLoopOrchestratorTests
     }
 
     [Fact]
+    public async Task GenerateDrafts_writes_Contract_schema_file_under_the_models_own_import_name()
+    {
+        // QAL-071: the model invents its OWN relative import path for the schema — unrelated to our
+        // spec-filename slug (which comes from the TEST CASE TITLE, not the route). Ground-truth
+        // example from a real generated file: `import { X } from './get-lead-deal-dealId.schema';` —
+        // that must resolve to a real get-lead-deal-dealId.schema.ts sitting next to the .spec.ts.
+        const string specWithSchemaImport = """
+            import { test, expect } from '@playwright/test';
+            import { DealDetailsDtoSchema } from './get-lead-deal-dealId.schema';
+
+            test('[<tcId-pending>] Contract: GET /deals/{dealId} - response shape matches schema', async () => {
+              expect(DealDetailsDtoSchema).toBeDefined();
+            });
+            """;
+        var specJson = System.Text.Json.JsonSerializer.Serialize(
+            new { spec = specWithSchemaImport, schema = "{\"type\":\"object\"}" });
+
+        using var h = Harness.Create(new StubLlmClient(OneGapAnalyzerJson, specJson, ContractTcJson));
+
+        var sid = await h.SeedSessionAsync(module: "Deals", autoHandoff: false);
+        await h.Orchestrator.StartAsync(sid);
+        await h.WaitForTerminalAsync(sid);    // AwaitingReview
+
+        await h.Orchestrator.GenerateDraftsAsync(sid);
+        await h.WaitForTerminalAsync(sid, ApiSessionStatus.Drafted);
+
+        using var scope = h.Provider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+        var draft = db.ApiTestDrafts.Single(d => d.SessionId == sid);
+        Assert.NotNull(draft.SpecFilePath);
+
+        var schemaPath = Path.Combine(Path.GetDirectoryName(draft.SpecFilePath)!, "get-lead-deal-dealId.schema.ts");
+        Assert.True(File.Exists(schemaPath), $"expected schema file at {schemaPath}");
+        Assert.Equal("{\"type\":\"object\"}", File.ReadAllText(schemaPath));
+        // Same directory as the spec — resolves the model's own `./get-lead-deal-dealId.schema` import.
+        Assert.Equal(Path.GetDirectoryName(draft.SpecFilePath), Path.GetDirectoryName(schemaPath));
+    }
+
+    [Fact]
     public async Task Push_rewrites_pending_tag_and_sets_AdoTestCaseId()
     {
         using var h = Harness.Create(new StubLlmClient());
