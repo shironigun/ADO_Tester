@@ -97,6 +97,14 @@ public static class DependencyInjection
             if (rt.Get("claude_cli.timeout_seconds") is { } ts && int.TryParse(ts, out var t))
                 o.TimeoutSeconds = Math.Max(10, t);
         });
+        services.AddOptions<CopilotCliOptions>().PostConfigure<RuntimeSettings>((o, rt) =>
+        {
+            o.Path = rt.Get("copilot_cli.path") ?? o.Path;
+            o.Model = rt.Get("copilot_cli.model") ?? o.Model;
+            o.Context = rt.Get("copilot_cli.context") ?? o.Context;
+            if (rt.Get("copilot_cli.timeout_seconds") is { } ts && int.TryParse(ts, out var t))
+                o.TimeoutSeconds = Math.Max(10, t);
+        });
 
         services.AddSingleton<IAppSettingsService, AppSettingsService>();
         return services;
@@ -173,6 +181,16 @@ public static class DependencyInjection
                 o.Path = Env("CLAUDE_CLI_PATH") ?? o.Path;
                 o.Model = Env("CLAUDE_CLI_MODEL") ?? o.Model;
                 if (int.TryParse(Env("CLAUDE_CLI_TIMEOUT_SECONDS"), out var t)) o.TimeoutSeconds = t;
+            });
+
+        services.AddOptions<CopilotCliOptions>()
+            .Bind(config.GetSection(CopilotCliOptions.SectionName))
+            .PostConfigure(o =>
+            {
+                o.Path = Env("COPILOT_CLI_PATH") ?? o.Path;
+                o.Model = Env("COPILOT_CLI_MODEL") ?? o.Model;
+                o.Context = Env("COPILOT_CLI_CONTEXT") ?? o.Context;
+                if (int.TryParse(Env("COPILOT_CLI_TIMEOUT_SECONDS"), out var t)) o.TimeoutSeconds = t;
             });
 
         // Anthropic provider is built per-call on a pooled HttpClient. 10-min timeout matches the SDK default.

@@ -32,6 +32,11 @@ export async function getClaudeCliModels(): Promise<string[]> {
   return data.suggestions ?? []
 }
 
+export async function getCopilotCliModels(): Promise<string[]> {
+  const { data } = await api.get<{ suggestions: string[] }>('/api/settings/copilot-cli/models')
+  return data.suggestions ?? []
+}
+
 export async function getAdoOrgs(): Promise<string[]> {
   const { data } = await api.get<{ organizations: string[] }>('/api/settings/ado/orgs')
   return data.organizations ?? []

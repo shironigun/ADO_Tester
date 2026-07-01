@@ -34,7 +34,7 @@ import { MONO_FONT } from '../theme/tokens'
 import { apiUrl } from '../config/env'
 import { axiosMessage } from '../common/errors'
 import {
-  getConfig, saveConfig, getClaudeCliModels, getAdoOrgs, getAdoProjects, getAdoAreaPaths, getAdoBranches,
+  getConfig, saveConfig, getClaudeCliModels, getCopilotCliModels, getAdoOrgs, getAdoProjects, getAdoAreaPaths, getAdoBranches, getAdoRepositories,
   type Config, type AdoProject,
 } from '../api/settings'
 import { getEnvStatus, getWorkItem, pingLlm, type EnvStatus, type WorkItem } from '../api/diagnostics'
@@ -58,6 +58,10 @@ const K = {
   CLAUDE_CLI_PATH: 'claude_cli.path',
   CLAUDE_CLI_MODEL: 'claude_cli.model',
   CLAUDE_CLI_TIMEOUT: 'claude_cli.timeout_seconds',
+  COPILOT_CLI_PATH: 'copilot_cli.path',
+  COPILOT_CLI_MODEL: 'copilot_cli.model',
+  COPILOT_CLI_CONTEXT: 'copilot_cli.context',
+  COPILOT_CLI_TIMEOUT: 'copilot_cli.timeout_seconds',
   DEFAULT_PLAN_ID: 'defaults.test_plan_id',
   DEFAULT_SUITE_ID: 'defaults.test_suite_id',
   DEFAULT_BOARDS: 'reports.default_boards',
@@ -73,6 +77,10 @@ const K = {
   QALOOP_POLL: 'qaloop.poll_interval_minutes',
   QALOOP_REPORT: 'qaloop.report_provider',
   QALOOP_ACTIVITY: 'qaloop.activity_enabled',
+  QALOOP_DEFAULT_REPO: 'qaloop.default_repository',
+  QALOOP_DEFAULT_BRANCH: 'qaloop.default_branch',
+  QALOOP_DEFAULT_PLAN: 'qaloop.default_plan_id',
+  QALOOP_DEFAULT_SUITE: 'qaloop.default_suite_id',
 }
 
 const REPORT_TYPE_OPTIONS = ['User Story', 'Bug', 'Defect', 'Task', 'Issue', 'Feature']
@@ -226,6 +234,11 @@ export default function SettingsPage() {
   const [claudeCliModel, setClaudeCliModel] = useState('')
   const [claudeCliTimeout, setClaudeCliTimeout] = useState('180')
   const [claudeCliModels, setClaudeCliModels] = useState<string[]>([])
+  const [copilotCliPath, setCopilotCliPath] = useState('')
+  const [copilotCliModel, setCopilotCliModel] = useState('')
+  const [copilotCliContext, setCopilotCliContext] = useState('')
+  const [copilotCliTimeout, setCopilotCliTimeout] = useState('180')
+  const [copilotCliModels, setCopilotCliModels] = useState<string[]>([])
   const [defaultPlan, setDefaultPlan] = useState<number | ''>('')
   const [defaultSuite, setDefaultSuite] = useState<number | ''>('')
   const [schedEnabled, setSchedEnabled] = useState(true)
@@ -241,6 +254,15 @@ export default function SettingsPage() {
   const [pollInterval, setPollInterval] = useState('5')
   const [reportProvider, setReportProvider] = useState('allure')
   const [qaLoopActivity, setQaLoopActivity] = useState(true)
+  const [qaLoopDefaultRepo, setQaLoopDefaultRepo] = useState('')
+  const [qaLoopDefaultBranch, setQaLoopDefaultBranch] = useState('')
+  const [qaLoopDefaultPlanId, setQaLoopDefaultPlanId] = useState<number | ''>('')
+  const [qaLoopDefaultSuiteId, setQaLoopDefaultSuiteId] = useState<number | ''>('')
+  const [qaLoopDefaultRepos, setQaLoopDefaultRepos] = useState<string[]>([])
+  const [qaLoopDefaultBranches, setQaLoopDefaultBranches] = useState<string[]>([])
+  const [qaLoopDefaultBranchesLoading, setQaLoopDefaultBranchesLoading] = useState(false)
+  const [qaLoopDefaultPlans, setQaLoopDefaultPlans] = useState<TestPlan[]>([])
+  const [qaLoopDefaultSuites, setQaLoopDefaultSuites] = useState<TestSuite[]>([])
 
   const [plans, setPlans] = useState<TestPlan[]>([])
   const [suites, setSuites] = useState<TestSuite[]>([])
@@ -282,6 +304,10 @@ export default function SettingsPage() {
       setClaudeCliPath(String(data[K.CLAUDE_CLI_PATH] ?? 'claude'))
       setClaudeCliModel(String(data[K.CLAUDE_CLI_MODEL] ?? ''))
       setClaudeCliTimeout(String(data[K.CLAUDE_CLI_TIMEOUT] ?? '180'))
+      setCopilotCliPath(String(data[K.COPILOT_CLI_PATH] ?? ''))
+      setCopilotCliModel(String(data[K.COPILOT_CLI_MODEL] ?? ''))
+      setCopilotCliContext(String(data[K.COPILOT_CLI_CONTEXT] ?? ''))
+      setCopilotCliTimeout(String(data[K.COPILOT_CLI_TIMEOUT] ?? '180'))
       setDefaultPlan(data[K.DEFAULT_PLAN_ID] ? Number(data[K.DEFAULT_PLAN_ID]) : '')
       setDefaultSuite(data[K.DEFAULT_SUITE_ID] ? Number(data[K.DEFAULT_SUITE_ID]) : '')
       const savedBoards = String(data[K.DEFAULT_BOARDS] ?? '')
@@ -297,6 +323,24 @@ export default function SettingsPage() {
       setPollInterval(String(data[K.QALOOP_POLL] ?? '5'))
       setReportProvider(String(data[K.QALOOP_REPORT] ?? 'allure'))
       setQaLoopActivity(String(data[K.QALOOP_ACTIVITY] ?? 'true').toLowerCase() === 'true')
+      setQaLoopDefaultRepo(String(data[K.QALOOP_DEFAULT_REPO] ?? ''))
+      setQaLoopDefaultBranch(String(data[K.QALOOP_DEFAULT_BRANCH] ?? ''))
+      setQaLoopDefaultPlanId(data[K.QALOOP_DEFAULT_PLAN] ? Number(data[K.QALOOP_DEFAULT_PLAN]) : '')
+      setQaLoopDefaultSuiteId(data[K.QALOOP_DEFAULT_SUITE] ? Number(data[K.QALOOP_DEFAULT_SUITE]) : '')
+
+      // Eagerly pre-load option lists so saved values render correctly without opening dropdowns.
+      const savedRepo = String(data[K.QALOOP_DEFAULT_REPO] ?? '')
+      const savedPlanId = data[K.QALOOP_DEFAULT_PLAN] ? Number(data[K.QALOOP_DEFAULT_PLAN]) : null
+      const savedSuiteId = data[K.QALOOP_DEFAULT_SUITE] ? Number(data[K.QALOOP_DEFAULT_SUITE]) : null
+      if (savedRepo) {
+        getAdoBranches(savedRepo).then(setQaLoopDefaultBranches).catch(() => {})
+      }
+      if (savedPlanId) {
+        getPlans().then(ps => {
+          setQaLoopDefaultPlans(ps)
+          if (savedSuiteId) getSuites(savedPlanId).then(setQaLoopDefaultSuites).catch(() => {})
+        }).catch(() => {})
+      }
     } catch (e) { setError(axiosMessage(e)) }
     finally { setLoading(false) }
   }, [])
@@ -305,6 +349,10 @@ export default function SettingsPage() {
 
   useEffect(() => {
     getClaudeCliModels().then(setClaudeCliModels).catch(() => setClaudeCliModels([]))
+  }, [])
+
+  useEffect(() => {
+    getCopilotCliModels().then(setCopilotCliModels).catch(() => setCopilotCliModels([]))
   }, [])
 
   // Auto-fetch env so the status strip renders without clicking "Re-check".
@@ -592,6 +640,39 @@ export default function SettingsPage() {
                             })}>Save</Button>
                         </ProviderCard>
                       </StaggerItem>
+
+                      <StaggerItem>
+                        <ProviderCard name="Copilot CLI"
+                          blurb={env?.copilotCliAvailable
+                            ? `Local CLI ${env.copilotCliVersion} — uses your GitHub Copilot login, no key.`
+                            : 'Local `copilot` CLI not detected — install GitHub Copilot CLI and run `copilot auth login`.'}
+                          active={activeProvider === 'CopilotCli'} ready={!!env?.copilotCliAvailable}>
+                          <TextField label="CLI path (blank = auto-detect)" size="small" fullWidth value={copilotCliPath}
+                            onChange={e => setCopilotCliPath(e.target.value)} placeholder="copilot"
+                            helperText="Leave blank to auto-find copilot / github-copilot-cli / gh-copilot on PATH, in %APPDATA%\npm, pnpm, Volta, or npm's global prefix." />
+                          <Autocomplete
+                            freeSolo options={copilotCliModels} value={copilotCliModel}
+                            onChange={(_, v) => setCopilotCliModel(v || '')}
+                            onInputChange={(_, v) => setCopilotCliModel(v)}
+                            renderInput={p => <TextField {...p} label="Model" size="small" placeholder="(blank = CLI default)" />}
+                          />
+                          <FormControl size="small" fullWidth>
+                            <InputLabel>Context window</InputLabel>
+                            <Select label="Context window" value={copilotCliContext}
+                              onChange={e => setCopilotCliContext(e.target.value)}>
+                              <MenuItem value="">Default (CLI decides)</MenuItem>
+                              <MenuItem value="long_context">long_context — maximum context window</MenuItem>
+                            </Select>
+                          </FormControl>
+                          <TextField label="Timeout (seconds)" size="small" type="number" fullWidth
+                            value={copilotCliTimeout} onChange={e => setCopilotCliTimeout(e.target.value)} />
+                          <Button size="small" variant="text" sx={{ alignSelf: 'flex-end' }}
+                            onClick={() => save({
+                              [K.COPILOT_CLI_PATH]: copilotCliPath, [K.COPILOT_CLI_MODEL]: copilotCliModel,
+                              [K.COPILOT_CLI_CONTEXT]: copilotCliContext, [K.COPILOT_CLI_TIMEOUT]: copilotCliTimeout,
+                            })}>Save</Button>
+                        </ProviderCard>
+                      </StaggerItem>
                     </Box>
                   </Stagger>
                 </Box>
@@ -683,6 +764,94 @@ export default function SettingsPage() {
               {tab === 'qaloop' && (
                 <Box>
                   <TabTitle title="QA Loop" hint="Pipeline watcher, Teams notifications, report format, and activity toggle." />
+
+                  <Panel title="New Scan defaults">
+                    <Stack spacing={2}>
+                      <Typography variant="body2" color="text.secondary">
+                        Pre-fill the New Scan dialog — users can still override each field.
+                      </Typography>
+                      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                        <Autocomplete
+                          sx={{ flex: 1 }}
+                          freeSolo options={qaLoopDefaultRepos} value={qaLoopDefaultRepo}
+                          onOpen={() => { if (!qaLoopDefaultRepos.length) getAdoRepositories().then(setQaLoopDefaultRepos).catch(() => setQaLoopDefaultRepos([])) }}
+                          onChange={(_, v) => {
+                            setQaLoopDefaultRepo(v || '')
+                            setQaLoopDefaultBranch('')
+                            setQaLoopDefaultBranches([])
+                            if (v) {
+                              setQaLoopDefaultBranchesLoading(true)
+                              getAdoBranches(v).then(bs => { setQaLoopDefaultBranches(bs) }).catch(() => {}).finally(() => setQaLoopDefaultBranchesLoading(false))
+                            }
+                          }}
+                          onInputChange={(_, v) => setQaLoopDefaultRepo(v)}
+                          renderInput={p => <TextField {...p} label="Default repository" size="small" placeholder="(none)" />}
+                        />
+                        <Autocomplete
+                          sx={{ flex: 1 }}
+                          freeSolo options={qaLoopDefaultBranches} value={qaLoopDefaultBranch}
+                          disabled={!qaLoopDefaultRepo}
+                          loading={qaLoopDefaultBranchesLoading}
+                          onOpen={() => {
+                            if (qaLoopDefaultRepo && !qaLoopDefaultBranches.length) {
+                              setQaLoopDefaultBranchesLoading(true)
+                              getAdoBranches(qaLoopDefaultRepo).then(setQaLoopDefaultBranches).catch(() => {}).finally(() => setQaLoopDefaultBranchesLoading(false))
+                            }
+                          }}
+                          onChange={(_, v) => setQaLoopDefaultBranch(v || '')}
+                          onInputChange={(_, v) => setQaLoopDefaultBranch(v)}
+                          renderInput={p => <TextField {...p} label="Default branch" size="small" placeholder="(none)"
+                            helperText={!qaLoopDefaultRepo ? 'Pick a repository first' : undefined} />}
+                        />
+                      </Stack>
+                      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                        <FormControl size="small" sx={{ flex: 1 }}>
+                          <InputLabel>Default Test Plan</InputLabel>
+                          <Select label="Default Test Plan" value={qaLoopDefaultPlanId}
+                            onOpen={() => { getPlans().then(setQaLoopDefaultPlans).catch(() => {}) }}
+                            onChange={e => {
+                              const pid = e.target.value as number
+                              setQaLoopDefaultPlanId(pid)
+                              setQaLoopDefaultSuiteId('')
+                              setQaLoopDefaultSuites([])
+                              if (pid) getSuites(pid).then(setQaLoopDefaultSuites).catch(() => {})
+                            }}>
+                            <MenuItem value="">(none)</MenuItem>
+                            {qaLoopDefaultPlans.map(p => (
+                              <MenuItem key={p.id} value={p.id}>
+                                {p.name}
+                                <Box component="span" sx={{ ml: 1, fontFamily: MONO_FONT, fontSize: 11, color: 'text.secondary' }}>#{p.id}</Box>
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                        <FormControl size="small" sx={{ flex: 1 }} disabled={!qaLoopDefaultPlanId}>
+                          <InputLabel>Default Test Suite</InputLabel>
+                          <Select label="Default Test Suite" value={qaLoopDefaultSuiteId}
+                            onOpen={() => {
+                              if (qaLoopDefaultPlanId && !qaLoopDefaultSuites.length)
+                                getSuites(qaLoopDefaultPlanId as number).then(setQaLoopDefaultSuites).catch(() => {})
+                            }}
+                            onChange={e => setQaLoopDefaultSuiteId(e.target.value as number)}>
+                            <MenuItem value="">(none)</MenuItem>
+                            {qaLoopDefaultSuites.map(s => (
+                              <MenuItem key={s.id} value={s.id}>
+                                {s.name}
+                                <Box component="span" sx={{ ml: 1, fontFamily: MONO_FONT, fontSize: 11, color: 'text.secondary' }}>#{s.id}</Box>
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                      </Stack>
+                    </Stack>
+                    <SaveBar label="Save scan defaults" onClick={() => save({
+                      [K.QALOOP_DEFAULT_REPO]: qaLoopDefaultRepo,
+                      [K.QALOOP_DEFAULT_BRANCH]: qaLoopDefaultBranch,
+                      [K.QALOOP_DEFAULT_PLAN]: qaLoopDefaultPlanId === '' ? '' : String(qaLoopDefaultPlanId),
+                      [K.QALOOP_DEFAULT_SUITE]: qaLoopDefaultSuiteId === '' ? '' : String(qaLoopDefaultSuiteId),
+                    })} />
+                  </Panel>
+
                   <Panel>
                     <Stack spacing={2.5}>
                       <SecretField label="Teams webhook URL" value={teamsWebhook} set={setTeamsWebhook}
@@ -808,6 +977,8 @@ export default function SettingsPage() {
                               <StatusPill ok={env.azureOpenAiConfigured} label="Azure OpenAI" />
                               <StatusPill ok={env.claudeCliAvailable} label="Claude CLI"
                                 value={env.claudeCliVersion ?? (env.claudeCliAvailable ? 'ok' : 'missing')} />
+                              <StatusPill ok={env.copilotCliAvailable} label="Copilot CLI"
+                                value={env.copilotCliVersion ?? (env.copilotCliAvailable ? 'ok' : 'missing')} />
                             </Stack>
                           ) : <CircularProgress size={20} />}
                         </Panel>

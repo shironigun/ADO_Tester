@@ -7,6 +7,8 @@ export interface EnvStatus {
   azureOpenAiConfigured: boolean
   claudeCliAvailable: boolean
   claudeCliVersion: string | null
+  copilotCliAvailable: boolean
+  copilotCliVersion: string | null
 }
 
 export interface WorkItem {

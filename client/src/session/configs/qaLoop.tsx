@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Alert, Autocomplete, Box, Button, Card, CardContent, Checkbox, Chip, CircularProgress,
   IconButton, LinearProgress, Stack, Tab, Tabs, TextField, Tooltip, Typography,
@@ -28,7 +28,7 @@ import {
 } from '../../api/qaLoop'
 import { getPlans, getSuites, searchWorkItems } from '../../api/authorTests'
 import type { TestPlan, TestSuite } from '../../api/authorTests'
-import { getAdoRepositories, getAdoBranches } from '../../api/settings'
+import { getAdoRepositories, getAdoBranches, getConfig } from '../../api/settings'
 import type { WorkItemOption } from '../types'
 import { PROJECT_ID } from '../../config/env'
 
@@ -78,6 +78,35 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
   const [branches, setBranches]       = useState<string[]>([])
   const [branchesLoading, setBranchesLoading] = useState(false)
   const [loading, setLoading]         = useState(false)
+
+  // Load saved defaults from Settings and pre-populate fields on mount.
+  useEffect(() => {
+    getConfig().then(async cfg => {
+      const defRepo   = String(cfg['qaloop.default_repository'] ?? '')
+      const defBranch = String(cfg['qaloop.default_branch'] ?? '')
+      const defPlanId = cfg['qaloop.default_plan_id'] ? Number(cfg['qaloop.default_plan_id']) : null
+      const defSuiteId = cfg['qaloop.default_suite_id'] ? Number(cfg['qaloop.default_suite_id']) : null
+
+      if (defRepo) {
+        setRepo(defRepo)
+        try {
+          const bs = await getAdoBranches(defRepo)
+          setBranches(bs)
+          if (defBranch) setBranch(defBranch)
+          else if (bs.includes('main')) setBranch('main')
+        } catch { /* ignore */ }
+      }
+      if (defPlanId) {
+        setPlanId(defPlanId)
+        try {
+          const [ps, ss] = await Promise.all([getPlans(), getSuites(defPlanId)])
+          setPlans(ps)
+          setSuites(ss)
+          if (defSuiteId) setSuiteId(defSuiteId)
+        } catch { /* ignore */ }
+      }
+    }).catch(() => { /* best-effort */ })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadFrontendModules() {
     if (fmodules.length > 0) return
@@ -166,13 +195,17 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
         />
         <Autocomplete
           options={plans} getOptionLabel={p => `${p.id} — ${p.name}`}
+          value={plans.find(p => p.id === planId) ?? null}
+          isOptionEqualToValue={(a, b) => a.id === b.id}
           onOpen={loadPlans}
-          onChange={(_, v) => { setPlanId(v?.id ?? null); setSuiteId(null); if (v) loadSuites(v.id) }}
+          onChange={(_, v) => { setPlanId(v?.id ?? null); setSuiteId(null); setSuites([]); if (v) loadSuites(v.id) }}
           renderInput={p => <TextField {...p} label="Test Plan (optional)" size="small" />}
         />
         {planId && (
           <Autocomplete
             options={suites} getOptionLabel={s => `${s.id} — ${s.name}`}
+            value={suites.find(s => s.id === suiteId) ?? null}
+            isOptionEqualToValue={(a, b) => a.id === b.id}
             onChange={(_, v) => setSuiteId(v?.id ?? null)}
             renderInput={p => <TextField {...p} label="Test Suite (optional)" size="small" />}
           />

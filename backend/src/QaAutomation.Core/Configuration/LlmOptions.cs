@@ -8,6 +8,8 @@ public enum LlmProvider
     OpenAICompatible,
     /// <summary>Local <c>claude</c> CLI (Pro/Max subscription, no API key) — streams token deltas.</summary>
     ClaudeCli,
+    /// <summary>Local GitHub <c>copilot</c> CLI (Copilot subscription, no API key) — mirrors ClaudeCli.</summary>
+    CopilotCli,
 }
 
 /// <summary>Default provider at startup. Live switching is handled by ILlmProviderState.</summary>
