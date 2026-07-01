@@ -22,5 +22,5 @@ Rules for spec:
 - Idempotent cleanup: use test.afterEach or a finally block to DELETE/revert any resources created during the test. Include a comment // cleanup: <what is cleaned up>.
 - Propagate the response body of each step (e.g. created id) as input to the next step.
 - No screenshot, no video, no browser; API-only (no use: block).
-- Use AUTOMATION_PROFILE env var for base URL; AUTOMATION_BEARER_TOKEN for auth.
+- Use AUTOMATION_BASE_URL env var for base URL (const BASE_URL = process.env.AUTOMATION_BASE_URL ?? '';); AUTOMATION_BEARER_TOKEN for auth.
 - Output path note: // intended: backend/data/scripts/{module}/workflows/{slug}.workflow.spec.ts
