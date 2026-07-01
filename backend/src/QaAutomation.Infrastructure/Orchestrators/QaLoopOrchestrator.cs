@@ -567,8 +567,7 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
         {
             try
             {
-                var levelDir = Path.Combine(_scriptsDir, session.Module,
-                    level.ToString().ToLowerInvariant() + "s");
+                var levelDir = Path.Combine(_scriptsDir, session.Module, level.ToDirName());
                 Directory.CreateDirectory(levelDir);
                 var slug = Slug(spec.TestCase?.Title ?? spec.Title);
                 var specPath = Path.Combine(levelDir, $"{slug}.spec.ts");

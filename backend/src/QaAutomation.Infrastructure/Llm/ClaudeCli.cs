@@ -87,8 +87,11 @@ public static class ClaudeCli
         return (false, null);
     }
 
-    /// <summary>PATH lookup honoring PATHEXT on Windows (mirrors Python's shutil.which).</summary>
-    private static string? Which(string name)
+    /// <summary>PATH lookup honoring PATHEXT on Windows (mirrors Python's shutil.which).
+    /// Internal (not just private) so other Infrastructure spawners — e.g. <c>PlaywrightRunner</c>
+    /// resolving npm/npx — can reuse the same PATHEXT-aware resolution instead of relying on
+    /// bare <c>ProcessStartInfo</c>, which can't find .cmd shims on Windows.</summary>
+    internal static string? Which(string name)
     {
         if (string.IsNullOrWhiteSpace(name))
             return null;
@@ -96,11 +99,19 @@ public static class ClaudeCli
         var pathVar = Environment.GetEnvironmentVariable("PATH") ?? "";
         var dirs = pathVar.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries);
 
-        var exts = new List<string> { "" };
+        // PATHEXT extensions must be tried BEFORE the bare name on Windows: node.js's install dir
+        // ships both a bare POSIX shell-script "npm" (not a valid Win32 executable) and the real
+        // "npm.cmd" shim side by side, and a bare-name-first search picks the unusable decoy.
+        List<string> exts;
         if (OperatingSystem.IsWindows())
         {
             var pathext = Environment.GetEnvironmentVariable("PATHEXT") ?? ".COM;.EXE;.BAT;.CMD";
-            exts.AddRange(pathext.Split(';', StringSplitOptions.RemoveEmptyEntries));
+            exts = pathext.Split(';', StringSplitOptions.RemoveEmptyEntries).ToList();
+            exts.Add(""); // bare name only as a last resort
+        }
+        else
+        {
+            exts = [""];
         }
 
         foreach (var dir in dirs)
