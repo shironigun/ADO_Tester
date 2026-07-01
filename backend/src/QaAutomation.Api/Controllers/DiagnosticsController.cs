@@ -24,12 +24,14 @@ public sealed class DiagnosticsController : ControllerBase
     private readonly IOptionsMonitor<AnthropicOptions> _anthropic;
     private readonly IOptionsMonitor<AzureOpenAiOptions> _azure;
     private readonly IOptionsMonitor<ClaudeCliOptions> _claudeCli;
+    private readonly IOptionsMonitor<CopilotCliOptions> _copilotCli;
     private readonly ILogger<DiagnosticsController> _log;
 
     public DiagnosticsController(
         ILlmProviderState providerState, ILlmClientFactory llmFactory, IAzureDevOpsClient ado,
         IOptionsMonitor<AzureDevOpsOptions> adoOptions, IOptionsMonitor<AnthropicOptions> anthropic,
         IOptionsMonitor<AzureOpenAiOptions> azure, IOptionsMonitor<ClaudeCliOptions> claudeCli,
+        IOptionsMonitor<CopilotCliOptions> copilotCli,
         ILogger<DiagnosticsController> log)
     {
         _providerState = providerState;
@@ -39,6 +41,7 @@ public sealed class DiagnosticsController : ControllerBase
         _anthropic = anthropic;
         _azure = azure;
         _claudeCli = claudeCli;
+        _copilotCli = copilotCli;
         _log = log;
     }
 
@@ -46,8 +49,9 @@ public sealed class DiagnosticsController : ControllerBase
     public async Task<DiagnosticsStatus> Status(CancellationToken cancellationToken)
     {
         var provider = await _providerState.CurrentAsync(cancellationToken);
-        // Probe the CLI on a worker thread (synchronous subprocess), via the SAME resolver the provider uses.
-        var (available, version) = await Task.Run(() => ClaudeCli.Probe(_claudeCli.CurrentValue.Path), cancellationToken);
+        // Probe both CLIs on a worker thread (synchronous subprocess), via the SAME resolvers the providers use.
+        var (claudeAvailable, claudeVersion) = await Task.Run(() => ClaudeCli.Probe(_claudeCli.CurrentValue.Path), cancellationToken);
+        var (copilotAvailable, copilotVersion) = await Task.Run(() => CopilotCli.Probe(_copilotCli.CurrentValue.Path), cancellationToken);
 
         var ado = _adoOptions.CurrentValue;
         var anthropic = _anthropic.CurrentValue;
@@ -60,8 +64,10 @@ public sealed class DiagnosticsController : ControllerBase
             AzureOpenAiConfigured = !string.IsNullOrEmpty(azure.Endpoint)
                                     && !string.IsNullOrEmpty(azure.ApiKey)
                                     && !string.IsNullOrEmpty(azure.Deployment),
-            ClaudeCliAvailable = available,
-            ClaudeCliVersion = version,
+            ClaudeCliAvailable = claudeAvailable,
+            ClaudeCliVersion = claudeVersion,
+            CopilotCliAvailable = copilotAvailable,
+            CopilotCliVersion = copilotVersion,
         };
     }
 

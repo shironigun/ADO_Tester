@@ -245,7 +245,7 @@ export default function SessionWorkspace({ config }: { config: SessionModuleConf
         </DialogTitle>
         <DialogContent>
           <StartForm onClose={() => setNewOpen(false)} onError={onError}
-            onStarted={id => { refresh(); setPanelId(id) }} />
+            onStarted={id => { setNewOpen(false); refresh(); setPanelId(id) }} />
         </DialogContent>
       </Dialog>
 
