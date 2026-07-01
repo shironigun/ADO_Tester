@@ -274,7 +274,7 @@ function CoverageMatrix({ session, onSaved }: { session: ApiSessionDetail; onSav
 
 // ── Drafts by level ───────────────────────────────────────────────────────────
 
-function DraftsByLevel({ session, refetch }: { session: ApiSessionDetail; refetch: () => void }) {
+function DraftsByLevel({ session, refetch, onGenerate }: { session: ApiSessionDetail; refetch: () => void; onGenerate: () => void }) {
   const drafts = (session.drafts ?? []) as unknown as ApiTestDraftDto[]
   // ApiTestDraftDto.level is TestLevel.ToWire() — lowercase ("contract"/"endpoint"/"workflow") — not
   // the capitalized tab labels; compare case-insensitively rather than assuming either casing.
@@ -302,8 +302,23 @@ function DraftsByLevel({ session, refetch }: { session: ApiSessionDetail; refetc
     try { await approveAllDrafts(session.id); refetch() } catch { /* ignore */ }
   }
 
-  if (drafts.length === 0)
-    return <EmptyState icon={<PushPinIcon />} title="No drafts yet" hint="Click Generate to create drafts." />
+  if (drafts.length === 0) {
+    // Mid-generation: drafts arrive when status leaves Drafting/Analyzing.
+    if (session.status === 'Drafting' || session.status === 'Analyzing')
+      return (
+        <Box sx={{ py: 2, textAlign: 'center' }}>
+          <Typography variant="body2" sx={{ mb: 1 }}>Generating drafts…</Typography>
+          <LinearProgress />
+        </Box>
+      )
+    return (
+      <Box sx={{ textAlign: 'center' }}>
+        <EmptyState icon={<PushPinIcon />} title="No drafts yet"
+          hint="Generate Playwright drafts for the selected surfaces." />
+        <Button variant="contained" size="small" onClick={onGenerate} sx={{ mt: 1 }}>Generate drafts</Button>
+      </Box>
+    )
+  }
 
   return (
     <Box>
@@ -451,8 +466,8 @@ export function QaLoopDetailBody({ session, refetch, onError, fullScreen }: Deta
         </Box>
       )}
 
-      {tab === 'coverage' && <CoverageMatrix session={s} onSaved={refetch} />}
-      {tab === 'drafts' && <DraftsByLevel session={s} refetch={refetch} />}
+      {tab === 'coverage' && <CoverageMatrix session={s} onSaved={() => { refetch(); setTab('drafts') }} />}
+      {tab === 'drafts' && <DraftsByLevel session={s} refetch={refetch} onGenerate={doGenerate} />}
       {tab === 'push' && <PushPanel session={s} refetch={refetch} />}
     </Box>
   )
