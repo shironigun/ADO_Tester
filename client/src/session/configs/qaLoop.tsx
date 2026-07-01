@@ -66,7 +66,6 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
   const [fmLoading, setFmLoading]     = useState(false)
   const [repo, setRepo]               = useState<string | null>(null)
   const [branch, setBranch]           = useState<string | null>(null)
-  const [sourceDirs, setSourceDirs]   = useState('')
   const [planId, setPlanId]           = useState<number | null>(null)
   const [suiteId, setSuiteId]         = useState<number | null>(null)
   const [story, setStory]             = useState<WorkItemOption | null>(null)
@@ -117,14 +116,12 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
     if (!fmodule) return
     setLoading(true)
     try {
-      const dirs = sourceDirs.split(/[,\n]/).map(d => d.trim()).filter(Boolean)
       const req: ScanStartRequest = {
         module: fmodule.moduleName,               // derived from the frontend module
         frontendModule: fmodule.routePath,
-        frontendPath: fmodule.componentPath,
+        frontendPath: fmodule.componentPath,      // scan traces its apis/ to the backend (source dirs derived)
         repository: repo || undefined,
         branch: branch || undefined,
-        sourceDirs: dirs.length > 0 ? dirs : undefined,
         testPlanId: planId ?? undefined,
         testSuiteId: suiteId ?? undefined,
         workItemId: story?.id ?? undefined,
@@ -167,10 +164,6 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
           renderInput={p => <TextField {...p} label="Branch (optional)" size="small"
             helperText={!repo ? 'Pick a repository first' : branchesLoading ? 'Loading branches…' : undefined} />}
         />
-        <TextField label="Source directories (optional)" size="small" multiline minRows={2}
-          value={sourceDirs} onChange={e => setSourceDirs(e.target.value)}
-          placeholder={'One per line, e.g.\nLead/src/Target.Crm.Lead/Target.Crm.Lead.Api/Target.Crm.Lead.Api/Deal'}
-          helperText="Repo-relative paths to scan when the module isn't a top-level folder. Comma or newline separated." />
         <Autocomplete
           options={plans} getOptionLabel={p => `${p.id} — ${p.name}`}
           onOpen={loadPlans}

@@ -72,16 +72,23 @@ public sealed class ModuleAnalyzerAgent
         if (data is not JsonObject root)
             throw new AgentException("Module analyzer did not return a JSON object.");
 
-        // Optional one-time refinement fetch.
+        // Optional one-time refinement fetch. Bounded so the refined prompt stays within the LLM's
+        // context window: for frontend-driven scans the model can request many (large) backend files,
+        // which otherwise blows past provider limits (ClaudeCli "Prompt is too long"). Cap the count and
+        // truncate each file; a bigger-context provider can raise these for fuller coverage.
+        const int MaxRefinementFiles = 6;
+        const int MaxRefinementFileChars = 8000;
         var additionalNeeded = ParseStringArray(root, "additionalFilesNeeded");
         if (additionalNeeded.Count > 0 && fetchFile is not null)
         {
             var extras = new List<string>();
-            foreach (var path in additionalNeeded)
+            foreach (var path in additionalNeeded.Take(MaxRefinementFiles))
             {
                 var content = await fetchFile(path, ct);
-                if (!string.IsNullOrEmpty(content))
-                    extras.Add($"\n### {path}\n```\n{content}\n```");
+                if (string.IsNullOrEmpty(content)) continue;
+                if (content.Length > MaxRefinementFileChars)
+                    content = content[..MaxRefinementFileChars] + "\n/* ...truncated... */";
+                extras.Add($"\n### {path}\n```\n{content}\n```");
             }
             if (extras.Count > 0)
             {

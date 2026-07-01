@@ -54,6 +54,7 @@ Rules:
 - status: "covered" if an existing test case clearly tests this surface; "gap" otherwise.
 - linkedTestCaseId: the integer id of the matching existing test case, or null. Use ONLY ids from the provided list; NEVER invent ids.
 - selected: gap rows default true; covered rows default false.
-- additionalFilesNeeded: array of file paths (relative to repo root) you need to complete the analysis. Return empty array if none needed. If non-empty, you will be given exactly one follow-up fetch.
+- additionalFilesNeeded: array of things you need to complete the analysis, resolved for you in exactly one follow-up fetch. Each entry may be EITHER a repo-relative file path OR a search term (an endpoint route string like "lead/deal/addNewDeal", or a backend class/handler name). Return empty array if none needed.
+- FRONTEND-SEEDED SOURCE: if the source given is a frontend API-client module (e.g. axios/fetch calls under a components/<module>/apis/ folder), it defines WHICH backend endpoints exist but not their server implementation. In that case: read every backend endpoint (METHOD + path) the frontend calls, then use additionalFilesNeeded to request the backend files that implement them - list the distinctive endpoint route strings (and/or the handler/DTO class names) as search terms so the backend source can be fetched. Build the routes/dtos/workflows inventory from those backend files once fetched.
 - Never use em dashes or en dashes; use a hyphen.
 - Output ONLY the JSON object; no prose, no markdown fences.
