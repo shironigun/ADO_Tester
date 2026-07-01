@@ -14,6 +14,7 @@ import {
   listWatches, addWatch, updateWatch, runLatest,
   type PipelineWatchDto,
 } from '../api/qaPipelines'
+import { PROJECT_ID } from '../config/env'
 
 function fmtDate(s: string | null) { return s ? new Date(s).toLocaleString() : 'Never' }
 
@@ -31,7 +32,7 @@ function AddWatchDialog({ open, onClose }: { open: boolean; onClose: () => void 
     if (!id || !pipelineName.trim() || !module.trim()) { setError('All fields required'); return }
     setSaving(true); setError('')
     try {
-      await addWatch({ adoPipelineId: id, adoPipelineName: pipelineName.trim(), module: module.trim() })
+      await addWatch(PROJECT_ID, { adoPipelineId: id, adoPipelineName: pipelineName.trim(), module: module.trim() })
       qc.invalidateQueries({ queryKey: ['qa-pipelines'] })
       onClose()
     } catch (err) { setError(axiosMessage(err)) }
@@ -96,9 +97,12 @@ function WatchCard({ watch }: { watch: PipelineWatchDto }) {
       <CardContent sx={{ pt: 1 }}>
         {error && <Alert severity="error" sx={{ mb: 1 }} onClose={() => setError('')}>{error}</Alert>}
         <Stack direction="row" spacing={2} sx={{ mb: 1, flexWrap: 'wrap' }}>
-          <Typography variant="caption" color="text.secondary">Last run: {fmtDate(watch.lastRunAt)}</Typography>
-          {watch.lastBuildId && <Chip size="small" label={`Build #${watch.lastBuildId}`} variant="outlined" />}
+          <Typography variant="caption" color="text.secondary">Last poll: {fmtDate(watch.lastPollAt)}</Typography>
+          {watch.lastSeenBuildId && <Chip size="small" label={`Build #${watch.lastSeenBuildId}`} variant="outlined" />}
         </Stack>
+        {watch.lastPollError && (
+          <Typography variant="caption" color="error" sx={{ display: 'block', mb: 1 }}>{watch.lastPollError}</Typography>
+        )}
         <Button size="small" variant="outlined" startIcon={running ? <CircularProgress size={14} /> : <PlayArrowIcon />}
           disabled={running || !watch.enabled} onClick={doRunLatest}>
           Run latest
@@ -111,7 +115,7 @@ function WatchCard({ watch }: { watch: PipelineWatchDto }) {
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function QaPipelinesPage() {
   const [addOpen, setAddOpen] = useState(false)
-  const watchesQ = useQuery({ queryKey: ['qa-pipelines'], queryFn: listWatches })
+  const watchesQ = useQuery({ queryKey: ['qa-pipelines'], queryFn: () => listWatches(PROJECT_ID) })
   const watches = watchesQ.data?.items ?? []
 
   return (

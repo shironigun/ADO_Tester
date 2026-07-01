@@ -2,15 +2,19 @@ import { api } from './client'
 
 // ── QA Loop Pipelines API — /api/qaloop/pipelines ────────────────────────────
 
+// Matches PipelineWatchDto.cs exactly.
 export interface PipelineWatchDto {
   id: number
+  projectId: number
   adoPipelineId: number
   adoPipelineName: string
   module: string
+  lastSeenBuildId: number | null
+  lastPollAt: string | null
+  lastPollError: string | null
   enabled: boolean
-  lastBuildId: number | null
-  lastRunAt: string | null
   createdAt: string
+  updatedAt: string
 }
 
 export interface AddWatchRequest {
@@ -26,13 +30,13 @@ export interface UpdateWatchRequest {
 
 // ── Methods ───────────────────────────────────────────────────────────────────
 
-export async function listWatches(): Promise<{ items: PipelineWatchDto[] }> {
-  const { data } = await api.get<{ items: PipelineWatchDto[] }>('/api/qaloop/pipelines')
+export async function listWatches(projectId: number): Promise<{ total: number; items: PipelineWatchDto[] }> {
+  const { data } = await api.get<{ total: number; items: PipelineWatchDto[] }>(`/api/qaloop/pipelines/${projectId}`)
   return data
 }
 
-export async function addWatch(req: AddWatchRequest): Promise<PipelineWatchDto> {
-  const { data } = await api.post<PipelineWatchDto>('/api/qaloop/pipelines', req)
+export async function addWatch(projectId: number, req: AddWatchRequest): Promise<PipelineWatchDto> {
+  const { data } = await api.post<PipelineWatchDto>(`/api/qaloop/pipelines/${projectId}`, req)
   return data
 }
 
