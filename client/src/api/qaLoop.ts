@@ -26,13 +26,21 @@ export interface ScanStartResponse {
   existingSessionId?: number | null
 }
 
+// Wire shape of a SurfaceRow EXACTLY as it appears inside the raw analysisJson string — that blob is
+// produced by QaLoopOrchestrator's own JsonSerializer.Serialize call (Infrastructure), not through the
+// API's camelCase MVC pipeline, so it keeps C#'s default PascalCase property names, and TestLevel
+// serializes as its ordinal (0=Contract, 1=Endpoint, 2=Workflow, 3=Ui) since no string enum converter
+// applies there either. Do not "fix" the casing here — match what's actually on the wire.
 export interface SurfaceRow {
-  surface: string
-  level: string
-  route: string
-  method?: string
-  status: string
+  Id: string
+  Level: number
+  Label: string
+  Status: 'gap' | 'covered'
+  LinkedTestCaseId: number | null
+  Selected: boolean
 }
+
+export const LEVEL_NAMES = ['Contract', 'Endpoint', 'Workflow', 'Ui'] as const
 
 /** Wire shape of a QA Loop session summary (GET /api/qaloop). */
 export interface ApiSessionSummary extends SessionSummary {
@@ -72,68 +80,62 @@ export interface UpdateApiDraftRequest {
   specCode?: string
 }
 
-// ── API methods ───────────────────────────────────────────────────────────────
+// ── API methods (routes match QaLoopController.cs exactly) ────────────────────
 
-export async function startScan(req: ScanStartRequest): Promise<ScanStartResponse> {
-  const { data } = await api.post<ScanStartResponse>('/api/qaloop/start', req)
+export async function startScan(projectId: number, req: ScanStartRequest): Promise<ScanStartResponse> {
+  const { data } = await api.post<ScanStartResponse>(`/api/qaloop/${projectId}/scan/start`, req)
   return data
 }
 
 export async function listSessionsPage(
-  take: number, skip: number,
+  projectId: number, take: number, skip: number,
 ): Promise<{ total: number; items: ApiSessionSummary[] }> {
   const { data } = await api.get<{ total: number; items: ApiSessionSummary[] }>(
-    '/api/qaloop', { params: { take, skip } })
+    `/api/qaloop/sessions/${projectId}`, { params: { take, skip } })
   return data
 }
 
 export async function getSessionDetail(id: number): Promise<ApiSessionDetail> {
-  const { data } = await api.get<ApiSessionDetail>(`/api/qaloop/${id}`)
+  const { data } = await api.get<ApiSessionDetail>(`/api/qaloop/sessions/detail/${id}`)
   return data
 }
 
-/** Full-replace PATCH: replaces the session's analysis rows. */
-export async function saveAnalysis(id: number, rows: SurfaceRow[]): Promise<void> {
-  await api.patch(`/api/qaloop/${id}/analysis`, { rows })
+/** Full-replace PATCH: send EVERY row (not just the selected ones) — omitted rows are dropped
+ * from the matrix entirely, so deselecting a row must still resend it with Selected=false. */
+export async function saveAnalysis(id: number, module: string, rows: SurfaceRow[]): Promise<void> {
+  await api.patch(`/api/qaloop/sessions/${id}/analysis`, { module, rows })
 }
 
 export async function generateDrafts(id: number): Promise<void> {
-  await api.post(`/api/qaloop/${id}/generate-drafts`)
+  await api.post(`/api/qaloop/sessions/${id}/generate-drafts`)
 }
 
-/** Skip-null PATCH — omit keys to leave them unchanged. */
-export async function patchDraft(
-  sessionId: number, draftId: number, req: UpdateApiDraftRequest,
-): Promise<ApiTestDraftDto> {
-  const { data } = await api.patch<ApiTestDraftDto>(
-    `/api/qaloop/${sessionId}/drafts/${draftId}`, req)
+/** Skip-null PATCH — omit keys to leave them unchanged. No sessionId in the route: drafts are
+ * addressed by their own id. */
+export async function patchDraft(draftId: number, req: UpdateApiDraftRequest): Promise<ApiTestDraftDto> {
+  const { data } = await api.patch<ApiTestDraftDto>(`/api/qaloop/drafts/${draftId}`, req)
   return data
 }
 
 export async function approveAllDrafts(id: number): Promise<void> {
-  await api.post(`/api/qaloop/${id}/approve-all`)
+  await api.post(`/api/qaloop/sessions/${id}/approve-all`)
 }
 
-export async function pushSession(
-  id: number, body: { testPlanId: number; testSuiteId: number; storyId?: number },
-): Promise<void> {
-  await api.post(`/api/qaloop/${id}/push`, body)
+/** Reads Plan/Suite/Story from the session itself — no body. */
+export async function pushSession(id: number): Promise<void> {
+  await api.post(`/api/qaloop/sessions/${id}/push`)
 }
 
-export async function pushDraft(
-  sessionId: number, draftId: number,
-  body: { testPlanId: number; testSuiteId: number; storyId?: number },
-): Promise<ApiTestDraftDto> {
-  const { data } = await api.post<ApiTestDraftDto>(
-    `/api/qaloop/${sessionId}/drafts/${draftId}/push`, body)
+export async function pushDraft(draftId: number): Promise<ApiTestDraftDto> {
+  const { data } = await api.post<ApiTestDraftDto>(`/api/qaloop/drafts/${draftId}/push`)
   return data
 }
 
 export async function cancelSession(id: number): Promise<void> {
-  await api.post(`/api/qaloop/${id}/cancel`)
+  await api.post(`/api/qaloop/sessions/${id}/cancel`)
 }
 
-export const sessionStreamUrl = (id: number) => apiUrl(`/api/qaloop/${id}/stream`)
+export const sessionStreamUrl = (id: number) => apiUrl(`/api/qaloop/sessions/${id}/stream`)
 
 // Org-level ADO work-item deep link (unchanged from old qaLoop.ts).
 export const adoWorkItemUrl = (id: number) =>
