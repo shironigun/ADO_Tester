@@ -586,6 +586,11 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
                         $"Spec written: {Path.GetFileName(specPath)}");
                 }
                 draft.SpecFilePath = specPath;
+
+                // QAL-071: Contract specs import their Zod schema via a relative path the model invents
+                // itself (unrelated to our own spec-filename slug) — write SchemaJson out under THAT
+                // exact name, next to the spec, or the import can never resolve.
+                TryWriteSchemaFile(levelDir, spec.SpecCode, spec.SchemaJson, session.Id);
             }
             catch (Exception ex)
             {
@@ -640,6 +645,43 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
                 File.WriteAllText(draft.SpecFilePath, updated);
         }
         catch { /* best-effort disk rewrite */ }
+    }
+
+    /// <summary>QAL-071: matches the one local relative import a generated spec uses for its schema,
+    /// e.g. <c>from './get-lead-deal-dealId.schema'</c> → captures "get-lead-deal-dealId.schema". Package
+    /// imports (@playwright/test, allure-playwright, ...) are never relative so they never match.</summary>
+    private static readonly System.Text.RegularExpressions.Regex SchemaImportPattern =
+        new(@"from\s+['""]\.\/([\w.-]+)['""]", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>Best-effort, non-fatal: if the spec has a SchemaJson and a resolvable local relative
+    /// import, writes the schema out under the model's OWN chosen import name (+.ts) next to the spec.
+    /// No-op (silent) when there's no schema (Endpoint/Workflow) or no matching import.</summary>
+    private void TryWriteSchemaFile(string levelDir, string specCode, string? schemaJson, int sessionId)
+    {
+        if (string.IsNullOrEmpty(schemaJson)) return;
+        var name = ExtractSchemaImportName(specCode);
+        if (name is null) return;
+
+        try
+        {
+            var schemaPath = Path.Combine(levelDir, $"{name}.ts");
+            File.WriteAllText(schemaPath, schemaJson);
+            Pub(SessionKey(sessionId), EventKinds.Result, EventPhases.Generate,
+                $"Schema written: {Path.GetFileName(schemaPath)}");
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Failed to write schema file for import '{Name}'", name);
+        }
+    }
+
+    /// <summary>Extracts the relative-import module name a generated spec references (its schema file),
+    /// e.g. "./get-lead-deal-dealId.schema" → "get-lead-deal-dealId.schema". Null if no local relative
+    /// import is found (Endpoint/Workflow specs, or a Contract spec with no import at all).</summary>
+    private static string? ExtractSchemaImportName(string specCode)
+    {
+        var m = SchemaImportPattern.Match(specCode);
+        return m.Success ? m.Groups[1].Value : null;
     }
 
     private async Task MarkQueuedAsync(int sessionId)
