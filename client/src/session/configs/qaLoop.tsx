@@ -27,6 +27,7 @@ import {
 } from '../../api/qaLoop'
 import { getPlans, getSuites, searchWorkItems } from '../../api/authorTests'
 import type { TestPlan, TestSuite } from '../../api/authorTests'
+import { getAdoRepositories, getAdoBranches } from '../../api/settings'
 import type { WorkItemOption } from '../types'
 import { PROJECT_ID } from '../../config/env'
 
@@ -60,8 +61,8 @@ const ANALYTICS_COLUMNS: AnalyticsColumn[] = [
 
 export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps) {
   const [module, setModule]           = useState('')
-  const [repo, setRepo]               = useState('')
-  const [branch, setBranch]           = useState('')
+  const [repo, setRepo]               = useState<string | null>(null)
+  const [branch, setBranch]           = useState<string | null>(null)
   const [sourceDirs, setSourceDirs]   = useState('')
   const [planId, setPlanId]           = useState<number | null>(null)
   const [suiteId, setSuiteId]         = useState<number | null>(null)
@@ -70,8 +71,27 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
   const [storyOpts, setStoryOpts]     = useState<WorkItemOption[]>([])
   const [plans, setPlans]             = useState<TestPlan[]>([])
   const [suites, setSuites]           = useState<TestSuite[]>([])
+  const [repos, setRepos]             = useState<string[]>([])
+  const [reposLoading, setReposLoading] = useState(false)
+  const [branches, setBranches]       = useState<string[]>([])
+  const [branchesLoading, setBranchesLoading] = useState(false)
   const [loading, setLoading]         = useState(false)
 
+  async function loadRepos() {
+    if (repos.length > 0) return
+    setReposLoading(true)
+    try { setRepos(await getAdoRepositories()) } catch { /* ignore */ }
+    finally { setReposLoading(false) }
+  }
+  async function loadBranches(r: string) {
+    setBranchesLoading(true)
+    try {
+      const bs = await getAdoBranches(r)
+      setBranches(bs)
+      if (bs.includes('main')) setBranch('main')   // sensible default when present
+    } catch { setBranches([]) }
+    finally { setBranchesLoading(false) }
+  }
   async function loadPlans() {
     try { setPlans(await getPlans()) } catch { /* ignore */ }
   }
@@ -91,8 +111,8 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
       const dirs = sourceDirs.split(/[,\n]/).map(d => d.trim()).filter(Boolean)
       const req: ScanStartRequest = {
         module: module.trim(),
-        repository: repo.trim() || undefined,
-        branch: branch.trim() || undefined,
+        repository: repo || undefined,
+        branch: branch || undefined,
         sourceDirs: dirs.length > 0 ? dirs : undefined,
         testPlanId: planId ?? undefined,
         testSuiteId: suiteId ?? undefined,
@@ -113,10 +133,20 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
       <Stack spacing={2}>
         <TextField required label="Module" size="small" value={module}
           onChange={e => setModule(e.target.value)} placeholder="e.g. deals" />
-        <TextField label="Repository" size="small" value={repo}
-          onChange={e => setRepo(e.target.value)} placeholder="leave blank for default" />
-        <TextField label="Branch" size="small" value={branch}
-          onChange={e => setBranch(e.target.value)} placeholder="leave blank for default" />
+        <Autocomplete
+          options={repos} value={repo} loading={reposLoading}
+          onOpen={loadRepos}
+          onChange={(_, v) => { setRepo(v); setBranch(null); setBranches([]); if (v) loadBranches(v) }}
+          renderInput={p => <TextField {...p} label="Repository (optional)" size="small"
+            helperText={reposLoading ? 'Loading repositories…' : undefined} />}
+        />
+        <Autocomplete
+          options={branches} value={branch} loading={branchesLoading} disabled={!repo}
+          onOpen={() => { if (repo) loadBranches(repo) }}
+          onChange={(_, v) => setBranch(v)}
+          renderInput={p => <TextField {...p} label="Branch (optional)" size="small"
+            helperText={!repo ? 'Pick a repository first' : branchesLoading ? 'Loading branches…' : undefined} />}
+        />
         <TextField label="Source directories (optional)" size="small" multiline minRows={2}
           value={sourceDirs} onChange={e => setSourceDirs(e.target.value)}
           placeholder={'One per line, e.g.\nLead/src/Target.Crm.Lead/Target.Crm.Lead.Api/Target.Crm.Lead.Api/Deal'}
