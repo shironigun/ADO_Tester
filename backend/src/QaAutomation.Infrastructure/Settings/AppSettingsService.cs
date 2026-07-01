@@ -31,6 +31,7 @@ public sealed class AppSettingsService : IAppSettingsService
         "find_bugs.verify_detail", "find_bugs.verify_step_scope", "find_bugs.bug_from_case_mode",
         "teams.webhook_url", "teams.template",
         "qaloop.poll_interval_minutes", "qaloop.report_provider", "qaloop.activity_enabled",
+        "qaloop.frontend_repo", "qaloop.frontend_root", "qaloop.frontend_base_url",
     ];
 
     public static readonly IReadOnlySet<string> SecretKeys =
@@ -46,6 +47,7 @@ public sealed class AppSettingsService : IAppSettingsService
         "claude_cli.path", "claude_cli.model", "claude_cli.timeout_seconds",
         "teams.webhook_url", "teams.template",
         "qaloop.poll_interval_minutes", "qaloop.report_provider", "qaloop.activity_enabled",
+        "qaloop.frontend_repo", "qaloop.frontend_root", "qaloop.frontend_base_url",
     };
 
     // Static defaults for the non-option keys when unset (frozen env-default map).
@@ -219,6 +221,9 @@ public sealed class AppSettingsService : IAppSettingsService
         "qaloop.poll_interval_minutes" => _qaLoop.CurrentValue.PollIntervalMinutes.ToString(),
         "qaloop.report_provider" => _qaLoop.CurrentValue.ReportProvider,
         "qaloop.activity_enabled" => _qaLoop.CurrentValue.ActivityEnabled.ToString().ToLowerInvariant(),
+        "qaloop.frontend_repo" => _qaLoop.CurrentValue.FrontendRepo,
+        "qaloop.frontend_root" => _qaLoop.CurrentValue.FrontendRoot,
+        "qaloop.frontend_base_url" => _qaLoop.CurrentValue.FrontendBaseUrl,
         _ => "",
     };
 }

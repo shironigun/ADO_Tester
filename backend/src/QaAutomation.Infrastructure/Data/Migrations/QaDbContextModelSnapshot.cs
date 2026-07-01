@@ -143,6 +143,14 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("EventLogJson");
 
+                    b.Property<string>("FrontendModule")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("FrontendModule");
+
+                    b.Property<string>("FrontendPath")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("FrontendPath");
+
                     b.Property<string>("InventoryJson")
                         .HasColumnType("TEXT")
                         .HasColumnName("InventoryJson");

@@ -13,12 +13,22 @@ export interface ScanStartRequest {
   module: string
   repository?: string
   branch?: string
+  frontendModule?: string
+  frontendPath?: string
   sourceDirs?: string[]
   extensions?: string[]
   workItemId?: number
   testPlanId?: number
   testSuiteId?: number
   autoHandoff?: boolean
+}
+
+// A product frontend module discovered from the SPA route file (QaLoopController /frontend-modules).
+export interface FrontendModule {
+  moduleName: string
+  routePath: string
+  componentPath: string
+  url: string
 }
 
 export interface ScanStartResponse {
@@ -84,6 +94,14 @@ export interface UpdateApiDraftRequest {
 
 export async function startScan(projectId: number, req: ScanStartRequest): Promise<ScanStartResponse> {
   const { data } = await api.post<ScanStartResponse>(`/api/qaloop/${projectId}/scan/start`, req)
+  return data
+}
+
+export async function listFrontendModules(repository?: string, branch?: string): Promise<FrontendModule[]> {
+  const params: Record<string, string> = {}
+  if (repository) params.repository = repository
+  if (branch) params.branch = branch
+  const { data } = await api.get<FrontendModule[]>('/api/qaloop/frontend-modules', { params })
   return data
 }
 

@@ -233,6 +233,8 @@ public sealed class QaDbContext : DbContext
             e.Property(x => x.TestPlanId).HasColumnName("TestPlanId");
             e.Property(x => x.TestSuiteId).HasColumnName("TestSuiteId");
             e.Property(x => x.SourceDirsJson).HasColumnName("SourceDirsJson");
+            e.Property(x => x.FrontendModule).HasColumnName("FrontendModule");
+            e.Property(x => x.FrontendPath).HasColumnName("FrontendPath");
             e.Property(x => x.Status).HasColumnName("Status").HasConversion<string>().IsRequired();
             e.Property(x => x.InventoryJson).HasColumnName("InventoryJson");
             e.Property(x => x.AnalysisJson).HasColumnName("AnalysisJson");

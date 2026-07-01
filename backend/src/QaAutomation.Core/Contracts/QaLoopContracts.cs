@@ -12,6 +12,11 @@ public sealed class ScanStartRequest
     public string Module { get; set; } = "";
     public string? Repository { get; set; }
     public string? Branch { get; set; }
+    /// <summary>Selected frontend module route (e.g. "/deals"); set by the module dropdown.</summary>
+    public string? FrontendModule { get; set; }
+    /// <summary>Repo-relative frontend component folder (e.g. "web-app/.../components/deals") — the
+    /// scan reads its apis/ to trace the backend. Set by the module dropdown.</summary>
+    public string? FrontendPath { get; set; }
     public List<string>? SourceDirs { get; set; }
     public List<string>? Extensions { get; set; }
     public int? WorkItemId { get; set; }
@@ -117,6 +122,9 @@ public sealed class ApiSessionDetail
     public string? WorkItemTitle { get; set; }
     public int? TestPlanId { get; set; }
     public int? TestSuiteId { get; set; }
+    public string? FrontendModule { get; set; }
+    public string? FrontendPath { get; set; }
+    public string? SourceDirsJson { get; set; }
     public ApiSessionStatus Status { get; set; }
     public string? InventoryJson { get; set; }
     public string? AnalysisJson { get; set; }
@@ -132,7 +140,9 @@ public sealed class ApiSessionDetail
     {
         Id = s.Id, ProjectId = s.ProjectId, Module = s.Module, Repository = s.Repository,
         Branch = s.Branch, WorkItemId = s.WorkItemId, WorkItemTitle = s.WorkItemTitle,
-        TestPlanId = s.TestPlanId, TestSuiteId = s.TestSuiteId, Status = s.Status,
+        TestPlanId = s.TestPlanId, TestSuiteId = s.TestSuiteId,
+        FrontendModule = s.FrontendModule, FrontendPath = s.FrontendPath, SourceDirsJson = s.SourceDirsJson,
+        Status = s.Status,
         InventoryJson = s.InventoryJson, AnalysisJson = s.AnalysisJson, EventLogJson = s.EventLogJson,
         ErrorMessage = s.ErrorMessage, AutoHandoff = s.AutoHandoff, ActivityEnabled = s.ActivityEnabled,
         CreatedAt = s.CreatedAt, UpdatedAt = s.UpdatedAt,
