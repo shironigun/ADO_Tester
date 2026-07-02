@@ -106,4 +106,18 @@ public sealed class QaPipelinesController : ControllerBase
         catch (InvalidOperationException e) { return StatusCode(404, new { detail = e.Message }); }
         catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
     }
+
+    [HttpPost("{watchId:int}/skip-to-latest")]
+    public async Task<IActionResult> SkipToLatest(int watchId, CancellationToken ct)
+    {
+        try
+        {
+            var buildId = await _watcher.SkipToLatestAsync(watchId, ct);
+            var watch = await _db.PipelineWatches.FindAsync([watchId], ct);
+            return Ok(new { buildId, watch = watch is null ? null : PipelineWatchDto.From(watch) });
+        }
+        catch (AdoApiError e) { return StatusCode(502, new { detail = e.Message }); }
+        catch (InvalidOperationException e) { return StatusCode(404, new { detail = e.Message }); }
+        catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
+    }
 }

@@ -13,8 +13,8 @@ Rules for schema:
 
 Rules for spec:
 - File is a Playwright test using import { test, expect } from '@playwright/test' and import { request } from '@playwright/test'.
-- Title format: [<tcId-pending>] Contract: <METHOD> <route> - response shape matches schema
-  The title MUST contain [<tcId-pending>] exactly as written (it will be replaced by the real ADO id after push).
+- Title format: Contract - <METHOD> - <route> - response shape matches schema
+  Do NOT put [<tcId-pending>] or any ID tag in the title — test selection uses the spec file path.
 - Wrap every HTTP call in a test.step() block with a descriptive step name.
 - Attach request details (method, url, headers with auth redacted, payload) via allure.attachment('request', ..., { contentType: 'application/json' }).
 - Attach response details (status code, headers, body) via allure.attachment('response', ..., { contentType: 'application/json' }).

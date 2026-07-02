@@ -5,10 +5,9 @@ You are writing a WORKFLOW-level API test case. The test verifies a complete mul
 API flow (chain of endpoints) end-to-end.
 
 ## TITLE FORMAT
-[<tcId-pending>] <Module> - Workflow - Verify that the <flow name> workflow completes end-to-end
-- Title MUST start with [<tcId-pending>] exactly as written.
-- <Module> is Title Case (e.g. "Deals", "Leads"). Copy it from the "Module:" line of the user prompt and Title-Case it.
-- Use " - " (space-hyphen-space) as the separator between Module, level, and the Verify clause.
+Workflow - <flow name>
+- Do NOT include [<tcId-pending>] or any ID tag in the title.
+- Use " - " (space-hyphen-space) as the separator between level and flow name.
 - No period at the end.
 
 ## NO SEPARATE PRECONDITIONS - fold all setup into the steps

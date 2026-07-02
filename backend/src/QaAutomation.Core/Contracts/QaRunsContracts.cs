@@ -115,6 +115,7 @@ public sealed class TestRunDetail
     public long DurationMs { get; set; }
     public string? JunitPath { get; set; }
     public string? ReportPath { get; set; }
+    public string? EventLogJson { get; set; }
     public int? AdoTestRunId { get; set; }
     public string? ErrorMessage { get; set; }
     public DateTime? StartedAt { get; set; }
@@ -132,6 +133,7 @@ public sealed class TestRunDetail
         TriggerCommitSha = r.TriggerCommitSha, ImpactAnalysisJson = r.ImpactAnalysisJson,
         Status = r.Status, Passed = r.Passed, Failed = r.Failed, Skipped = r.Skipped,
         DurationMs = r.DurationMs, JunitPath = r.JunitPath, ReportPath = r.ReportPath,
+        EventLogJson = r.EventLogJson,
         AdoTestRunId = r.AdoTestRunId, ErrorMessage = r.ErrorMessage,
         StartedAt = r.StartedAt, FinishedAt = r.FinishedAt, CreatedAt = r.CreatedAt,
         ActivityEnabled = r.ActivityEnabled,

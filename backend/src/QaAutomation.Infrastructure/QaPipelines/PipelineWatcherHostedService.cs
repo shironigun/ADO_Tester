@@ -83,9 +83,34 @@ public sealed class PipelineWatcherHostedService : BackgroundService
 
     private async Task ProcessWatchAsync(PipelineWatch watch, QaDbContext db, CancellationToken ct)
     {
+        // First-run guard: if no LastSeenBuildId has been recorded yet, skip the entire
+        // historical backlog by advancing to the most recent build and returning.
+        // This prevents a newly-created watch on a busy shared pipeline from churning
+        // through thousands of old builds and flooding the runs table with cancellations.
+        if (watch.LastSeenBuildId is null)
+        {
+            var allBuilds = await _ado.GetPipelineBuildsAsync(watch.AdoPipelineId, ct: ct);
+            var latest = allBuilds.MaxBy(b => b.Id);
+            if (latest is not null)
+            {
+                _log.LogInformation(
+                    "PipelineWatch {Id} ({Pipeline}): first poll — skipping to latest build {BuildId}",
+                    watch.Id, watch.AdoPipelineId, latest.Id);
+                watch.LastSeenBuildId = latest.Id;
+                watch.UpdatedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync(ct);
+            }
+            return;
+        }
+
         var builds = await _ado.GetPipelineBuildsAsync(watch.AdoPipelineId, watch.LastSeenBuildId, ct);
         foreach (var build in builds.OrderBy(b => b.Id))
         {
+            // Re-read the enabled flag each iteration so the user can abort a long backlog
+            // catch-up by disabling the watch — takes effect within one build's processing.
+            await db.Entry(watch).ReloadAsync(ct);
+            if (!watch.Enabled) break;
+
             await ProcessBuildAsync(watch, build, db, ct);
             watch.LastSeenBuildId = build.Id;
             watch.UpdatedAt = DateTime.UtcNow;
@@ -255,5 +280,30 @@ public sealed class PipelineWatcherHostedService : BackgroundService
         watch.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
         return runId;
+    }
+
+    /// <summary>
+    /// Advances LastSeenBuildId to the most recent succeeded build without creating any test run.
+    /// Useful when a watch is stuck catching up on a large historical backlog.
+    /// Returns the build id that was set, or null if no builds exist for the pipeline.
+    /// </summary>
+    public async Task<int?> SkipToLatestAsync(int watchId, CancellationToken ct = default)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+        var watch = await db.PipelineWatches.FindAsync([watchId], ct)
+            ?? throw new InvalidOperationException($"PipelineWatch {watchId} not found.");
+
+        var builds = await _ado.GetPipelineBuildsAsync(watch.AdoPipelineId, ct: ct);
+        var latest = builds.MaxBy(b => b.Id);
+        if (latest is null) return null;
+
+        watch.LastSeenBuildId = latest.Id;
+        watch.LastPollAt = DateTime.UtcNow;
+        watch.LastPollError = null;
+        watch.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+        _log.LogInformation("PipelineWatch {Id} ({Pipeline}): skipped to latest build {BuildId}", watchId, watch.AdoPipelineId, latest.Id);
+        return latest.Id;
     }
 }

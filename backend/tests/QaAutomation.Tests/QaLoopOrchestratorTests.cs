@@ -127,12 +127,14 @@ public sealed class QaLoopOrchestratorTests
     }
 
     [Fact]
-    public async Task GenerateDrafts_writes_Contract_schema_file_under_the_models_own_import_name()
+    public async Task GenerateDrafts_rewrites_Contract_schema_import_to_a_deterministic_filename()
     {
-        // QAL-071: the model invents its OWN relative import path for the schema — unrelated to our
-        // spec-filename slug (which comes from the TEST CASE TITLE, not the route). Ground-truth
-        // example from a real generated file: `import { X } from './get-lead-deal-dealId.schema';` —
-        // that must resolve to a real get-lead-deal-dealId.schema.ts sitting next to the .spec.ts.
+        // QAL-071b: the model's own relative import path is untrustworthy — it has been observed
+        // using both './x' and '../schemas/x' conventions, sometimes with no matching "schema"
+        // field at all. A single unresolvable import aborts Playwright's test COLLECTION for every
+        // spec in the run (not just the broken one), so the writer no longer trusts the model's
+        // path: it rewrites the spec's import to a filename it controls — the same slug as the
+        // spec's own .spec.ts file — and writes the schema there.
         const string specWithSchemaImport = """
             import { test, expect } from '@playwright/test';
             import { DealDetailsDtoSchema } from './get-lead-deal-dealId.schema';
@@ -158,11 +160,18 @@ public sealed class QaLoopOrchestratorTests
         var draft = db.ApiTestDrafts.Single(d => d.SessionId == sid);
         Assert.NotNull(draft.SpecFilePath);
 
-        var schemaPath = Path.Combine(Path.GetDirectoryName(draft.SpecFilePath)!, "get-lead-deal-dealId.schema.ts");
+        // Slug = spec filename minus ".spec.ts" — the same slug PersistDraft derives the schema
+        // filename from, regardless of whatever import path the model originally wrote.
+        var slug = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(draft.SpecFilePath!));
+        var schemaPath = Path.Combine(Path.GetDirectoryName(draft.SpecFilePath)!, $"{slug}.schema.ts");
         Assert.True(File.Exists(schemaPath), $"expected schema file at {schemaPath}");
         Assert.Equal("{\"type\":\"object\"}", File.ReadAllText(schemaPath));
-        // Same directory as the spec — resolves the model's own `./get-lead-deal-dealId.schema` import.
-        Assert.Equal(Path.GetDirectoryName(draft.SpecFilePath), Path.GetDirectoryName(schemaPath));
+
+        // The on-disk spec's import must be rewritten to the deterministic path, not left as the
+        // model's original './get-lead-deal-dealId.schema'.
+        var writtenSpec = File.ReadAllText(draft.SpecFilePath!);
+        Assert.Contains($"from './{slug}.schema'", writtenSpec);
+        Assert.Equal(writtenSpec, draft.SpecCode);
     }
 
     [Fact]
@@ -494,7 +503,8 @@ public sealed class QaLoopOrchestratorTests
         public Task<IReadOnlyList<string>> ListRepoFilePathsAsync(string scopePath, string? branch = null, string? repoId = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<string>> SearchCodeAsync(string text, int top = 20, string? repoId = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<int> CreateAdoTestRunAsync(int planId, int suiteId, string name, IReadOnlyList<int> pointIds, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task SetAdoTestResultAsync(int adoTestRunId, int testPointId, string outcome, string? errorMessage, long durationMs, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<IReadOnlyDictionary<int, int>> GetAdoTestResultIdsAsync(int adoTestRunId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpdateAdoTestResultsAsync(int adoTestRunId, IReadOnlyList<AdoTestResultUpdate> updates, CancellationToken ct = default) => throw new NotImplementedException();
         public Task CompleteAdoTestRunAsync(int adoTestRunId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyDictionary<int, int>> GetTestPointsAsync(int planId, int suiteId, IReadOnlyList<int> testCaseIds, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<AdoBuild>> GetPipelineBuildsAsync(int pipelineId, int? minBuildId = null, CancellationToken ct = default) => throw new NotImplementedException();

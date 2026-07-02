@@ -50,6 +50,7 @@ export interface TestRunDetail extends TestRunSummary {
   impactAnalysisJson: string | null
   junitPath: string | null
   reportPath: string | null
+  eventLogJson: string | null
   failures: TestFailureDto[]
 }
 
@@ -98,6 +99,20 @@ export async function triage(runId: number): Promise<{ triagedCount: number; rea
 
 export async function fileBugs(runId: number, req: FileBugsRequest): Promise<FileBugsResponse> {
   const { data } = await api.post<FileBugsResponse>(`/api/qaloop/runs/${runId}/file-bugs`, req)
+  return data
+}
+
+export interface RunFacets {
+  modules: string[]
+  levels: string[]
+  profiles: string[]
+  tags: string[]
+  defaultProfile: string
+  adoBaseUrl: string
+}
+
+export async function getRunFacets(): Promise<RunFacets> {
+  const { data } = await api.get<RunFacets>('/api/qaloop/runs/facets')
   return data
 }
 

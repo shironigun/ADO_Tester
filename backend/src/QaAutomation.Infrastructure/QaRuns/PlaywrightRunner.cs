@@ -23,6 +23,7 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
 {
     private readonly IEventBus _bus;
     private readonly PipelineConcurrency _concurrency;
+    private readonly IAutomationAuthenticator _authenticator;
     private readonly string _scriptsDir;
     private readonly string _runsDir;
     private readonly string _runtimeDir;
@@ -36,13 +37,14 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
     private readonly SemaphoreSlim _runtimeLock = new(1, 1);
 
     public PlaywrightRunner(
-        IEventBus bus, PipelineConcurrency concurrency,
+        IEventBus bus, PipelineConcurrency concurrency, IAutomationAuthenticator authenticator,
         IOptions<StorageOptions> storage, IOptions<QaLoopOptions> qaLoop,
         IOptions<AzureDevOpsOptions> ado,
         ILogger<PlaywrightRunner> log)
     {
         _bus = bus;
         _concurrency = concurrency;
+        _authenticator = authenticator;
         var dataDir = storage.Value.DataDirectory;
         _scriptsDir      = Path.GetFullPath(Path.Combine(dataDir, qaLoop.Value.ScriptsFolderName));
         _runsDir         = Path.GetFullPath(Path.Combine(dataDir, qaLoop.Value.RunsFolderName));
@@ -58,10 +60,10 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
     {
         await EnsureRuntimeAsync(eventKey, ct);
 
-        // Only Pushed drafts with numeric ids are eligible
-        if (spec.GrepTags.Count == 0)
+        // Need either spec file paths OR numeric grep tags to select tests
+        if (spec.SpecFilePaths.Count == 0 && spec.GrepTags.Count == 0)
         {
-            _log.LogWarning("Run {RunId}: no eligible (Pushed) grep tags — aborting", spec.RunId);
+            _log.LogWarning("Run {RunId}: no spec files or grep tags — aborting", spec.RunId);
             return new PlaywrightRunResult { ExitCode = 1, Failed = 0 };
         }
 
@@ -73,30 +75,52 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
 
         WriteRunConfig(runDir, spec);
 
-        var grep = BuildGrep(spec.GrepTags);
-        // Reporters are declared in playwright.config.ts (allure-playwright + conditional html);
-        // --output must NOT be runDir itself — Playwright wipes its entire outputDir at the start of
-        // every run, which was deleting playwright.config.ts/package.json/the node_modules link before
-        // it could even load them (config load then silently fails → 0 tests found, no error surfaced).
         var testOutputDir = Path.Combine(runDir, "test-output");
-        var args = $"test --grep \"{grep}\" --output={EscPath(testOutputDir)}";
 
-        Pub(eventKey, EventKinds.Phase, "run", $"Playwright run {spec.RunId} starting · grep={grep}");
+        // Prefer spec file paths (clean titles, no [tcId] in name) over grep-by-title fallback.
+        // Selection itself lives in playwright.config.ts's testMatch (see WriteRunConfig) — NOT as
+        // CLI positional args, which blow past Windows' ~8191-char cmd.exe command-line limit for
+        // any run selecting more than a couple dozen specs ("The command line is too long").
+        string args;
+        int testCount;
+        if (spec.SpecFilePaths.Count > 0)
+        {
+            args = $"test --output={EscPath(testOutputDir)}";
+            testCount = spec.SpecFilePaths.Count;
+        }
+        else
+        {
+            var grep = BuildGrep(spec.GrepTags);
+            args = $"test --grep \"{grep}\" --output={EscPath(testOutputDir)}";
+            testCount = spec.GrepTags.Count;
+        }
+
+        Pub(eventKey, EventKinds.Phase, "run", $"Playwright run {spec.RunId} starting · {testCount} test case(s) selected (profile: {spec.Profile})");
 
         var sw = Stopwatch.StartNew();
         int exitCode;
 
-        // Resolve the profile key (e.g. "infinity") to its registry entry so the child process gets
-        // a real target URL/token, not just the key string (QAL-068 — AUTOMATION_PROFILE alone is
-        // not a URL; every generated spec was silently falling back to a hardcoded/localhost guess).
+        // Pre-run auth (QAL-072): the API base URL is the SAME for every DMS (one APIM gateway), and
+        // the bearer is minted once per run session from the shared QA-admin creds — mirrors the CRM
+        // automation project's global-setup token mint. Falls back to the per-profile registry values
+        // only when the shared automation auth isn't configured (keeps older setups working).
         var profileEntry = DmsProfileOptions.All.FirstOrDefault(p => p.Key == spec.Profile);
+        var baseUrl = _authenticator.ApiBaseUrl ?? profileEntry?.BaseUrl;
+        var bearerToken = await _authenticator.GetBearerTokenAsync(ct: ct) ?? profileEntry?.BearerToken;
+        if (string.IsNullOrEmpty(baseUrl))
+            Pub(eventKey, EventKinds.System, "run",
+                "No API base URL configured (set LEAD_API_BASE_URL in .env) — tests will hit localhost.",
+                EventLevels.Warn);
+        else
+            Pub(eventKey, EventKinds.System, "run",
+                $"Auth ready · target {baseUrl}" + (bearerToken is null ? " · no bearer (unauthenticated)" : " · bearer minted"));
 
         await _concurrency.Gate.WaitAsync(ct);
         try
         {
             exitCode = await SpawnAsync("npx", $"playwright {args}", runDir, spec.Profile, eventKey, ct,
                 suppressOutput: !spec.ActivityEnabled,
-                baseUrl: profileEntry?.BaseUrl, bearerToken: profileEntry?.BearerToken);
+                baseUrl: baseUrl, bearerToken: bearerToken);
         }
         finally
         {
@@ -204,11 +228,30 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
         // html gated on report_provider ∈ {playwright, both}
         var htmlReporter = (_reportProvider == "playwright" || _reportProvider == "both")
             ? ", ['html']" : "";
+
+        // Test selection lives in the config's testMatch, NOT as CLI positional args: Windows
+        // invokes npx.cmd through cmd.exe, whose command-line buffer caps out at ~8191 chars — a
+        // run selecting ~90+ specs (typical "whole module" run) blows past that with "The command
+        // line is too long" and the process never even starts Node, so it looks exactly like a
+        // silent 0/0/0 collection crash. A config file has no such limit.
+        var testMatchLine = spec.SpecFilePaths.Count > 0
+            ? $"\n  testMatch: [{string.Join(", ", spec.SpecFilePaths.Select(p => $"'{EscPath(p)}'"))}],"
+            : "";
+
         var config = $$"""
             import { defineConfig } from '@playwright/test';
             import path from 'path';
             export default defineConfig({
-              testDir: '{{testDir}}',
+              testDir: '{{testDir}}',{{testMatchLine}}
+              // Cap every layer so a run can never hang indefinitely against a live QA API:
+              // per-test 30s, per-assertion 10s, and a whole-run globalTimeout (15m default).
+              timeout: 30_000,
+              globalTimeout: Number(process.env.AUTOMATION_GLOBAL_TIMEOUT_MS ?? '900000'),
+              expect: { timeout: 10_000 },
+              // Parallelise across spec files (workers) for speed; keep tests within a file ordered.
+              fullyParallel: false,
+              workers: Number(process.env.AUTOMATION_WORKERS ?? '6'),
+              retries: 0,
               reporter: [['junit', { outputFile: 'junit.xml' }], ['json', { outputFile: 'results.json' }], ['allure-playwright', { resultsDir: 'allure-results' }]{{htmlReporter}}],
               use: { baseURL: process.env.BASE_URL ?? 'http://localhost' },
               projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
@@ -279,8 +322,16 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
         try
         {
             Pub(eventKey, EventKinds.System, "run", "Generating Allure report…");
+            // Allure 3's `generate` has no --single-file or --clean flag (confirmed via `allure
+            // generate --help`: only --config/-o/--cwd/--report-name/--dump/--open/--port/
+            // --history-limit/--hide-labels exist) — passing either produced "Unknown Syntax
+            // Error" and silently fell back to no report on every run. Delete reportDir ourselves
+            // to get --clean's effect; the report is unavoidably a multi-file directory, served via
+            // the report/{subPath} catch-all in QaRunsController.
+            if (Directory.Exists(reportDir))
+                Directory.Delete(reportDir, recursive: true);
             var genExit = await SpawnAsync(
-                "npx", $"allure generate {EscPath(resultsDir)} -o {EscPath(reportDir)} --single-file --clean",
+                "npx", $"allure generate {EscPath(resultsDir)} -o {EscPath(reportDir)}",
                 runDir, profile: null, eventKey, ct);
 
             if (genExit != 0)
@@ -408,6 +459,10 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
         // against the npm registry; "@allurereport/cli" never existed (404) and silently broke every
         // provisioning attempt. allure-playwright is the Playwright reporter.
         // ponytail: if "allure" generate --single-file is ever unsupported, fallback = allure-commandline + bundled JRE
+        // "zod" is required at spec load time: generated contract specs `import { z } from 'zod'`
+        // to validate response shapes. Without it every contract spec throws "Cannot find module
+        // 'zod'" while Playwright is collecting tests, so the whole run silently reports 0 tests /
+        // exit 1 (the load errors are swallowed when ActivityEnabled is off).
         const string json = """
             {
               "name": "qa-playwright-runtime",
@@ -415,7 +470,8 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
               "devDependencies": {
                 "@playwright/test": "latest",
                 "allure-playwright": "latest",
-                "allure": "latest"
+                "allure": "latest",
+                "zod": "latest"
               }
             }
             """;
@@ -442,11 +498,19 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
         };
         ApplyAutomationEnv(psi.Environment, profile, baseUrl, bearerToken);
 
-        using var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
+        using var proc = new Process { StartInfo = psi };
+
+        // Bounded tail buffer of raw lines, kept regardless of suppressOutput, so a failure can be
+        // diagnosed even when live relay is off — otherwise a fast crash (bad import, missing module)
+        // surfaces only as "exit 1 / 0 passed" with no clue why (see QAL-071b).
+        var tail = new List<string>();
+        const int MaxTailLines = 40;
 
         void RelayLine(string? line, bool isErr)
         {
-            if (string.IsNullOrEmpty(line) || suppressOutput) return;
+            if (string.IsNullOrEmpty(line)) return;
+            lock (tail) { if (tail.Count < MaxTailLines) tail.Add(line); }
+            if (suppressOutput) return;
             Pub(eventKey, EventKinds.Stat, "run", line, isErr ? EventLevels.Warn : EventLevels.Info);
         }
 
@@ -457,11 +521,54 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
         proc.BeginOutputReadLine();
         proc.BeginErrorReadLine();
 
-        var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
-        proc.Exited += (_, _) => tcs.TrySetResult(proc.ExitCode);
-
         await using var reg = ct.Register(() => { try { proc.Kill(entireProcessTree: true); } catch { } });
-        return await tcs.Task;
+
+        // Heartbeat: Playwright/Node buffers stdout when piped (not a TTY), so the live stat lines
+        // arrive in a burst near the very end — without this the console looks frozen for minutes
+        // between "starting" and the flush. Emit a periodic "still running" event so the UI shows
+        // liveness while the child process works.
+        using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var startedAt = DateTime.UtcNow;
+        var heartbeat = Task.Run(async () =>
+        {
+            try
+            {
+                while (!heartbeatCts.IsCancellationRequested)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(15), heartbeatCts.Token);
+                    if (heartbeatCts.IsCancellationRequested) break;
+                    var secs = (int)(DateTime.UtcNow - startedAt).TotalSeconds;
+                    Pub(eventKey, EventKinds.System, "run",
+                        $"Still running… {secs}s elapsed (Playwright buffers output; it appears when the run finishes)");
+                }
+            }
+            catch (OperationCanceledException) { /* process exited */ }
+        }, heartbeatCts.Token);
+
+        // WaitForExitAsync (not the Exited event) is required here: Process.Exited can fire before the
+        // redirected output pipes finish draining into OutputDataReceived/ErrorDataReceived, especially
+        // for a process that crashes in milliseconds — losing exactly the error text needed to diagnose
+        // a fast collection-time crash. The parameterless overload also blocks until buffered async
+        // reads are flushed, so `tail` is complete once this returns.
+        await proc.WaitForExitAsync(ct);
+        heartbeatCts.Cancel();
+        try { await heartbeat; } catch { /* ignore */ }
+        var exitCode = proc.ExitCode;
+
+        if (exitCode != 0)
+        {
+            List<string> snapshot;
+            lock (tail) { snapshot = [.. tail]; }
+            if (snapshot.Count > 0)
+            {
+                var summary = string.Join('\n', snapshot);
+                _log.LogWarning("{Exe} {Args} exited {Code} in {Dir}:\n{Output}", exe, args, exitCode, workDir, summary);
+                if (suppressOutput)
+                    Pub(eventKey, EventKinds.Stat, "run", summary, EventLevels.Warn);
+            }
+        }
+
+        return exitCode;
     }
 
     /// <summary>Sets AUTOMATION_PROFILE/AUTOMATION_BASE_URL/AUTOMATION_BEARER_TOKEN on the child
@@ -506,11 +613,25 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
 
             var failures = doc.Descendants("testcase")
                 .Where(tc => tc.Element("failure") is not null || tc.Element("error") is not null)
-                .Select(tc => new FailedTestResult
+                .Select(tc =>
                 {
-                    TestTitle    = tc.Attribute("name")?.Value ?? "",
-                    ErrorMessage = (tc.Element("failure") ?? tc.Element("error"))?.Value
-                        ?.Split('\n').FirstOrDefault()?.Trim(),
+                    // Extract spec file path from parent testsuite — Playwright's JUnit reporter
+                    // sets the 'file' attribute to the absolute path (v1.42+). Fall back to the
+                    // 'name' attribute which includes the relative path (e.g. "contracts/foo.spec.ts [chromium]").
+                    var suiteFile = tc.Parent?.Attribute("file")?.Value;
+                    if (suiteFile == null)
+                    {
+                        var suiteName = tc.Parent?.Attribute("name")?.Value ?? "";
+                        var bracketIdx = suiteName.LastIndexOf(" [");
+                        suiteFile = bracketIdx > 0 ? suiteName[..bracketIdx] : suiteName;
+                    }
+                    return new FailedTestResult
+                    {
+                        TestTitle    = tc.Attribute("name")?.Value ?? "",
+                        ErrorMessage = (tc.Element("failure") ?? tc.Element("error"))?.Value
+                            ?.Split('\n').FirstOrDefault()?.Trim(),
+                        SpecFilePath = string.IsNullOrEmpty(suiteFile) ? null : suiteFile,
+                    };
                 })
                 .ToList();
 

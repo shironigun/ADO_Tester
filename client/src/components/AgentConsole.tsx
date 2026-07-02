@@ -22,6 +22,7 @@ const PHASE_LABEL: Record<string, string> = {
   fetch: 'FETCH', retrieve: 'KB', analyst: 'ANALYST', tester: 'TESTER',
   bugwriter: 'BUGWRITER', push: 'PUSH', summarize: 'SUMMARIZE',
   discover: 'DISCOVER', 'code-verify': 'VERIFY',
+  run: 'RUN',
 }
 
 function buildModel(events: ConsoleEvent[]): { lines: Line[]; chars: number; elapsed: number } {
@@ -72,8 +73,8 @@ function fmtTime(ts: number): string {
  * follow-pause when the user scrolls up.
  */
 export default function AgentConsole({
-  streamUrl, seedEvents = [], title = 'Agent console',
-}: { streamUrl: string | null; seedEvents?: ConsoleEvent[]; title?: string }) {
+  streamUrl, seedEvents = [], title = 'Agent console', fillHeight = false,
+}: { streamUrl: string | null; seedEvents?: ConsoleEvent[]; title?: string; fillHeight?: boolean }) {
   const reduce = useReducedMotion()
   const { events, connected } = useEventStream(streamUrl, seedEvents)
   const { lines, chars, elapsed } = useMemo(() => buildModel(events), [events])
@@ -97,7 +98,7 @@ export default function AgentConsole({
   if (!streamUrl && lines.length === 0) return null
 
   return (
-    <Box sx={{ mt: 2 }}>
+    <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', flex: fillHeight ? 1 : undefined, minHeight: 0 }}>
       {/* Header */}
       <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1 }}>
         {connected && <AgentOrb size={18} />}
@@ -116,7 +117,7 @@ export default function AgentConsole({
       </Stack>
 
       {/* Terminal surface */}
-      <Box sx={{ position: 'relative' }}>
+      <Box sx={{ position: 'relative', flex: fillHeight ? 1 : undefined, minHeight: 0 }}>
         <Box
           ref={scrollRef}
           onScroll={onScroll}
@@ -128,7 +129,8 @@ export default function AgentConsole({
             border: theme => `1px solid ${alpha(theme.palette.primary.main, 0.25)}`,
             boxShadow: 'inset 0 2px 18px rgba(0,0,0,0.45)',
             p: 1.5,
-            maxHeight: 360,
+            maxHeight: fillHeight ? 'none' : 360,
+            height: fillHeight ? '100%' : undefined,
             minHeight: 120,
             overflowY: 'auto',
             whiteSpace: 'pre-wrap',

@@ -789,6 +789,9 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("ErrorMessage");
 
+                    b.Property<string>("EventLogJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("Failed")
                         .HasColumnType("INTEGER")
                         .HasColumnName("Failed");

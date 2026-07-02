@@ -204,10 +204,8 @@ public sealed class LeadsScanSeeder
     public void Seed()
     {
         if (!_db.Projects.Any()) return; // project seed hasn't run yet
-        // Two demo entries share the same route inventory: the original "leads" seed (kept for its
-        // history — still in the OLD title format) and a "deals" seed reproducing the same scan under
-        // the deals module label using the NEW title/step format.
-        SeedModule("leads", "Leads");
+        // This project only demos the "deals" module — the original "leads" seed was removed
+        // 2026-07-02 (leads was demo scaffolding, not part of this project's scope).
         SeedModule("deals", "Deals");
     }
 

@@ -6,8 +6,12 @@ public sealed class PlaywrightRunSpec
     public int RunId { get; init; }
     /// <summary>DMS profile key (e.g. "infinity") — set as AUTOMATION_PROFILE on child process env.</summary>
     public string Profile { get; init; } = "";
-    /// <summary>Numeric ADO Test Case ids to run; grep pattern is built from these.</summary>
+    /// <summary>Numeric ADO Test Case ids — still used for ADO Test Run point mapping even when
+    /// test selection uses spec file paths instead of grep.</summary>
     public IReadOnlyList<int> GrepTags { get; init; } = [];
+    /// <summary>Absolute spec file paths to pass to Playwright as positional args (replaces
+    /// --grep-by-title). When non-empty, used for test selection; GrepTags still drives ADO mapping.</summary>
+    public IReadOnlyList<string> SpecFilePaths { get; init; } = [];
     public string Module { get; init; } = "";
     /// <summary>Optional level filter ("contracts" | "endpoints" | "workflows"); null = all.</summary>
     public string? LevelFilter { get; init; }
@@ -45,6 +49,10 @@ public sealed class FailedTestResult
 {
     public string TestTitle { get; init; } = "";
     public string? ErrorMessage { get; init; }
+    /// <summary>Absolute path of the spec file that owns this test, extracted from the JUnit
+    /// testsuite 'file' attribute. Used to map failures back to ADO Test Case IDs without
+    /// requiring a numeric ID tag in the test title.</summary>
+    public string? SpecFilePath { get; init; }
 }
 
 /// <summary>Runs Playwright specs in a background process; singleton-safe.</summary>

@@ -273,6 +273,19 @@ public static class DependencyInjection
                 o.FrontendBaseUrl = rt.Get("qaloop.frontend_base_url") ?? o.FrontendBaseUrl;
             });
 
+        // Automation target + pre-run auth (single base URL for all DMS; bearer minted per run).
+        services.AddOptions<AutomationAuthOptions>()
+            .Bind(config.GetSection(AutomationAuthOptions.SectionName))
+            .PostConfigure(o =>
+            {
+                o.LeadApiBaseUrl = Env("LEAD_API_BASE_URL") ?? o.LeadApiBaseUrl;
+                o.WebApiBaseUrl  = Env("WEB_API_BASE_URL") ?? o.WebApiBaseUrl;
+                o.AuthDealerId   = Env("AUTH_DEALER_ID") ?? o.AuthDealerId;
+                o.AuthUsername   = Env("AUTH_USERNAME") ?? o.AuthUsername;
+                o.AuthPassword   = Env("AUTH_PASSWORD") ?? o.AuthPassword;
+            });
+        services.AddSingleton<IAutomationAuthenticator, AutomationAuthenticator>();
+
         services.AddSingleton<IQaLoopOrchestrator, QaLoopOrchestrator>();
         services.AddSingleton<IPlaywrightRunner, PlaywrightRunner>();
         services.AddScoped<RunExecutionService>();

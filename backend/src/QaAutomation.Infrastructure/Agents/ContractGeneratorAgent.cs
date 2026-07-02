@@ -45,40 +45,12 @@ public static partial class TitleTag
         return char.ToUpperInvariant(trimmed[0]) + trimmed[1..];
     }
 
-    /// <summary>Returns spec text guaranteed to contain a pending tag in the test title line. If the
-    /// model omitted it, injects it at the start of the first test/describe title found.</summary>
-    public static string EnsureInSpec(string specCode, string title, int? caseIndex = null)
-    {
-        var tag = PendingFor(caseIndex);
-        if (specCode.Contains(tag) || System.Text.RegularExpressions.Regex.IsMatch(specCode, @"\[\d+\]"))
-            return specCode;
-        // Inject into the first test( or describe( title string.
-        var pattern = new System.Text.RegularExpressions.Regex(@"(test|describe)\s*\(\s*(['""])");
-        return pattern.Replace(specCode, m => $"{m.Groups[1].Value}({m.Groups[2].Value}{tag} ", 1);
-    }
+    /// <summary>No-op: test selection now uses spec file paths rather than a [tcId] title tag,
+    /// so there is nothing to inject. Kept for call-site compatibility.</summary>
+    public static string EnsureInSpec(string specCode, string title, int? caseIndex = null) => specCode;
 
-    /// <summary>QAL-067: same as <see cref="EnsureInSpec"/> but for a shared multi-case spec file — tags
-    /// the Nth untagged test(/describe( occurrence with [<tcId-pending:N>], in source order, for N in
-    /// [0, caseCount). If the model already tagged some/all titles (any [<tcId-pending...] or [\d+] tag),
-    /// those occurrences are left alone and only the remaining untagged ones get indexed tags, so this is
-    /// safe to call even when the model partially followed instructions.</summary>
-    public static string EnsureIndexedInSpec(string specCode, int caseCount)
-    {
-        var pattern = new System.Text.RegularExpressions.Regex(@"(test|describe)\s*\(\s*(['""])");
-        var nextIndex = 0;
-        return pattern.Replace(specCode, m =>
-        {
-            // Peek at the text right after the opening quote — if it's already tagged, skip it untouched.
-            var tailStart = m.Index + m.Length;
-            var tail = specCode.Substring(tailStart, Math.Min(64, specCode.Length - tailStart));
-            if (tail.Contains("[<tcId-pending") || System.Text.RegularExpressions.Regex.IsMatch(tail, @"^\[\d+\]"))
-                return m.Value;
-            if (nextIndex >= caseCount)
-                return m.Value;
-            var tag = PendingFor(nextIndex++);
-            return $"{m.Groups[1].Value}({m.Groups[2].Value}{tag} ";
-        });
-    }
+    /// <summary>No-op: see <see cref="EnsureInSpec"/>.</summary>
+    public static string EnsureIndexedInSpec(string specCode, int caseCount) => specCode;
 }
 
 /// <summary>

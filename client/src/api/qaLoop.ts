@@ -161,6 +161,10 @@ export async function cancelSession(id: number): Promise<void> {
   await api.post(`/api/qaloop/sessions/${id}/cancel`)
 }
 
+export async function deleteSession(id: number): Promise<void> {
+  await api.delete(`/api/qaloop/sessions/${id}`)
+}
+
 export const sessionStreamUrl = (id: number) => apiUrl(`/api/qaloop/sessions/${id}/stream`)
 
 // Org-level ADO work-item deep link (unchanged from old qaLoop.ts).

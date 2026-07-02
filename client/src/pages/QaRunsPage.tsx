@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Alert, Autocomplete, Box, Button, Card, CardContent, Checkbox, Chip, CircularProgress,
-  Collapse, Drawer, IconButton, LinearProgress, Stack, Tab, Table, TableBody, TableCell,
-  TableHead, TableRow, Tabs, TextField, Tooltip, Typography,
+  Collapse, Drawer, IconButton, LinearProgress, MenuItem, Stack, Tab, Table, TableBody, TableCell,
+  TableHead, TableRow, Tabs, TextField, Toolbar, Tooltip, Typography,
 } from '@mui/material'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import CloseIcon from '@mui/icons-material/Close'
@@ -10,6 +10,9 @@ import BugReportIcon from '@mui/icons-material/BugReport'
 import DownloadIcon from '@mui/icons-material/Download'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
+import OpenInFullIcon from '@mui/icons-material/OpenInFull'
+import CloseFullscreenIcon from '@mui/icons-material/CloseFullscreen'
+import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty'
 import AgentConsole from '../components/AgentConsole'
 import { useQuery } from '@tanstack/react-query'
 import PageHeader from '../components/PageHeader'
@@ -18,13 +21,24 @@ import EmptyState from '../components/EmptyState'
 import { axiosMessage } from '../common/errors'
 import { searchWorkItems } from '../api/authorTests'
 import type { WorkItemOption } from '../session/types'
+import type { ConsoleEvent } from '../hooks/useEventStream'
 import {
-  startRun, listRunsPage, getRunDetail, triage, fileBugs, runStreamUrl,
+  startRun, listRunsPage, getRunDetail, triage, fileBugs, runStreamUrl, getRunFacets,
   type TestRunSummary, type TestRunDetail, type TestFailureDto,
 } from '../api/qaRuns'
 import { PROJECT_ID } from '../config/env'
 
 const IN_FLIGHT: string[] = ['Queued', 'Running']
+
+function parseEventLog(json: string | null | undefined): ConsoleEvent[] {
+  if (!json) return []
+  try {
+    const arr = JSON.parse(json)
+    return Array.isArray(arr) ? (arr as ConsoleEvent[]) : []
+  } catch {
+    return []
+  }
+}
 
 function fmtDuration(ms: number) {
   if (ms < 1000) return `${ms}ms`
@@ -63,8 +77,8 @@ function FailureRow({ f, selected, onToggle }: { f: TestFailureDto; selected: bo
 }
 
 // ── Run drawer ────────────────────────────────────────────────────────────────
-function RunDrawer({ run, onClose }: { run: TestRunSummary; onClose: () => void }) {
-  const [tab, setTab] = useState<'failures' | 'impact' | 'console'>('failures')
+function RunDrawer({ run, adoBaseUrl, onClose }: { run: TestRunSummary; adoBaseUrl?: string; onClose: () => void }) {
+  const [tab, setTab] = useState<'console' | 'failures' | 'impact'>('console')
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [story, setStory] = useState<WorkItemOption | null>(null)
   const [storyInput, setStoryInput] = useState('')
@@ -73,6 +87,7 @@ function RunDrawer({ run, onClose }: { run: TestRunSummary; onClose: () => void 
   const [filing, setFiling] = useState(false)
   const [error, setError] = useState('')
   const [expanded, setExpanded] = useState(false)
+  const [fullscreen, setFullscreen] = useState(false)
 
   const detailQ = useQuery({
     queryKey: ['run-detail', run.id],
@@ -102,49 +117,80 @@ function RunDrawer({ run, onClose }: { run: TestRunSummary; onClose: () => void 
   const realBugPending = failures.filter(f => f.classification === 'RealBug' && f.bugDraftJson != null && !f.bugId)
   const allPendingIds = new Set(realBugPending.map(f => f.id))
 
-  const adoRunUrl = run.adoTestRunId ? `https://dev.azure.com/your-org/_testManagement/runs?runId=${run.adoTestRunId}` : null
+  // detail is polled every 3s while in-flight — use it as the live source of truth for all
+  // status-dependent rendering. The `run` prop is a stale list-row snapshot from when the row
+  // was clicked; it never gets updated, so adoTestRunId, status, and counts lag behind.
+  const liveStatus = detail?.status ?? run.status
+  const liveAdoTestRunId = detail?.adoTestRunId ?? run.adoTestRunId
+  const liveErrorMessage = detail?.errorMessage ?? run.errorMessage
+  const livePassed = detail?.passed ?? run.passed
+  const liveFailed = detail?.failed ?? run.failed
+  const liveSkipped = detail?.skipped ?? run.skipped
+  const liveDuration = detail?.durationMs ?? run.durationMs
+  const isInFlight = IN_FLIGHT.includes(liveStatus)
+
+  const adoRunUrl = liveAdoTestRunId && adoBaseUrl
+    ? `${adoBaseUrl}/_testManagement/runs?runId=${liveAdoTestRunId}`
+    : null
 
   return (
-    <Drawer anchor="right" open onClose={onClose} slotProps={{ paper: { sx: { width: 640, maxWidth: '100%' } } }}>
+    <Drawer anchor="right" open onClose={onClose} slotProps={{ paper: { sx: { width: fullscreen ? '100%' : 640, maxWidth: '100%' } } }}>
       <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <Toolbar />
         <Box sx={{ p: 2, pb: 0 }}>
           <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1 }}>
-            <StatusChip value={run.status} />
+            <StatusChip value={liveStatus} />
             <Typography variant="subtitle1" sx={{ fontWeight: 600, flex: 1 }}>{run.module ?? `Run #${run.id}`}</Typography>
+            <Tooltip title={fullscreen ? 'Exit full screen' : 'Full screen'}>
+              <IconButton size="small" onClick={() => setFullscreen(v => !v)}>
+                {fullscreen ? <CloseFullscreenIcon fontSize="small" /> : <OpenInFullIcon fontSize="small" />}
+              </IconButton>
+            </Tooltip>
             <IconButton size="small" onClick={onClose}><CloseIcon /></IconButton>
           </Stack>
           <Stack direction="row" spacing={2} sx={{ mb: 1, flexWrap: 'wrap' }}>
             <Typography variant="caption">Profile: {run.profile}</Typography>
-            <Typography variant="caption">Passed: {run.passed}</Typography>
-            <Typography variant="caption">Failed: {run.failed}</Typography>
-            <Typography variant="caption">Duration: {fmtDuration(run.durationMs)}</Typography>
+            <Typography variant="caption">Passed: {livePassed}</Typography>
+            <Typography variant="caption">Failed: {liveFailed}</Typography>
+            {liveSkipped > 0 && <Typography variant="caption">Skipped: {liveSkipped}</Typography>}
+            <Typography variant="caption">Duration: {fmtDuration(liveDuration)}</Typography>
           </Stack>
           <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: 'wrap' }}>
             {adoRunUrl && <Button size="small" startIcon={<OpenInNewIcon />} href={adoRunUrl} target="_blank" rel="noopener">ADO Test Run</Button>}
-            {/* reportPath only exists on TestRunDetail, not the list-row TestRunSummary — must read
-                from the fetched detail, not the `run` prop. */}
-            {!IN_FLIGHT.includes(run.status) && !detailQ.isLoading && (
+            {/* Gate on liveStatus (from fresh detail poll) — not the stale run prop — so the
+                buttons appear as soon as the run finishes without waiting for the list to refresh. */}
+            {!isInFlight && !detailQ.isLoading && (
               detail?.reportPath
                 ? <>
                     <Button size="small" startIcon={<OpenInNewIcon />} component="a" href={`/api/qaloop/runs/${run.id}/report`} target="_blank" rel="noopener">Report ↗</Button>
-                    <Button size="small" startIcon={<DownloadIcon />} component="a" href={`/api/qaloop/runs/${run.id}/report?dl=true`} download={`qa-run-${run.id}-report.html`}>Download</Button>
+                    <Button size="small" startIcon={<DownloadIcon />} component="a" href={`/api/qaloop/runs/${run.id}/report?dl=true`} download={`qa-run-${run.id}-report.zip`}>Download</Button>
                   </>
-                : <Typography variant="caption" color="text.disabled" sx={{ alignSelf: 'center' }}>report unavailable</Typography>
+                : liveStatus !== 'Error' && liveStatus !== 'Cancelled'
+                  && <Typography variant="caption" color="text.disabled" sx={{ alignSelf: 'center' }}>report unavailable</Typography>
             )}
           </Stack>
           <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ borderBottom: 1, borderColor: 'divider' }}>
+            <Tab value="console" label="Console" sx={{ textTransform: 'none', minHeight: 36 }} />
             <Tab value="failures" label={`Failures (${failures.length})`} sx={{ textTransform: 'none', minHeight: 36 }} />
             <Tab value="impact" label="Impact" sx={{ textTransform: 'none', minHeight: 36 }} />
-            {IN_FLIGHT.includes(run.status) && <Tab value="console" label="Console" sx={{ textTransform: 'none', minHeight: 36 }} />}
           </Tabs>
         </Box>
-        <Box sx={{ flex: 1, overflowY: 'auto', p: 2 }}>
+        <Box sx={{ flex: 1, overflowY: tab === 'console' ? 'hidden' : 'auto', p: 2, display: 'flex', flexDirection: 'column' }}>
           {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
           {tab === 'failures' && (
             <Box>
               {failures.length === 0 && !detailQ.isLoading && (
-                <EmptyState icon={<BugReportIcon />} title="No failures" hint="All tests passed." />
+                isInFlight
+                  ? <EmptyState icon={<HourglassEmptyIcon />} title="Run in progress"
+                      hint="Failures will appear here once the run finishes." />
+                  : liveStatus === 'Error' || liveStatus === 'Cancelled'
+                    ? <EmptyState icon={<BugReportIcon />} title={`Run ${liveStatus.toLowerCase()}`}
+                        hint={liveErrorMessage ?? 'No test results were recorded.'} />
+                    : livePassed === 0 && liveFailed === 0
+                      ? <EmptyState icon={<BugReportIcon />} title="No tests ran"
+                          hint="No tests matched this run's filters — nothing was executed." />
+                      : <EmptyState icon={<BugReportIcon />} title="No failures" hint="All tests passed." />
               )}
               {failures.some(f => f.classification === 'TestIssue' && f.bugDraftJson == null) && (
                 <Button size="small" variant="outlined" sx={{ mb: 2 }} disabled={triaging}
@@ -195,11 +241,21 @@ function RunDrawer({ run, onClose }: { run: TestRunSummary; onClose: () => void 
             </Box>
           )}
 
-          {tab === 'console' && (
-            run.activityEnabled
-              ? <AgentConsole streamUrl={IN_FLIGHT.includes(run.status) ? runStreamUrl(run.id) : null} seedEvents={[]} />
-              : <Box sx={{ py: 2 }}><LinearProgress /></Box>
-          )}
+          {tab === 'console' && (() => {
+            // Phase/system/result events are always published to the bus regardless of
+            // activityEnabled. Once finished, replay from eventLogJson persisted at completion.
+            const seed = parseEventLog(detail?.eventLogJson)
+            const streamUrl = isInFlight ? runStreamUrl(run.id) : null
+            if (!isInFlight && seed.length === 0) {
+              return detailQ.isLoading
+                ? <Box sx={{ py: 2 }}><LinearProgress /></Box>
+                : <EmptyState icon={<HourglassEmptyIcon />} title="No console output"
+                    hint="This run predates console logging. Re-run to capture output." />
+            }
+            // key forces remount (re-seed) when the run transitions from in-flight to finished.
+            return <AgentConsole key={`${run.id}-${isInFlight ? 'live' : 'done'}`}
+              streamUrl={streamUrl} seedEvents={seed} title="Run console" fillHeight />
+          })()}
 
           {tab === 'impact' && (
             <Box>
@@ -227,13 +283,21 @@ function RunDrawer({ run, onClose }: { run: TestRunSummary; onClose: () => void 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function QaRunsPage() {
   const [module, setModule]   = useState('')
-  const [level, setLevel]     = useState('')
-  const [tag, setTag]         = useState('')
+  const [level, setLevel]     = useState('')      // '' == All
+  const [tag, setTag]         = useState('')      // '' == All
   const [profile, setProfile] = useState('infinity')
   const [launching, setLaunching] = useState(false)
   const [launchError, setLaunchError] = useState('')
   const [page, setPage]       = useState(0)
   const [selectedRun, setSelectedRun] = useState<TestRunSummary | null>(null)
+
+  const facetsQ = useQuery({ queryKey: ['qa-run-facets'], queryFn: getRunFacets })
+  const facets = facetsQ.data
+  // Seed profile from AUTOMATION_PROFILE env once facets arrive; user can still override.
+  useEffect(() => {
+    if (facets?.defaultProfile && facets.profiles.includes(facets.defaultProfile))
+      setProfile(facets.defaultProfile)
+  }, [facets?.defaultProfile])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const TAKE = 20
   const runsQ = useQuery({
@@ -266,12 +330,31 @@ export default function QaRunsPage() {
             <Typography variant="subtitle2" sx={{ mb: 2 }}>New Run</Typography>
             {launchError && <Alert severity="error" sx={{ mb: 2 }}>{launchError}</Alert>}
             <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap' }}>
-              <TextField label="Module filter" size="small" value={module} onChange={e => setModule(e.target.value)} sx={{ minWidth: 160 }} />
-              <TextField label="Level filter" size="small" value={level} onChange={e => setLevel(e.target.value)} placeholder="Contract|Endpoint|Workflow" sx={{ minWidth: 160 }} />
-              <TextField label="Tag filter" size="small" value={tag} onChange={e => setTag(e.target.value)} sx={{ minWidth: 120 }} />
-              <TextField label="Profile" size="small" value={profile} onChange={e => setProfile(e.target.value)} sx={{ minWidth: 100 }} />
+              <TextField select label="Module" size="small" value={module}
+                onChange={e => setModule(e.target.value)} sx={{ minWidth: 200 }}
+                disabled={facetsQ.isLoading}
+                helperText={facets && facets.modules.length === 0 ? 'No modules with pushed drafts' : ' '}>
+                {(facets?.modules ?? []).map(m => <MenuItem key={m} value={m}>{m}</MenuItem>)}
+              </TextField>
+              <TextField select label="Level" size="small" value={level}
+                onChange={e => setLevel(e.target.value)} sx={{ minWidth: 160 }}>
+                <MenuItem value="">All levels</MenuItem>
+                {(facets?.levels ?? ['contract', 'endpoint', 'workflow']).map(l =>
+                  <MenuItem key={l} value={l} sx={{ textTransform: 'capitalize' }}>{l}</MenuItem>)}
+              </TextField>
+              <Autocomplete
+                freeSolo size="small" options={facets?.tags ?? []} value={tag}
+                onChange={(_, v) => setTag(v ?? '')} onInputChange={(_, v) => setTag(v)}
+                sx={{ minWidth: 160 }}
+                renderInput={p => <TextField {...p} label="Tag" placeholder="All tags" />}
+              />
+              <TextField select label="Profile" size="small" value={profile}
+                onChange={e => setProfile(e.target.value)} sx={{ minWidth: 140 }}>
+                {(facets?.profiles ?? ['ideal', 'infinity', 'aspen', 'quantum']).map(p =>
+                  <MenuItem key={p} value={p} sx={{ textTransform: 'capitalize' }}>{p}</MenuItem>)}
+              </TextField>
               <Button variant="contained" startIcon={launching ? <CircularProgress size={16} /> : <PlayArrowIcon />}
-                disabled={launching} onClick={doLaunch}>Run</Button>
+                disabled={launching || !module} onClick={doLaunch}>Run</Button>
             </Stack>
           </CardContent>
         </Card>
@@ -284,7 +367,7 @@ export default function QaRunsPage() {
             <Table size="small">
               <TableHead>
                 <TableRow>
-                  <TableCell>Module</TableCell><TableCell>Profile</TableCell><TableCell>Status</TableCell>
+                  <TableCell>Run</TableCell><TableCell>Module</TableCell><TableCell>Profile</TableCell><TableCell>Status</TableCell>
                   <TableCell align="right">Pass</TableCell><TableCell align="right">Fail</TableCell>
                   <TableCell>Duration</TableCell><TableCell>Started</TableCell><TableCell />
                 </TableRow>
@@ -292,6 +375,7 @@ export default function QaRunsPage() {
               <TableBody>
                 {runs.map(r => (
                   <TableRow key={r.id} hover sx={{ cursor: 'pointer' }} onClick={() => setSelectedRun(r)}>
+                    <TableCell>#{r.id}</TableCell>
                     <TableCell>{r.module ?? `#${r.id}`}</TableCell>
                     <TableCell>{r.profile}</TableCell>
                     <TableCell><StatusChip value={r.status} /></TableCell>
@@ -316,7 +400,7 @@ export default function QaRunsPage() {
           </Box>
         )}
       </Box>
-      {selectedRun && <RunDrawer run={selectedRun} onClose={() => setSelectedRun(null)} />}
+      {selectedRun && <RunDrawer run={selectedRun} adoBaseUrl={facets?.adoBaseUrl} onClose={() => setSelectedRun(null)} />}
     </Box>
   )
 }
