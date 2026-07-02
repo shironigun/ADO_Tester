@@ -1044,10 +1044,13 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
     public async Task<int> CreateAdoTestRunAsync(int planId, int suiteId, string name,
         IReadOnlyList<int> pointIds, CancellationToken ct = default)
     {
+        // Include pointIds so ADO auto-creates one result per point (outcome unset). We then PATCH
+        // those results with final outcomes via UpdateAdoTestResultsAsync. (POSTing fresh results to
+        // a pointId-less run is rejected with 400 — the results must be created by ADO from points.)
         var body = new JsonObject
         {
-            ["name"]   = name,
-            ["plan"]   = new JsonObject { ["id"] = planId.ToString(CultureInfo.InvariantCulture) },
+            ["name"]     = name,
+            ["plan"]     = new JsonObject { ["id"] = planId.ToString(CultureInfo.InvariantCulture) },
             ["pointIds"] = new JsonArray(pointIds.Select(id => JsonValue.Create(id)).ToArray<JsonNode?>()),
         };
         var url = $"{Opts.BaseUrl}/_apis/test/runs?api-version=7.0";
@@ -1055,21 +1058,46 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
         return doc.RootElement.GetProperty("id").GetInt32();
     }
 
-    public async Task SetAdoTestResultAsync(int adoTestRunId, int testPointId, string outcome,
-        string? errorMessage, long durationMs, CancellationToken ct = default)
+    public async Task<IReadOnlyDictionary<int, int>> GetAdoTestResultIdsAsync(int adoTestRunId, CancellationToken ct = default)
     {
-        var result = new JsonObject
-        {
-            ["testPoint"]    = new JsonObject { ["id"] = testPointId.ToString(CultureInfo.InvariantCulture) },
-            ["outcome"]      = outcome,
-            ["durationInMs"] = durationMs,
-        };
-        if (!string.IsNullOrEmpty(errorMessage))
-            result["errorMessage"] = errorMessage;
-
-        var body = new JsonArray { result };
         var url = $"{Opts.BaseUrl}/_apis/test/Runs/{adoTestRunId}/results?api-version=7.0";
-        using var _ = await PostDocAsync(url, body, $"Set ADO test result (run {adoTestRunId})", ct);
+        using var doc = await GetDocAsync(url, $"Get ADO test results (run {adoTestRunId})", ct);
+        var map = new Dictionary<int, int>();
+        if (doc.RootElement.TryGetProperty("value", out var arr))
+            foreach (var r in arr.EnumerateArray())
+            {
+                var resultId = r.TryGetProperty("id", out var idP) && idP.ValueKind == JsonValueKind.Number
+                    ? idP.GetInt32() : 0;
+                var ptId = 0;
+                if (r.TryGetProperty("testPoint", out var tp) && tp.TryGetProperty("id", out var tpId))
+                    ptId = tpId.ValueKind == JsonValueKind.Number ? tpId.GetInt32()
+                         : int.TryParse(tpId.GetString(), out var v) ? v : 0;
+                if (resultId > 0 && ptId > 0) map[ptId] = resultId;
+            }
+        return map;
+    }
+
+    public async Task UpdateAdoTestResultsAsync(int adoTestRunId, IReadOnlyList<AdoTestResultUpdate> updates,
+        CancellationToken ct = default)
+    {
+        if (updates.Count == 0) return;
+        var arr = new JsonArray();
+        foreach (var u in updates)
+        {
+            var o = new JsonObject
+            {
+                ["id"]           = u.ResultId,
+                ["outcome"]      = u.Outcome,
+                ["state"]        = "Completed",
+                ["durationInMs"] = u.DurationMs,
+            };
+            if (!string.IsNullOrEmpty(u.ErrorMessage))
+                o["errorMessage"] = u.ErrorMessage;
+            arr.Add(o);
+        }
+        var url = $"{Opts.BaseUrl}/_apis/test/Runs/{adoTestRunId}/results?api-version=7.0";
+        using var _ = await SendDocAsync(HttpMethod.Patch, url, arr, "application/json",
+            $"Update ADO test results (run {adoTestRunId})", ct);
     }
 
     public async Task CompleteAdoTestRunAsync(int adoTestRunId, CancellationToken ct = default)
@@ -1083,9 +1111,14 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
     public async Task<IReadOnlyDictionary<int, int>> GetTestPointsAsync(
         int planId, int suiteId, IReadOnlyList<int> testCaseIds, CancellationToken ct = default)
     {
-        var ids = string.Join(",", testCaseIds);
+        // isRecursive=true makes ADO return test points from child suites too, which is needed
+        // when the session's TestSuiteId is a parent/folder suite (e.g. COWORK 173473) but the
+        // actual test cases live in level child-suites (175537 → 175538/539/540).
+        // We filter by testCaseIds in-memory rather than via a testCaseId= query param to avoid
+        // building a multi-KB URL (a large push can have hundreds of ids) that risks a 404/414.
+        var wanted = testCaseIds.ToHashSet();
         var url = $"{Opts.BaseUrl}/_apis/testplan/Plans/{planId}/Suites/{suiteId}/TestPoint" +
-                  $"?testCaseId={ids}&api-version={Opts.ApiVersion}";
+                  $"?isRecursive=true&api-version={Opts.ApiVersion}";
         using var doc = await GetDocAsync(url, "Get test points", ct);
         var map = new Dictionary<int, int>();
         if (doc.RootElement.TryGetProperty("value", out var arr))
@@ -1095,7 +1128,8 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
                     ? (tcr.TryGetProperty("id", out var idProp) ? idProp.GetInt32() : 0)
                     : 0;
                 var ptId = pt.TryGetProperty("id", out var ptProp) ? ptProp.GetInt32() : 0;
-                if (tcId > 0 && ptId > 0) map[tcId] = ptId;
+                if (tcId > 0 && ptId > 0 && (wanted.Count == 0 || wanted.Contains(tcId)))
+                    map[tcId] = ptId;
             }
         return map;
     }

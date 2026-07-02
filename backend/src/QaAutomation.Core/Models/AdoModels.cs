@@ -24,6 +24,9 @@ public sealed record TimelineEvent(string? Date, string Actor, string Kind, stri
 public sealed record AdoTestPlan(int Id, string Name);
 public sealed record AdoTestSuite(int Id, string Name, int? ParentId = null);
 
+/// <summary>A pending outcome update for one auto-created ADO test result (PATCH by result id).</summary>
+public sealed record AdoTestResultUpdate(int ResultId, string Outcome, string? ErrorMessage, long DurationMs);
+
 // ── Build / pipeline reads ────────────────────────────────────────────────────
 public sealed record AdoBuild(int Id, string SourceVersion, string RepositoryId, DateTime FinishedAt);
 public sealed record AdoBuildChange(string Id, string Message);

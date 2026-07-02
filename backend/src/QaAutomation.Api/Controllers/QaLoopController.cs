@@ -248,6 +248,23 @@ public sealed class QaLoopController : ControllerBase
     public IActionResult Cancel(int sessionId)
         => Ok(new CancelResponse { Cancelled = _orchestrator.Cancel(sessionId) });
 
+    [HttpDelete("sessions/{sessionId:int}")]
+    public async Task<IActionResult> DeleteSession(int sessionId, CancellationToken ct)
+    {
+        try
+        {
+            var session = await _db.ApiTestSessions.FindAsync([sessionId], ct);
+            if (session is null) return StatusCode(404, new { detail = "Session not found." });
+            _orchestrator.Cancel(sessionId);
+            var drafts = await _db.ApiTestDrafts.Where(d => d.SessionId == sessionId).ToListAsync(ct);
+            _db.ApiTestDrafts.RemoveRange(drafts);
+            _db.ApiTestSessions.Remove(session);
+            await _db.SaveChangesAsync(ct);
+            return NoContent();
+        }
+        catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
+    }
+
     // ── Session list/detail ───────────────────────────────────────────────────
 
     [HttpGet("sessions/{projectId:int}")]

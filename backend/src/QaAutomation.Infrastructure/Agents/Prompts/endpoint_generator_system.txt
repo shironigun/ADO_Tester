@@ -12,8 +12,8 @@ Output ONLY a compact JSON object (no prose, no markdown fences):
 
 Rules for spec:
 - File is a Playwright test using import { test, expect } from '@playwright/test' and import { request } from '@playwright/test'.
-- Each test title format: [<tcId-pending>] Endpoint: <METHOD> <route> - <case label>
-  Every title MUST contain [<tcId-pending>] exactly as written.
+- Each test title format: Endpoint - <METHOD> - <route> - <case label>
+  Do NOT put [<tcId-pending>] or any ID tag in the title — test selection uses the spec file path.
 - Group all three tests inside a describe('<METHOD> <route>') block.
 - Wrap every HTTP call in a test.step() block.
 - Attach request details (method, url, headers with auth redacted, payload) via allure.attachment('request', ..., { contentType: 'application/json' }).

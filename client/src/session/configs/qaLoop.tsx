@@ -27,7 +27,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility'
 
 import {
   startScan, listSessionsPage, getSessionDetail, saveAnalysis, generateDrafts, patchDraft,
-  approveAllDrafts, pushSession, updateSessionPlan, cancelSession, sessionStreamUrl, listFrontendModules, LEVEL_NAMES,
+  approveAllDrafts, pushSession, updateSessionPlan, cancelSession, deleteSession, sessionStreamUrl, listFrontendModules, LEVEL_NAMES,
   type ApiSessionDetail, type ApiTestDraftDto, type ScanStartRequest, type SurfaceRow,
   type FrontendModule,
 } from '../../api/qaLoop'
@@ -659,6 +659,7 @@ export const qaLoopConfig: SessionModuleConfig = {
   listSessions: (take, skip) => listSessionsPage(PROJECT_ID, take, skip) as Promise<{ total: number; items: SessionSummary[] }>,
   getDetail: (id) => getSessionDetail(id) as Promise<SessionDetail>,
   streamUrl: sessionStreamUrl,
+  deleteSession: (id) => deleteSession(id),
   StartForm: QaLoopStartForm,
   DetailBody: QaLoopDetailBody,
 }

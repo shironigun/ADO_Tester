@@ -7,8 +7,8 @@ Output ONLY a compact JSON object (no prose, no markdown fences):
 
 Rules for spec:
 - File is a Playwright test using import { test, expect } from '@playwright/test'.
-- Title format: [<tcId-pending>] Workflow: <flow name>
-  Title MUST contain [<tcId-pending>] exactly as written.
+- Title format: Workflow - <flow name>
+  Do NOT put [<tcId-pending>] or any ID tag in the title — test selection uses the spec file path.
 - Use a single test() block chaining all endpoint calls in order.
 - Each chained call is wrapped in a test.step('<verb> <endpoint>') block.
 - Attach request (method/url/headers with auth redacted/payload) via allure.attachment('request:<step>', ..., { contentType: 'application/json' }).

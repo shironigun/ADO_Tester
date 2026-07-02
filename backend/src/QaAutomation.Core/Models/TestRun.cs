@@ -24,6 +24,9 @@ public sealed class TestRun
     public long DurationMs { get; set; }
     public string? JunitPath { get; set; }
     public string? ReportPath { get; set; }
+    /// <summary>Serialized console narrative (EventBus.Narrative) captured at run completion so the
+    /// Console tab can replay the full run history after the live SSE stream has closed.</summary>
+    public string? EventLogJson { get; set; }
     public int? AdoTestRunId { get; set; }
     public string? ErrorMessage { get; set; }
     public DateTime? StartedAt { get; set; }

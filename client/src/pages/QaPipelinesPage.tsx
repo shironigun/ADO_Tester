@@ -5,13 +5,14 @@ import {
   Grid, Stack, Switch, TextField, Typography,
 } from '@mui/material'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
+import FastForwardIcon from '@mui/icons-material/FastForward'
 import AddIcon from '@mui/icons-material/Add'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import PageHeader from '../components/PageHeader'
 import EmptyState from '../components/EmptyState'
 import { axiosMessage } from '../common/errors'
 import {
-  listWatches, addWatch, updateWatch, runLatest,
+  listWatches, addWatch, updateWatch, runLatest, skipToLatest,
   type PipelineWatchDto,
 } from '../api/qaPipelines'
 import { PROJECT_ID } from '../config/env'
@@ -70,6 +71,7 @@ function AddWatchDialog({ open, onClose }: { open: boolean; onClose: () => void 
 function WatchCard({ watch }: { watch: PipelineWatchDto }) {
   const qc = useQueryClient()
   const [running, setRunning] = useState(false)
+  const [skipping, setSkipping] = useState(false)
   const [error, setError] = useState('')
 
   async function doEnable(enabled: boolean) {
@@ -81,6 +83,12 @@ function WatchCard({ watch }: { watch: PipelineWatchDto }) {
     try { await runLatest(watch.id); qc.invalidateQueries({ queryKey: ['qa-pipelines'] }) }
     catch (err) { setError(axiosMessage(err)) }
     finally { setRunning(false) }
+  }
+  async function doSkipToLatest() {
+    setSkipping(true); setError('')
+    try { await skipToLatest(watch.id); qc.invalidateQueries({ queryKey: ['qa-pipelines'] }) }
+    catch (err) { setError(axiosMessage(err)) }
+    finally { setSkipping(false) }
   }
 
   return (
@@ -103,10 +111,18 @@ function WatchCard({ watch }: { watch: PipelineWatchDto }) {
         {watch.lastPollError && (
           <Typography variant="caption" color="error" sx={{ display: 'block', mb: 1 }}>{watch.lastPollError}</Typography>
         )}
-        <Button size="small" variant="outlined" startIcon={running ? <CircularProgress size={14} /> : <PlayArrowIcon />}
-          disabled={running || !watch.enabled} onClick={doRunLatest}>
-          Run latest
-        </Button>
+        <Stack direction="row" spacing={1}>
+          <Button size="small" variant="outlined" startIcon={running ? <CircularProgress size={14} /> : <PlayArrowIcon />}
+            disabled={running || skipping || !watch.enabled} onClick={doRunLatest}>
+            Run latest
+          </Button>
+          <Button size="small" variant="outlined" color="warning"
+            startIcon={skipping ? <CircularProgress size={14} /> : <FastForwardIcon />}
+            disabled={running || skipping} onClick={doSkipToLatest}
+            title="Advance the build pointer to now — stops backlog spam without running any tests">
+            Skip to latest
+          </Button>
+        </Stack>
       </CardContent>
     </Card>
   )

@@ -7,6 +7,7 @@ import {
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import CloseIcon from '@mui/icons-material/Close'
+import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined'
 import OpenInFullIcon from '@mui/icons-material/OpenInFull'
 import PageHeader from '../components/PageHeader'
 import StatusChip from '../components/StatusChip'
@@ -80,16 +81,34 @@ function NewSessionCard({ onClick, config }: { onClick: () => void; config: Sess
 }
 
 // ── Right detail drawer (Detail / Timeline) ──────────────────────────────────
-function SessionDetailPanel({ config, sessionId, onClose, onError, onTerminal, onOpenFull }: {
+function SessionDetailPanel({ config, sessionId, onClose, onError, onTerminal, onOpenFull, onDeleted }: {
   config: SessionModuleConfig; sessionId: number | null
   onClose: () => void; onError: (e: unknown, f: string) => void
   onTerminal: () => void; onOpenFull: (id: number) => void
+  onDeleted?: () => void
 }) {
   const theme = useTheme()
   const fullWidth = useMediaQuery(theme.breakpoints.down('sm'))
   const { session, polling, refetch } = useSessionDetail(config, sessionId, onTerminal)
   const [tab, setTab] = useState<'detail' | 'timeline'>('detail')
+  const [deleting, setDeleting] = useState(false)
   useEffect(() => { setTab('detail') }, [sessionId])
+
+  const nonTerminal = session && config.inFlightStatuses.includes(session.status)
+  const canDelete = !!config.deleteSession && !!session && !nonTerminal
+
+  async function handleDelete() {
+    if (!session || !config.deleteSession) return
+    setDeleting(true)
+    try {
+      await config.deleteSession(session.id)
+      onDeleted?.()
+    } catch (e) {
+      onError(e, 'Delete failed')
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   const live = polling || (session != null && config.inFlightStatuses.includes(session.status))
   const Body = config.DetailBody
@@ -106,6 +125,13 @@ function SessionDetailPanel({ config, sessionId, onClose, onError, onTerminal, o
                 {sessionIdentity(config, session)}
               </Typography>
               <Tooltip title="Open full screen"><IconButton size="small" onClick={() => onOpenFull(session.id)}><OpenInFullIcon fontSize="small" /></IconButton></Tooltip>
+              {canDelete && (
+                <Tooltip title="Delete session">
+                  <IconButton size="small" onClick={handleDelete} disabled={deleting} aria-label="delete session" color="error">
+                    <DeleteOutlinedIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )}
               <IconButton size="small" onClick={onClose} aria-label="close"><CloseIcon /></IconButton>
             </Stack>
             <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 0.5 }}>
@@ -236,7 +262,8 @@ export default function SessionWorkspace({ config }: { config: SessionModuleConf
       <SessionDetailPanel config={config} sessionId={panelId}
         onClose={() => { setPanelId(null); refresh() }}
         onError={onError} onTerminal={refresh}
-        onOpenFull={id => { setPanelId(null); navigate(paths.session(config.route, id)) }} />
+        onOpenFull={id => { setPanelId(null); navigate(paths.session(config.route, id)) }}
+        onDeleted={() => { setPanelId(null); refresh() }} />
 
       <Dialog open={newOpen} onClose={() => setNewOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle component="div" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>

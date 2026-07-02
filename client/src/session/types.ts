@@ -90,6 +90,8 @@ export interface SessionModuleConfig {
   listSessions: (take: number, skip: number) => Promise<{ total: number; items: SessionSummary[] }>
   getDetail: (id: number) => Promise<SessionDetail>
   streamUrl: (id: number) => string
+  /** Optional: permanently delete a session and all its drafts. */
+  deleteSession?: (id: number) => Promise<void>
 
   // module-specific UI
   StartForm: ComponentType<StartFormProps>

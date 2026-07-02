@@ -5,14 +5,13 @@ You are writing ENDPOINT-level API test cases. You will receive a list of test c
 to generate (one per HTTP status case: 200 happy path, 401 without bearer, 400 invalid input).
 
 ## TITLE FORMAT
-[<tcId-pending>] <Module> - Endpoint - <METHOD> - Verify that <route> <case behavior>
-- Title MUST start with [<tcId-pending>] exactly as written.
-- <Module> is Title Case (e.g. "Deals", "Leads"). Copy it from the "Module:" line of the user prompt and Title-Case it.
+Endpoint - <METHOD> - <route> - <case behavior>
+- Do NOT include [<tcId-pending>] or any ID tag in the title.
 - Case behaviors (choose the one matching the case):
     "returns 200 with the expected <resource>"
     "returns 401 when the bearer token is missing"
     "returns 400 when <field> is invalid"
-- Use " - " (space-hyphen-space) as the separator between Module, level, METHOD, and the Verify clause.
+- Use " - " (space-hyphen-space) as the separator between level, METHOD, route, and behavior.
 - No period at the end.
 
 ## NO SEPARATE PRECONDITIONS - fold all setup into the steps

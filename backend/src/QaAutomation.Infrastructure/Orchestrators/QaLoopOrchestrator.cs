@@ -722,20 +722,21 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
                     ? Slug(spec.SourceRoutes[0])
                     : Slug(spec.TestCase?.Title ?? spec.Title);
                 var specPath = Path.Combine(levelDir, $"{slug}.spec.ts");
+
+                // QAL-071b: resolve the schema import (if any) against a filename WE control, derived
+                // from the same slug as the spec file, before writing to disk — see RewriteSchemaImport.
+                var specCode = RewriteSchemaImport(levelDir, slug, spec.SpecCode, spec.SchemaJson, session.Id);
+                draft.SpecCode = specCode;
+
                 // Only case 0 actually needs to write the (identical) shared file to disk; cases 1..N
                 // still get SpecFilePath pointed at it so their push-time rewrite isn't a silent no-op.
                 if (spec.CaseIndex is null or 0)
                 {
-                    File.WriteAllText(specPath, spec.SpecCode);
+                    File.WriteAllText(specPath, specCode);
                     Pub(SessionKey(session.Id), EventKinds.Result, EventPhases.Generate,
                         $"Spec written: {Path.GetFileName(specPath)}");
                 }
                 draft.SpecFilePath = specPath;
-
-                // QAL-071: Contract specs import their Zod schema via a relative path the model invents
-                // itself (unrelated to our own spec-filename slug) — write SchemaJson out under THAT
-                // exact name, next to the spec, or the import can never resolve.
-                TryWriteSchemaFile(levelDir, spec.SpecCode, spec.SchemaJson, session.Id);
             }
             catch (Exception ex)
             {
@@ -865,40 +866,51 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
     }
 
     /// <summary>QAL-071: matches the one local relative import a generated spec uses for its schema,
-    /// e.g. <c>from './get-lead-deal-dealId.schema'</c> → captures "get-lead-deal-dealId.schema". Package
-    /// imports (@playwright/test, allure-playwright, ...) are never relative so they never match.</summary>
+    /// e.g. <c>from './get-lead-deal-dealId.schema'</c> or <c>from '../schemas/x.schema'</c> — captures
+    /// the quote char (group 1) and the path (group 2). Package imports (@playwright/test,
+    /// allure-playwright, ...) are never relative so they never match.</summary>
     private static readonly System.Text.RegularExpressions.Regex SchemaImportPattern =
-        new(@"from\s+['""]\.\/([\w.-]+)['""]", System.Text.RegularExpressions.RegexOptions.Compiled);
+        new(@"from\s+(['""])(\.\.?/[\w./-]+)\1", System.Text.RegularExpressions.RegexOptions.Compiled);
 
-    /// <summary>Best-effort, non-fatal: if the spec has a SchemaJson and a resolvable local relative
-    /// import, writes the schema out under the model's OWN chosen import name (+.ts) next to the spec.
-    /// No-op (silent) when there's no schema (Endpoint/Workflow) or no matching import.</summary>
-    private void TryWriteSchemaFile(string levelDir, string specCode, string? schemaJson, int sessionId)
+    /// <summary>QAL-071b: the model's own relative import path is unreliable — it has invented
+    /// same-dir ('./x') and parent-dir ('../schemas/x') conventions, sometimes with no matching
+    /// "schema" field at all. A single unresolvable import aborts Playwright's test COLLECTION for
+    /// every selected spec, not just the broken one, silently zeroing out an entire run. So we never
+    /// trust the model's path: rewrite the spec's import to a filename WE control (same slug as the
+    /// .spec.ts file) and write the schema there — spec and schema are then always mutually
+    /// consistent regardless of what the model wrote. If an import exists but no schema content was
+    /// returned, log/publish loudly instead of silently leaving a dangling import.</summary>
+    private string RewriteSchemaImport(string levelDir, string slug, string specCode, string? schemaJson, int sessionId)
     {
-        if (string.IsNullOrEmpty(schemaJson)) return;
-        var name = ExtractSchemaImportName(specCode);
-        if (name is null) return;
+        var match = SchemaImportPattern.Match(specCode);
+        if (!match.Success) return specCode;   // Endpoint/Workflow specs have no schema import
 
+        if (string.IsNullOrEmpty(schemaJson))
+        {
+            _log.LogWarning(
+                "Session {SessionId}: spec '{Slug}' imports a schema ({Import}) but generation returned no schema content",
+                sessionId, slug, match.Groups[2].Value);
+            Pub(SessionKey(sessionId), EventKinds.System, EventPhases.Generate,
+                $"WARNING: '{slug}' imports a schema but none was generated — this spec will fail until regenerated.",
+                EventLevels.Warn);
+            return specCode;
+        }
+
+        var schemaFileName = $"{slug}.schema";
         try
         {
-            var schemaPath = Path.Combine(levelDir, $"{name}.ts");
-            File.WriteAllText(schemaPath, schemaJson);
-            Pub(SessionKey(sessionId), EventKinds.Result, EventPhases.Generate,
-                $"Schema written: {Path.GetFileName(schemaPath)}");
+            File.WriteAllText(Path.Combine(levelDir, $"{schemaFileName}.ts"), schemaJson);
+            Pub(SessionKey(sessionId), EventKinds.Result, EventPhases.Generate, $"Schema written: {schemaFileName}.ts");
         }
         catch (Exception ex)
         {
-            _log.LogWarning(ex, "Failed to write schema file for import '{Name}'", name);
+            _log.LogWarning(ex, "Failed to write schema file '{Name}'", schemaFileName);
+            return specCode;
         }
-    }
 
-    /// <summary>Extracts the relative-import module name a generated spec references (its schema file),
-    /// e.g. "./get-lead-deal-dealId.schema" → "get-lead-deal-dealId.schema". Null if no local relative
-    /// import is found (Endpoint/Workflow specs, or a Contract spec with no import at all).</summary>
-    private static string? ExtractSchemaImportName(string specCode)
-    {
-        var m = SchemaImportPattern.Match(specCode);
-        return m.Success ? m.Groups[1].Value : null;
+        var quote = match.Groups[1].Value;
+        var replacement = $"from {quote}./{schemaFileName}{quote}";
+        return specCode[..match.Index] + replacement + specCode[(match.Index + match.Length)..];
     }
 
     private async Task MarkQueuedAsync(int sessionId)

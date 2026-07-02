@@ -12,7 +12,8 @@ namespace QaAutomation.Infrastructure.Events;
 /// </summary>
 public sealed class EventBus : IEventBus
 {
-    private const int RingMax = 400;            // recent events kept for replay
+    private const int RingMax = 400;            // recent events kept for live SSE replay
+    private const int StructuredMax = 800;      // structured progress events kept for durable narrative
     private const int QueueMax = 1000;          // per-subscriber bound; oldest dropped on overflow
     private static readonly TimeSpan GraceTtl = TimeSpan.FromSeconds(600);  // keep ring after terminal+last unsub
 
@@ -23,6 +24,9 @@ public sealed class EventBus : IEventBus
     {
         public readonly HashSet<Channel<ConsoleEvent>> Subscribers = new();
         public readonly Queue<ConsoleEvent> Ring = new();
+        // Structured narrative events (phase/system/result/error) kept separately so a flood of raw
+        // "stat" stdout lines from a long Playwright run can't evict the meaningful progress events.
+        public readonly Queue<ConsoleEvent> StructuredRing = new();
         public long Seq;
         public double? TerminalAt;
     }
@@ -42,6 +46,14 @@ public sealed class EventBus : IEventBus
             st.Ring.Enqueue(ev);
             while (st.Ring.Count > RingMax)
                 st.Ring.Dequeue();
+            // Retain structured progress events in their own bounded buffer (kind != stat) so they
+            // survive the raw-stdout flood and can be replayed after the run finishes.
+            if (ev.IsNarrative && ev.Kind != EventKinds.Stat)
+            {
+                st.StructuredRing.Enqueue(ev);
+                while (st.StructuredRing.Count > StructuredMax)
+                    st.StructuredRing.Dequeue();
+            }
             if (ev.IsTerminal)
                 st.TerminalAt = Now();
             subscribers = st.Subscribers.ToArray();
@@ -80,7 +92,15 @@ public sealed class EventBus : IEventBus
         {
             if (!_sessions.TryGetValue(key, out var st))
                 return [];
-            return st.Ring.Where(e => e.IsNarrative).TakeLast(cap).Select(e => e.ToCamel()).ToList();
+            // Always retain the structured progress events (phase/system/result/error) — they carry
+            // the meaningful narrative (phase transitions, pass/fail summary). Raw Playwright stdout
+            // ("stat") can number in the thousands, so it's kept only as a bounded recent tail.
+            var structured = st.StructuredRing.AsEnumerable();
+            var statTail = st.Ring.Where(e => e.Kind == EventKinds.Stat).TakeLast(cap);
+            return structured.Concat(statTail)
+                .OrderBy(e => e.Seq)
+                .Select(e => e.ToCamel())
+                .ToList();
         }
     }
 

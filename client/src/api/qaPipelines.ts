@@ -53,3 +53,8 @@ export async function runLatest(id: number): Promise<{ runId?: number; buildId?:
   const { data } = await api.post(`/api/qaloop/pipelines/${id}/run-latest`)
   return data
 }
+
+export async function skipToLatest(id: number): Promise<{ buildId?: number }> {
+  const { data } = await api.post(`/api/qaloop/pipelines/${id}/skip-to-latest`)
+  return data
+}

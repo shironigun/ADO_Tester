@@ -82,13 +82,18 @@ public interface IAzureDevOpsClient
 
     // ── ADO Test Run lifecycle (QAL-026) ──────────────────────────────────────
 
-    /// <summary>Create an ADO Test Run bound to a plan; returns the new run id.</summary>
+    /// <summary>Create an ADO Test Run bound to a plan with the given test points; returns the new
+    /// run id. ADO auto-creates one (outcome-less) result per point — update them via
+    /// <see cref="UpdateAdoTestResultsAsync"/>.</summary>
     Task<int> CreateAdoTestRunAsync(int planId, int suiteId, string name,
         IReadOnlyList<int> pointIds, CancellationToken ct = default);
 
-    /// <summary>Post a single test result for one test point in the given run.</summary>
-    Task SetAdoTestResultAsync(int adoTestRunId, int testPointId, string outcome,
-        string? errorMessage, long durationMs, CancellationToken ct = default);
+    /// <summary>Read the run's auto-created results, returning a map of testPointId → resultId.</summary>
+    Task<IReadOnlyDictionary<int, int>> GetAdoTestResultIdsAsync(int adoTestRunId, CancellationToken ct = default);
+
+    /// <summary>Batch-update (PATCH) existing results in a run with their final outcomes.</summary>
+    Task UpdateAdoTestResultsAsync(int adoTestRunId, IReadOnlyList<AdoTestResultUpdate> updates,
+        CancellationToken ct = default);
 
     /// <summary>Mark the ADO Test Run as Completed.</summary>
     Task CompleteAdoTestRunAsync(int adoTestRunId, CancellationToken ct = default);

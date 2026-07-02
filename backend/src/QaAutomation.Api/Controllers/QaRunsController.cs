@@ -17,26 +17,29 @@ namespace QaAutomation.Api.Controllers;
 [Route("api/qaloop/runs")]
 public sealed class QaRunsController : ControllerBase
 {
-    private readonly IServiceProvider _sp;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly IEventBus _bus;
     private readonly IAzureDevOpsClient _ado;
     private readonly ILlmClientFactory _llmFactory;
     private readonly IResultsIngestService _ingest;
     private readonly QaDbContext _db;
     private readonly IOptions<QaLoopOptions> _opts;
+    private readonly IOptions<AzureDevOpsOptions> _adoOpts;
     private readonly ILogger<QaRunsController> _log;
 
     public QaRunsController(
-        IServiceProvider sp, IEventBus bus, IAzureDevOpsClient ado, ILlmClientFactory llmFactory,
-        IResultsIngestService ingest, QaDbContext db, IOptions<QaLoopOptions> opts, ILogger<QaRunsController> log)
+        IServiceScopeFactory scopeFactory, IEventBus bus, IAzureDevOpsClient ado, ILlmClientFactory llmFactory,
+        IResultsIngestService ingest, QaDbContext db, IOptions<QaLoopOptions> opts,
+        IOptions<AzureDevOpsOptions> adoOpts, ILogger<QaRunsController> log)
     {
-        _sp = sp;
+        _scopeFactory = scopeFactory;
         _bus = bus;
         _ado = ado;
         _llmFactory = llmFactory;
         _ingest = ingest;
         _db = db;
         _opts = opts;
+        _adoOpts = adoOpts;
         _log = log;
     }
 
@@ -82,10 +85,30 @@ public sealed class QaRunsController : ControllerBase
         var runId = run.Id;
         _ = Task.Run(async () =>
         {
-            using var scope = _sp.GetRequiredService<IServiceScopeFactory>().CreateScope();
-            var svc = scope.ServiceProvider.GetRequiredService<RunExecutionService>();
-            try { await svc.ExecuteAsync(runId); }
-            catch (Exception e) { _log.LogError(e, "Run {RunId} background task failed", runId); }
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var svc = scope.ServiceProvider.GetRequiredService<RunExecutionService>();
+                await svc.ExecuteAsync(runId);
+            }
+            catch (Exception e)
+            {
+                _log.LogError(e, "Run {RunId} background task failed", runId);
+                try
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+                    var r = await db.TestRuns.FindAsync(runId);
+                    if (r is { Status: TestRunStatus.Queued or TestRunStatus.Running })
+                    {
+                        r.Status = TestRunStatus.Failed;
+                        r.ErrorMessage = e.Message;
+                        r.FinishedAt = DateTime.UtcNow;
+                        await db.SaveChangesAsync();
+                    }
+                }
+                catch { /* best-effort status update */ }
+            }
         });
 
         return StatusCode(202, new RunStartResponse { RunId = runId });
@@ -160,6 +183,62 @@ public sealed class QaRunsController : ControllerBase
         catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
     }
 
+    /// <summary>Dropdown facets for the New Run launcher: modules that have at least one Pushed
+    /// draft (i.e. a completed QA Loop with runnable specs), plus fixed level/profile enums,
+    /// distinct known tags, and the AUTOMATION_PROFILE env default.</summary>
+    [HttpGet("facets")]
+    public async Task<IActionResult> Facets(CancellationToken ct)
+    {
+        try
+        {
+            var pushedSessionIds = await _db.ApiTestDrafts
+                .Where(d => d.Status == ApiDraftStatus.Pushed)
+                .Select(d => d.SessionId)
+                .Distinct()
+                .ToListAsync(ct);
+
+            var modules = await _db.ApiTestSessions
+                .Where(s => pushedSessionIds.Contains(s.Id) && s.Module != null && s.Module != "")
+                .Select(s => s.Module)
+                .Distinct()
+                .OrderBy(m => m)
+                .ToListAsync(ct);
+
+            var tagJsons = await _db.ApiTestDrafts
+                .Where(d => d.Status == ApiDraftStatus.Pushed && d.Tags != null)
+                .Select(d => d.Tags!)
+                .ToListAsync(ct);
+            var tagSet = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var json in tagJsons)
+            {
+                try
+                {
+                    var arr = System.Text.Json.JsonSerializer.Deserialize<List<string>>(json);
+                    if (arr is null) continue;
+                    foreach (var t in arr)
+                        if (!string.IsNullOrWhiteSpace(t)) tagSet.Add(t.Trim());
+                }
+                catch { /* ponytail: skip malformed rows, not worth blocking dropdown */ }
+            }
+
+            var envDefault = Environment.GetEnvironmentVariable("AUTOMATION_PROFILE");
+            var defaultProfile = string.IsNullOrWhiteSpace(envDefault)
+                ? "infinity"
+                : envDefault.Trim().ToLowerInvariant();
+
+            return Ok(new
+            {
+                modules,
+                levels = new[] { "contract", "endpoint", "workflow" },
+                profiles = new[] { "ideal", "infinity", "aspen", "quantum" },
+                tags = tagSet.ToList(),
+                defaultProfile,
+                adoBaseUrl = _adoOpts.Value.BaseUrl,
+            });
+        }
+        catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
+    }
+
     [HttpPost("preview-impact")]
     public async Task<IActionResult> PreviewImpact([FromBody] PreviewImpactRequest req, CancellationToken ct)
     {
@@ -186,17 +265,48 @@ public sealed class QaRunsController : ControllerBase
         catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
     }
 
-    /// <summary>Serve the run's HTML report (Allure single-file or Playwright html).</summary>
-    [HttpGet("{runId:int}/report")]
+    /// <summary>Serves the run's Allure/Playwright HTML report. Allure has no single-file bundling
+    /// mode — its report is index.html plus a directory of chunked JS/CSS/font assets — so subPath
+    /// serves the relative asset requests the browser makes after loading index.html at the bare
+    /// route. dl=true zips the whole report directory instead of just index.html, since downloading
+    /// index.html alone would be missing every asset it references.</summary>
+    [HttpGet("{runId:int}/report/{**subPath}")]
     public async Task<IActionResult> Report(
-        int runId, [FromQuery] bool dl = false, CancellationToken ct = default)
+        int runId, string? subPath, [FromQuery] bool dl = false, CancellationToken ct = default)
     {
         var run = await _db.TestRuns.FindAsync([runId], ct);
         if (run?.ReportPath is null || !System.IO.File.Exists(run.ReportPath))
             return NotFound(new { detail = "Report not available." });
-        return dl
-            ? PhysicalFile(run.ReportPath, "text/html; charset=utf-8", $"qa-run-{runId}-report.html")
-            : PhysicalFile(run.ReportPath, "text/html; charset=utf-8");
+
+        var reportDir = Path.GetDirectoryName(run.ReportPath)!;
+
+        if (dl)
+        {
+            var zipPath = Path.Combine(Path.GetTempPath(), $"qa-run-{runId}-report-{Guid.NewGuid():N}.zip");
+            try
+            {
+                System.IO.Compression.ZipFile.CreateFromDirectory(reportDir, zipPath);
+                var bytes = await System.IO.File.ReadAllBytesAsync(zipPath, ct);
+                return File(bytes, "application/zip", $"qa-run-{runId}-report.zip");
+            }
+            finally
+            {
+                if (System.IO.File.Exists(zipPath)) System.IO.File.Delete(zipPath);
+            }
+        }
+
+        var relative = string.IsNullOrEmpty(subPath) ? "index.html" : subPath;
+        var fullPath = Path.GetFullPath(Path.Combine(reportDir, relative));
+        if (!fullPath.StartsWith(Path.GetFullPath(reportDir) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(fullPath, Path.GetFullPath(reportDir), StringComparison.OrdinalIgnoreCase))
+            return NotFound();
+        if (!System.IO.File.Exists(fullPath))
+            return NotFound();
+
+        var typeProvider = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
+        if (!typeProvider.TryGetContentType(fullPath, out var contentType))
+            contentType = "application/octet-stream";
+        return PhysicalFile(fullPath, contentType);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
