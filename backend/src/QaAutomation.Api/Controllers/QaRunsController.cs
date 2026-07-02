@@ -280,6 +280,16 @@ public sealed class QaRunsController : ControllerBase
 
         var reportDir = Path.GetDirectoryName(run.ReportPath)!;
 
+        // Allure's index.html references its assets with bare relative paths (styles.css, app.js,
+        // fonts). If the browser loads ".../report" WITHOUT a trailing slash, those resolve one level
+        // too high (".../{runId}/styles.css") and 404. Redirect the bare route to the trailing-slash
+        // form so every relative asset resolves under ".../report/". (dl bypasses this.)
+        if (!dl && string.IsNullOrEmpty(subPath) && !(Request.Path.Value?.EndsWith('/') ?? false))
+        {
+            var query = Request.QueryString.HasValue ? Request.QueryString.Value : string.Empty;
+            return Redirect($"{Request.Path.Value}/{query}");
+        }
+
         if (dl)
         {
             var zipPath = Path.Combine(Path.GetTempPath(), $"qa-run-{runId}-report-{Guid.NewGuid():N}.zip");
