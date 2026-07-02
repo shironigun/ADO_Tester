@@ -162,7 +162,7 @@ function RunDrawer({ run, adoBaseUrl, onClose }: { run: TestRunSummary; adoBaseU
             {!isInFlight && !detailQ.isLoading && (
               detail?.reportPath
                 ? <>
-                    <Button size="small" startIcon={<OpenInNewIcon />} component="a" href={`/api/qaloop/runs/${run.id}/report`} target="_blank" rel="noopener">Report ↗</Button>
+                    <Button size="small" startIcon={<OpenInNewIcon />} component="a" href={`/api/qaloop/runs/${run.id}/report/`} target="_blank" rel="noopener">Report ↗</Button>
                     <Button size="small" startIcon={<DownloadIcon />} component="a" href={`/api/qaloop/runs/${run.id}/report?dl=true`} download={`qa-run-${run.id}-report.zip`}>Download</Button>
                   </>
                 : liveStatus !== 'Error' && liveStatus !== 'Cancelled'
