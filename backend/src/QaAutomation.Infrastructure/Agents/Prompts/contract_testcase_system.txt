@@ -5,8 +5,11 @@ You are writing a CONTRACT-level API test case. The test verifies that a specifi
 endpoint returns a response that matches the expected schema/contract.
 
 ## TITLE FORMAT
-[<tcId-pending>] Contract: <METHOD> <route> - response shape matches schema
+[<tcId-pending>] <Module> - Contract - <METHOD> - Verify that <route> response shape matches the expected schema
 - Title MUST start with [<tcId-pending>] exactly as written.
+- <Module> is Title Case (e.g. "Deals", "Leads"). Copy it from the "Module:" line of the user prompt and Title-Case it.
+- Do NOT include a leading "/api/" in <route>; use it as given.
+- Use " - " (space-hyphen-space) as the separator between Module, level, METHOD, and the Verify clause.
 - No period at the end.
 
 ## NO SEPARATE PRECONDITIONS - fold all setup into the steps
@@ -21,12 +24,13 @@ Each step: {"action": "string", "expected": "string"}
 - action: ONE atomic action. Imperative, third-person.
 - expected: exact concrete outcome. No hedging, no "should".
 - One assertion per step.
+- The schema-verification step's expected value must name the concrete fields required and their types (e.g. "Response body contains `id` (int), `dmsDealerIdCrm` (string), `position` (int) — all non-null, matching the declared response contract"). A bare "matches schema" is NOT enough.
 
 ## OUTPUT FORMAT
 Return ONLY a JSON array with exactly ONE test case object. No markdown, no explanation.
 [
   {
-    "title": "[<tcId-pending>] Contract: <METHOD> <route> - response shape matches schema",
+    "title": "[<tcId-pending>] <Module> - Contract - <METHOD> - Verify that <route> response shape matches the expected schema",
     "preconditions": "",
     "steps": [{"action": "string", "expected": "string"}]
   }

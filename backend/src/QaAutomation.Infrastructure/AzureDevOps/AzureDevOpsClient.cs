@@ -435,6 +435,19 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
         using var _ = await SendDocAsync(HttpMethod.Post, url, body, "application/json", $"Add TC {testCaseId} to suite {suiteId}", ct);
     }
 
+    public async Task<int> CreateStaticTestSuiteAsync(int planId, int parentSuiteId, string name, CancellationToken ct = default)
+    {
+        var body = new JsonObject
+        {
+            ["suiteType"]   = "staticTestSuite",
+            ["name"]        = name,
+            ["parentSuite"] = new JsonObject { ["id"] = parentSuiteId },
+        };
+        var url = $"{Opts.BaseUrl}/_apis/testplan/Plans/{planId}/suites?api-version={Opts.ApiVersion}";
+        using var doc = await SendDocAsync(HttpMethod.Post, url, body, "application/json", $"Create suite '{name}' under {parentSuiteId}", ct);
+        return doc.RootElement.GetProperty("id").GetInt32();
+    }
+
     public async Task LinkTestedByAsync(int storyId, int testCaseId, CancellationToken ct = default)
     {
         var tcUrl = $"https://dev.azure.com/{Opts.Organization}/{Quote(Opts.Project)}/_apis/wit/workItems/{testCaseId}";

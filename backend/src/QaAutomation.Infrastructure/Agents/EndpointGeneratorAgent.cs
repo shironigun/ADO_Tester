@@ -49,11 +49,12 @@ public sealed class EndpointGeneratorAgent
             '[', progress, emit, label: "EndpointTestcase", cancellationToken: ct);
 
         var tcs = ParseTestCases(tcData, cases);
+        var mod = TitleTag.TitleCaseModule(module);
         var specs = new List<GeneratedSpec>();
         for (var i = 0; i < cases.Count; i++)
         {
-            var tc = i < tcs.Count ? tcs[i] : FallbackTestCase(route, cases[i].Label, cases[i].StatusCode);
-            tc.Title = TitleTag.EnsureTitle(tc.Title, $"Endpoint: {route.Method} {route.Route} - {cases[i].Label}", caseIndex: i);
+            var tc = i < tcs.Count ? tcs[i] : FallbackTestCase(module, route, cases[i].Label, cases[i].StatusCode);
+            tc.Title = TitleTag.EnsureTitle(tc.Title, $"{mod} - Endpoint - {route.Method} - Verify that {route.Route} {cases[i].Label}", caseIndex: i);
             specs.Add(new GeneratedSpec
             {
                 Level = "endpoint",
@@ -99,17 +100,17 @@ public sealed class EndpointGeneratorAgent
         return result;
     }
 
-    private static GeneratedTestCase FallbackTestCase(RouteInfo route, string label, int statusCode) => new()
+    private static GeneratedTestCase FallbackTestCase(string module, RouteInfo route, string label, int statusCode) => new()
     {
         // No tag embedded here — the caller's EnsureTitle(..., caseIndex: i) adds the correct
         // per-case [<tcId-pending:N>] tag; pre-embedding the bare Pending tag would double-tag it.
-        Title = $"Endpoint: {route.Method} {route.Route} - {label}",
+        Title = $"{TitleTag.TitleCaseModule(module)} - Endpoint - {route.Method} - Verify that {route.Route} {label}",
         Preconditions = "",
         Steps =
         [
             new TestCaseStep { Action = "Obtain a valid bearer token for the INFINITY QA environment", Expected = "Token received" },
-            new TestCaseStep { Action = $"Send a {route.Method} request to {route.Route}", Expected = $"Response received with status {statusCode}" },
-            new TestCaseStep { Action = $"Verify that the response returns status {statusCode}", Expected = $"HTTP {statusCode} is returned" },
+            new TestCaseStep { Action = $"Send a {route.Method} request to {route.Route}", Expected = $"Response returns {statusCode} and the body carries the payload expected for the {label} case" },
+            new TestCaseStep { Action = $"Verify that the response returns status {statusCode}", Expected = $"HTTP {statusCode} is returned, and — for state-changing calls — the returned resource shows the change made by this request" },
         ],
     };
 

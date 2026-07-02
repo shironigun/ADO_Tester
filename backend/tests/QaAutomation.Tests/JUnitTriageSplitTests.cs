@@ -399,6 +399,7 @@ public sealed class JUnitTriageSplitTests
         public Task<IReadOnlyList<AdoTestSuite>> GetTestSuitesAsync(int planId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<int> CreateTestCaseAsync(string title, string preconditions, IReadOnlyList<TestCaseStep> steps, CancellationToken ct = default) => throw new NotImplementedException();
         public Task AddTestCaseToSuiteAsync(int planId, int suiteId, int tcId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<int> CreateStaticTestSuiteAsync(int planId, int parentSuiteId, string name, CancellationToken ct = default) => throw new NotImplementedException();
         public Task LinkTestedByAsync(int storyId, int tcId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<LinkedTestCase>> GetSuiteTestCasesAsync(int planId, int suiteId, bool recurse = true, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<LinkedTestCase>>([]);
         public Task<IReadOnlyList<ReportTicket>> GetTicketsInRangeAsync(DateTime fromUtc, DateTime toUtc, IReadOnlyList<string> boards, IReadOnlyList<string>? types = null, CancellationToken ct = default) => throw new NotImplementedException();
@@ -454,6 +455,7 @@ public sealed class JUnitTriageSplitTests
         public Task<IReadOnlyList<AdoTestSuite>> GetTestSuitesAsync(int planId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<int> CreateTestCaseAsync(string title, string preconditions, IReadOnlyList<TestCaseStep> steps, CancellationToken ct = default) => throw new NotImplementedException();
         public Task AddTestCaseToSuiteAsync(int planId, int suiteId, int tcId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<int> CreateStaticTestSuiteAsync(int planId, int parentSuiteId, string name, CancellationToken ct = default) => throw new NotImplementedException();
         public Task LinkTestedByAsync(int storyId, int tcId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<LinkedTestCase>> GetSuiteTestCasesAsync(int planId, int suiteId, bool recurse = true, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<LinkedTestCase>>([]);
         public Task<IReadOnlyList<ReportTicket>> GetTicketsInRangeAsync(DateTime fromUtc, DateTime toUtc, IReadOnlyList<string> boards, IReadOnlyList<string>? types = null, CancellationToken ct = default) => throw new NotImplementedException();

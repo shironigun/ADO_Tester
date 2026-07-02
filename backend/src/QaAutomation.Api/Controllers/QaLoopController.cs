@@ -186,6 +186,25 @@ public sealed class QaLoopController : ControllerBase
         catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
     }
 
+    [HttpPatch("sessions/{sessionId:int}/plan")]
+    public async Task<IActionResult> UpdateSessionPlan(
+        int sessionId, [FromBody] UpdateSessionPlanRequest req, CancellationToken ct)
+    {
+        try
+        {
+            var session = await _db.ApiTestSessions.FindAsync([sessionId], ct);
+            if (session is null) return StatusCode(404, new { detail = "Session not found." });
+            if (req.TestPlanId is not null) session.TestPlanId = req.TestPlanId;
+            if (req.TestSuiteId is not null) session.TestSuiteId = req.TestSuiteId;
+            if (req.WorkItemId is not null) session.WorkItemId = req.WorkItemId;
+            session.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(ct);
+            var drafts = await _db.ApiTestDrafts.Where(d => d.SessionId == sessionId).ToListAsync(ct);
+            return Ok(ApiSessionDetail.From(session, drafts));
+        }
+        catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
+    }
+
     [HttpPost("sessions/{sessionId:int}/push")]
     public async Task<IActionResult> PushAll(int sessionId, CancellationToken ct)
     {

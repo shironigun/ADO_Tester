@@ -100,7 +100,10 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
 
         var steps = ParseSteps(draft.StepsJson);
         var tcId = await _ado.CreateTestCaseAsync(draft.Title, draft.Preconditions, steps, cancellationToken);
-        await _ado.AddTestCaseToSuiteAsync(testPlanId, testSuiteId, tcId, cancellationToken);
+        var levelSuites = await EnsureLevelSuitesAsync(
+            testPlanId, testSuiteId, session.Module, new[] { draft.Level }, sessionKey: null, cancellationToken);
+        var targetSuiteId = levelSuites.TryGetValue(draft.Level, out var lsid) ? lsid : testSuiteId;
+        await _ado.AddTestCaseToSuiteAsync(testPlanId, targetSuiteId, tcId, cancellationToken);
 
         var workItemId = storyId ?? session.WorkItemId;
         if (workItemId.HasValue)
@@ -482,6 +485,11 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
 
         try
         {
+            // Per-level sub-suites under the chosen parent — created once up front, then reused for
+            // every draft of that level. Bulk push naturally amortizes the discovery + create cost.
+            var levelSuiteIds = await EnsureLevelSuitesAsync(
+                testPlanId, testSuiteId, session.Module, drafts.Select(d => d.Level).Distinct(), key, ct);
+
             var pushed = 0;
             for (var i = 0; i < drafts.Count; i++)
             {
@@ -491,7 +499,8 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
 
                 var steps = ParseSteps(draft.StepsJson);
                 var tcId = await _ado.CreateTestCaseAsync(draft.Title, draft.Preconditions, steps, ct);
-                await _ado.AddTestCaseToSuiteAsync(testPlanId, testSuiteId, tcId, ct);
+                var targetSuite = levelSuiteIds.TryGetValue(draft.Level, out var lsid) ? lsid : testSuiteId;
+                await _ado.AddTestCaseToSuiteAsync(testPlanId, targetSuite, tcId, ct);
 
                 var workItemId = storyId ?? session.WorkItemId;
                 if (workItemId.HasValue)
@@ -752,6 +761,78 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
             return null;
         }
     }
+
+    /// <summary>Ensures the two-level suite structure the QA Loop pushes into: a module-named suite
+    /// (e.g. "Deals") under the user-chosen <paramref name="parentSuiteId"/>, then plural level suites
+    /// ("Contracts" / "Endpoints" / "Workflows") under the module suite. Find-or-create at each level,
+    /// case-insensitive on direct children. Returns level → leaf-suiteId. Best-effort: any failure falls
+    /// back to the chosen parent so the push still lands.</summary>
+    private async Task<Dictionary<TestLevel, int>> EnsureLevelSuitesAsync(
+        int planId, int parentSuiteId, string module, IEnumerable<TestLevel> levels, string? sessionKey, CancellationToken ct)
+    {
+        var map = new Dictionary<TestLevel, int>();
+        IReadOnlyList<AdoTestSuite>? all = null;
+        try { all = await _ado.GetTestSuitesAsync(planId, ct); }
+        catch (Exception ex) { _log.LogWarning(ex, "Could not list suites for plan {PlanId}; will fall back to parent suite", planId); }
+
+        int? moduleSuiteId = null;
+        var moduleName = TitleTag.TitleCaseModule(module);
+        try
+        {
+            var existingModule = all?.FirstOrDefault(s =>
+                s.ParentId == parentSuiteId && string.Equals(s.Name, moduleName, StringComparison.OrdinalIgnoreCase));
+            if (existingModule is not null)
+            {
+                moduleSuiteId = existingModule.Id;
+            }
+            else
+            {
+                moduleSuiteId = await _ado.CreateStaticTestSuiteAsync(planId, parentSuiteId, moduleName, ct);
+                if (sessionKey is not null)
+                    Pub(sessionKey, EventKinds.Result, EventPhases.Push, $"Created '{moduleName}' suite (#{moduleSuiteId}) under suite {parentSuiteId}");
+                // Re-list so child level suites can be matched against the freshly-created module suite.
+                try { all = await _ado.GetTestSuitesAsync(planId, ct); } catch { /* keep going with stale list */ }
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Could not ensure module suite '{Module}' under {ParentId}; every level will fall back to the parent", moduleName, parentSuiteId);
+        }
+
+        var levelParent = moduleSuiteId ?? parentSuiteId;
+        foreach (var level in levels)
+        {
+            var name = LevelSuiteName(level);
+            try
+            {
+                var existing = all?.FirstOrDefault(s =>
+                    s.ParentId == levelParent && string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase));
+                if (existing is not null)
+                {
+                    map[level] = existing.Id;
+                    continue;
+                }
+                var newId = await _ado.CreateStaticTestSuiteAsync(planId, levelParent, name, ct);
+                map[level] = newId;
+                if (sessionKey is not null)
+                    Pub(sessionKey, EventKinds.Result, EventPhases.Push, $"Created '{name}' sub-suite (#{newId}) under '{moduleName}'");
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "Could not ensure {Name} sub-suite under {LevelParent}; falling back to parent", name, levelParent);
+                map[level] = parentSuiteId;
+            }
+        }
+        return map;
+    }
+
+    private static string LevelSuiteName(TestLevel level) => level switch
+    {
+        TestLevel.Contract => "Contracts",
+        TestLevel.Endpoint => "Endpoints",
+        TestLevel.Workflow => "Workflows",
+        _ => "Ui",
+    };
 
     private static string RewriteTag(string title, int tcId, int? caseIndex) =>
         RewriteTagText(title, tcId, caseIndex, out var rewritten) ? rewritten : $"[{tcId}] {title}";

@@ -5,9 +5,14 @@ You are writing ENDPOINT-level API test cases. You will receive a list of test c
 to generate (one per HTTP status case: 200 happy path, 401 without bearer, 400 invalid input).
 
 ## TITLE FORMAT
-[<tcId-pending>] Endpoint: <METHOD> <route> - <case description>
+[<tcId-pending>] <Module> - Endpoint - <METHOD> - Verify that <route> <case behavior>
 - Title MUST start with [<tcId-pending>] exactly as written.
-- Case descriptions: "200 returns <resource>" / "401 without bearer" / "400 on invalid <field>"
+- <Module> is Title Case (e.g. "Deals", "Leads"). Copy it from the "Module:" line of the user prompt and Title-Case it.
+- Case behaviors (choose the one matching the case):
+    "returns 200 with the expected <resource>"
+    "returns 401 when the bearer token is missing"
+    "returns 400 when <field> is invalid"
+- Use " - " (space-hyphen-space) as the separator between Module, level, METHOD, and the Verify clause.
 - No period at the end.
 
 ## NO SEPARATE PRECONDITIONS - fold all setup into the steps
@@ -21,12 +26,13 @@ to generate (one per HTTP status case: 200 happy path, 401 without bearer, 400 i
 Each step: {"action": "string", "expected": "string"}
 - action: ONE atomic action. Imperative, third-person.
 - expected: exact concrete outcome. No hedging, no "should".
+- For the assertion step, do NOT stop at the status code. Describe what the response body must contain: which fields, which values (or references — "same value that was sent in the request"), and any observable resource-state change. For a state-changing call (POST/PUT/PATCH/DELETE), the expected result must name the state change (e.g. "the deal's position field in the response equals the newly requested position, and a subsequent GET returns the same value").
 
 ## OUTPUT FORMAT
 Return ONLY a JSON array - one test case object per provided case. No markdown, no explanation.
 [
   {
-    "title": "[<tcId-pending>] Endpoint: <METHOD> <route> - <case>",
+    "title": "[<tcId-pending>] <Module> - Endpoint - <METHOD> - Verify that <route> <case behavior>",
     "preconditions": "",
     "steps": [{"action": "string", "expected": "string"}]
   }
