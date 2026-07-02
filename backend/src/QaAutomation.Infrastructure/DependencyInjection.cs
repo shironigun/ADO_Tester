@@ -38,6 +38,7 @@ public static class DependencyInjection
             .UseSqlite(sqliteConnectionString)
             .AddInterceptors(SqliteBusyTimeoutInterceptor.Instance));
         services.AddScoped<DatabaseInitializer>();
+        services.AddScoped<LeadsScanSeeder>();
         services.AddDbLogging();
         services.AddAzureDevOps(config);
         services.AddLlm(config);
@@ -292,5 +293,6 @@ public static class DependencyInjection
     {
         using var scope = services.CreateScope();
         scope.ServiceProvider.GetRequiredService<DatabaseInitializer>().Initialize();
+        scope.ServiceProvider.GetRequiredService<LeadsScanSeeder>().Seed();
     }
 }

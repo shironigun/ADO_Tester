@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react'
 import {
   Alert, Autocomplete, Box, Button, Card, CardContent, Checkbox, Chip, CircularProgress,
-  IconButton, LinearProgress, Stack, Tab, Tabs, TextField, Tooltip, Typography,
+  IconButton, LinearProgress, Stack, Tab, Table, TableBody, TableCell, TableHead, TableRow,
+  Tabs, TextField, Tooltip, Typography,
 } from '@mui/material'
 import CheckIcon from '@mui/icons-material/Check'
 import CloseIcon from '@mui/icons-material/Close'
+import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import PushPinIcon from '@mui/icons-material/PushPin'
 import QrCode2Icon from '@mui/icons-material/QrCode2'
 import type { PipelineStep } from '../../components/AgentPipeline'
@@ -19,10 +21,13 @@ import type {
 } from '../types'
 import { parseEventLog } from '../shared'
 import { axiosMessage } from '../../common/errors'
+import { useAdoWorkItemUrl } from '../../common/adoLinks'
+import DraftDetailDialog from '../DraftDetailDialog'
+import VisibilityIcon from '@mui/icons-material/Visibility'
 
 import {
   startScan, listSessionsPage, getSessionDetail, saveAnalysis, generateDrafts, patchDraft,
-  approveAllDrafts, pushSession, cancelSession, sessionStreamUrl, listFrontendModules, LEVEL_NAMES,
+  approveAllDrafts, pushSession, updateSessionPlan, cancelSession, sessionStreamUrl, listFrontendModules, LEVEL_NAMES,
   type ApiSessionDetail, type ApiTestDraftDto, type ScanStartRequest, type SurfaceRow,
   type FrontendModule,
 } from '../../api/qaLoop'
@@ -230,7 +235,7 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
 
 // ── Coverage matrix ───────────────────────────────────────────────────────────
 
-function CoverageMatrix({ session, onSaved }: { session: ApiSessionDetail; onSaved: () => void }) {
+function CoverageMatrix({ session, onSaved, readOnly }: { session: ApiSessionDetail; onSaved: () => void; readOnly?: boolean }) {
   const module = (() => {
     try { return JSON.parse(session.analysisJson ?? '')?.Module ?? session.module ?? '' }
     catch { return session.module ?? '' }
@@ -272,24 +277,26 @@ function CoverageMatrix({ session, onSaved }: { session: ApiSessionDetail; onSav
   return (
     <Box>
       <Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: 'center' }}>
-        <Typography variant="body2">{selCount} of {rows.length} selected → will generate {selCount}</Typography>
+        <Typography variant="body2">{selCount} of {rows.length} selected{!readOnly && ` → will generate ${selCount}`}</Typography>
         <Box sx={{ flex: 1 }} />
-        {covered.length > 0 && (
+        {!readOnly && covered.length > 0 && (
           <Button size="small" onClick={() => {
             setJustSaved(false)
             setSelected(new Set(rows.filter(r => r.Status !== 'covered').map(r => r.Id)))
           }}>Deselect all covered</Button>
         )}
-        {justSaved && <Typography variant="body2" color="success.main">Saved ✓</Typography>}
-        {saveError && <Typography variant="body2" color="error.main">{saveError}</Typography>}
-        <Button size="small" variant="contained" disabled={saving} onClick={save}
-          startIcon={saving ? <CircularProgress size={14} /> : undefined}>Save</Button>
+        {!readOnly && justSaved && <Typography variant="body2" color="success.main">Saved ✓</Typography>}
+        {!readOnly && saveError && <Typography variant="body2" color="error.main">{saveError}</Typography>}
+        {readOnly
+          ? <Typography variant="body2" color="success.main">Saved ✓</Typography>
+          : <Button size="small" variant="contained" disabled={saving} onClick={save}
+              startIcon={saving ? <CircularProgress size={14} /> : undefined}>Save</Button>}
       </Stack>
       <Stack spacing={0.5}>
         {rows.map(r => (
           <Stack key={r.Id} direction="row" spacing={1} sx={{ alignItems: 'center' }}>
             <Checkbox size="small" checked={selected.has(r.Id)}
-              onChange={e => toggle(r.Id, e.target.checked)} />
+              onChange={e => toggle(r.Id, e.target.checked)} disabled={readOnly} />
             <Chip size="small" label={LEVEL_NAMES[r.Level] ?? r.Level} />
             <Chip size="small" label={r.Status === 'covered' ? 'covered' : 'gap'} color={r.Status === 'covered' ? 'success' : 'warning'} variant="outlined" />
             <Typography variant="body2" sx={{ fontFamily: 'monospace', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -307,17 +314,26 @@ function CoverageMatrix({ session, onSaved }: { session: ApiSessionDetail; onSav
 
 // ── Drafts by level ───────────────────────────────────────────────────────────
 
-function DraftsByLevel({ session, refetch, onGenerate }: { session: ApiSessionDetail; refetch: () => void; onGenerate: () => void }) {
+// Strip the machinery prefix (`[<tcId-pending>]`, `[<tcId-pending:N>]`, or the pushed `[123456]`)
+// from a title for display. The tag stays in stored titles for the push-time rewrite; UI just hides it.
+const stripTitleTag = (title: string): string =>
+  title.replace(/^\[(?:<tcId-pending(?::\d+)?>|\d+)\]\s*/, '')
+
+function DraftsByLevel({ session, refetch, onGenerate, readOnly }: { session: ApiSessionDetail; refetch: () => void; onGenerate: () => void; readOnly?: boolean }) {
+  const wiUrl = useAdoWorkItemUrl()
   const drafts = (session.drafts ?? []) as unknown as ApiTestDraftDto[]
   // ApiTestDraftDto.level is TestLevel.ToWire() — lowercase ("contract"/"endpoint"/"workflow") — not
   // the capitalized tab labels; compare case-insensitively rather than assuming either casing.
   const levels = ['Contract', 'Endpoint', 'Workflow']
   const [tab, setTab] = useState(0)
-  const [editId, setEditId] = useState<number | null>(null)
-  const [editTitle, setEditTitle] = useState('')
-  const [saving, setSaving] = useState(false)
+  const [openDraftId, setOpenDraftId] = useState<number | null>(null)
 
   const byLevel = (l: string) => drafts.filter(d => d.level.toLowerCase() === l.toLowerCase())
+  const hasApprovable = drafts.some(d => d.status !== 'Approved' && d.status !== 'Rejected' && d.status !== 'Pushed')
+  const openDraft = drafts.find(d => d.id === openDraftId) ?? null
+  const stepCount = (json: string | null | undefined) => {
+    try { const v = JSON.parse(json ?? '[]'); return Array.isArray(v) ? v.length : 0 } catch { return 0 }
+  }
 
   async function doApprove(id: number) {
     try { await patchDraft(id, { status: 'Approved' }); refetch() } catch { /* ignore */ }
@@ -325,14 +341,20 @@ function DraftsByLevel({ session, refetch, onGenerate }: { session: ApiSessionDe
   async function doReject(id: number) {
     try { await patchDraft(id, { status: 'Rejected' }); refetch() } catch { /* ignore */ }
   }
-  async function doSaveTitle(d: ApiTestDraftDto) {
-    setSaving(true)
-    try { await patchDraft(d.id, { title: editTitle }); setEditId(null); refetch() }
-    catch { /* ignore */ }
-    finally { setSaving(false) }
-  }
   async function doApproveAll() {
     try { await approveAllDrafts(session.id); refetch() } catch { /* ignore */ }
+  }
+  async function saveOpenDraft(patch: { title?: string; preconditions?: string; steps?: { action: string; expected: string }[] }) {
+    if (!openDraft) return
+    const body: { title?: string; preconditions?: string; stepsJson?: string } = {}
+    if (patch.title !== undefined) {
+      // Re-attach the machinery tag stripped for display so push-time rewrite still finds it.
+      const tag = openDraft.title.match(/^\[(?:<tcId-pending(?::\d+)?>|\d+)\]/)?.[0]
+      body.title = tag ? `${tag} ${patch.title}` : patch.title
+    }
+    if (patch.preconditions !== undefined) body.preconditions = patch.preconditions
+    if (patch.steps !== undefined)         body.stepsJson = JSON.stringify(patch.steps)
+    await patchDraft(openDraft.id, body); refetch()
   }
 
   if (drafts.length === 0) {
@@ -358,49 +380,49 @@ function DraftsByLevel({ session, refetch, onGenerate }: { session: ApiSessionDe
       <Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: 'center' }}>
         <Typography variant="body2">{drafts.length} draft{drafts.length !== 1 ? 's' : ''}</Typography>
         <Box sx={{ flex: 1 }} />
-        <Button size="small" variant="outlined" onClick={doApproveAll}>Approve all</Button>
+        {!readOnly && hasApprovable && <Button size="small" variant="outlined" onClick={doApproveAll}>Approve all</Button>}
+        {!readOnly && !hasApprovable && <Typography variant="body2" color="success.main">Approved ✓</Typography>}
       </Stack>
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 1 }}>
         {levels.map((l, i) => <Tab key={l} value={i} label={`${l} (${byLevel(l).length})`} sx={{ textTransform: 'none', minHeight: 36 }} />)}
       </Tabs>
       <Stack spacing={1}>
         {byLevel(levels[tab]).map(d => (
-          <Card key={d.id} variant="outlined">
+          <Card key={d.id} variant="outlined"
+            sx={{ transition: 'border-color .15s, box-shadow .15s', '&:hover': { borderColor: 'primary.main', boxShadow: 1 } }}>
             <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                 <StatusChip value={d.status} kind="draft" />
-                {editId === d.id ? (
+                <Typography variant="body2"
+                  sx={{ flex: 1, fontWeight: 500, cursor: 'pointer', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  title={stripTitleTag(d.title)} onClick={() => setOpenDraftId(d.id)}>{stripTitleTag(d.title)}</Typography>
+                <Chip size="small" variant="outlined"
+                  label={`${stepCount(d.stepsJson)} step${stepCount(d.stepsJson) === 1 ? '' : 's'}`} />
+                {d.adoTestCaseId && <Chip size="small" color="success" variant="outlined" label={`TC #${d.adoTestCaseId}`} />}
+                {!readOnly && d.status !== 'Pushed' && d.status !== 'Rejected' && (
                   <>
-                    <TextField size="small" value={editTitle} onChange={e => setEditTitle(e.target.value)}
-                      sx={{ flex: 1 }} autoFocus onKeyDown={e => { if (e.key === 'Enter') doSaveTitle(d) }} />
-                    <IconButton size="small" disabled={saving} onClick={() => doSaveTitle(d)}>
-                      {saving ? <CircularProgress size={14} /> : <CheckIcon fontSize="small" />}
-                    </IconButton>
-                    <IconButton size="small" onClick={() => setEditId(null)}><CloseIcon fontSize="small" /></IconButton>
-                  </>
-                ) : (
-                  <>
-                    <Typography variant="body2" sx={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}
-                      onClick={() => { setEditId(d.id); setEditTitle(d.title) }}>{d.title}</Typography>
-                    {d.adoTestCaseId && <Chip size="small" color="success" variant="outlined" label={`TC #${d.adoTestCaseId}`} />}
-                    {d.status !== 'Pushed' && d.status !== 'Rejected' && (
-                      <>
-                        {d.status !== 'Approved' && <Tooltip title="Approve"><IconButton size="small" color="success" onClick={() => doApprove(d.id)}><CheckIcon fontSize="small" /></IconButton></Tooltip>}
-                        <Tooltip title="Reject"><IconButton size="small" color="error" onClick={() => doReject(d.id)}><CloseIcon fontSize="small" /></IconButton></Tooltip>
-                      </>
-                    )}
+                    {d.status !== 'Approved' && <Tooltip title="Approve"><IconButton size="small" color="success" onClick={() => doApprove(d.id)}><CheckIcon fontSize="small" /></IconButton></Tooltip>}
+                    <Tooltip title="Reject"><IconButton size="small" color="error" onClick={() => doReject(d.id)}><CloseIcon fontSize="small" /></IconButton></Tooltip>
                   </>
                 )}
+                <Button size="small" variant="outlined" startIcon={<VisibilityIcon />}
+                  onClick={() => setOpenDraftId(d.id)}>View</Button>
               </Stack>
-              {d.specCode && (
-                <Box component="pre" sx={{ mt: 1, p: 1, bgcolor: 'action.hover', borderRadius: 1, fontSize: 11, overflowX: 'auto', whiteSpace: 'pre-wrap', maxHeight: 180 }}>
-                  {d.specCode.slice(0, 800)}{d.specCode.length > 800 ? '\n…' : ''}
-                </Box>
-              )}
             </CardContent>
           </Card>
         ))}
       </Stack>
+
+      {openDraft && (
+        <DraftDetailDialog
+          open={openDraftId !== null}
+          onClose={() => setOpenDraftId(null)}
+          draft={{ ...openDraft, title: stripTitleTag(openDraft.title) }}
+          readOnly={Boolean(readOnly) || openDraft.status === 'Pushed' || openDraft.status === 'Rejected'}
+          onSave={saveOpenDraft}
+          adoUrl={wiUrl}
+        />
+      )}
     </Box>
   )
 }
@@ -411,12 +433,27 @@ function DraftsByLevel({ session, refetch, onGenerate }: { session: ApiSessionDe
 // body at all, so there is nothing to pick here. Show what will be used and let the user push,
 // or point them back at a new scan if the session was never given a Plan/Suite.
 function PushPanel({ session, refetch }: { session: ApiSessionDetail; refetch: () => void }) {
-  const [pushing, setPushing] = useState(false)
-  const [error, setError]   = useState('')
+  const wiUrl = useAdoWorkItemUrl()
+  const [pushing, setPushing]       = useState(false)
+  const [error, setError]           = useState('')
+  const [plans, setPlans]           = useState<TestPlan[]>([])
+  const [suites, setSuites]         = useState<TestSuite[]>([])
+  const [localPlanId, setLocalPlanId]   = useState<number | null>(null)
+  const [localSuiteId, setLocalSuiteId] = useState<number | null>(null)
+  const [savingPlan, setSavingPlan] = useState(false)
+  const [planError, setPlanError]   = useState('')
 
-  const drafts = (session.drafts ?? []) as unknown as ApiTestDraftDto[]
+  const [pushTab, setPushTab] = useState(0)
+
+  const drafts   = (session.drafts ?? []) as unknown as ApiTestDraftDto[]
+  const pushed   = drafts.filter(d => d.status === 'Pushed').length
   const approved = drafts.filter(d => d.status === 'Approved').length
-  const canPush = Boolean(session.testPlanId && session.testSuiteId)
+  const canPush  = Boolean(session.testPlanId && session.testSuiteId)
+  const isDone   = session.status === 'Done'
+  const isPushing = session.status === 'Pushing'
+  const pushedDrafts = drafts.filter(d => d.status === 'Pushed' && d.adoTestCaseId)
+  const PUSH_LEVELS = ['Contract', 'Endpoint', 'Workflow'] as const
+  const byPushLevel = (l: string) => pushedDrafts.filter(d => d.level.toLowerCase() === l.toLowerCase())
 
   async function doPush() {
     setPushing(true); setError('')
@@ -429,31 +466,125 @@ function PushPanel({ session, refetch }: { session: ApiSessionDetail; refetch: (
     try { await cancelSession(session.id); refetch() } catch { /* ignore */ }
   }
 
+  async function loadPlans() {
+    try { setPlans(await getPlans()) } catch { /* ignore */ }
+  }
+
+  async function loadSuites(pid: number) {
+    try { setSuites(await getSuites(pid)) } catch { setSuites([]) }
+  }
+
+  async function savePlan() {
+    if (!localPlanId || !localSuiteId) return
+    setSavingPlan(true); setPlanError('')
+    try { await updateSessionPlan(session.id, { testPlanId: localPlanId, testSuiteId: localSuiteId }); refetch() }
+    catch (e) { setPlanError(axiosMessage(e)) }
+    finally { setSavingPlan(false) }
+  }
+
   return (
     <Stack spacing={2}>
       {error && <Alert severity="error">{error}</Alert>}
-      <Typography variant="body2">{approved} approved draft{approved !== 1 ? 's' : ''} will be pushed.</Typography>
+      <Typography variant="body2">
+        {isDone
+          ? `${pushed} draft${pushed !== 1 ? 's' : ''} pushed to ADO.`
+          : `${approved} approved draft${approved !== 1 ? 's' : ''} will be pushed.`}
+      </Typography>
+
       {canPush ? (
         <Stack direction="row" spacing={1}>
           <Chip size="small" label={`Plan #${session.testPlanId}`} />
           <Chip size="small" label={`Suite #${session.testSuiteId}`} />
           {session.workItemId && <Chip size="small" label={`Story #${session.workItemId}`} />}
         </Stack>
-      ) : (
-        <Alert severity="warning">
-          This session has no Test Plan/Suite — set them on the New Scan form to push. (Plan/Suite are
-          chosen once at scan time, not per push.)
-        </Alert>
+      ) : !isDone && (
+        <Stack spacing={1.5}>
+          {planError && <Alert severity="error">{planError}</Alert>}
+          <Autocomplete
+            options={plans} getOptionLabel={p => `${p.id} — ${p.name}`}
+            value={plans.find(p => p.id === localPlanId) ?? null}
+            isOptionEqualToValue={(a, b) => a.id === b.id}
+            onOpen={loadPlans}
+            onChange={(_, v) => { setLocalPlanId(v?.id ?? null); setLocalSuiteId(null); setSuites([]); if (v) loadSuites(v.id) }}
+            renderInput={p => <TextField {...p} label="Test Plan" size="small" required />}
+          />
+          <Autocomplete
+            options={suites} getOptionLabel={s => `${s.id} — ${s.name}`}
+            value={suites.find(s => s.id === localSuiteId) ?? null}
+            isOptionEqualToValue={(a, b) => a.id === b.id}
+            disabled={!localPlanId}
+            onChange={(_, v) => setLocalSuiteId(v?.id ?? null)}
+            renderInput={p => <TextField {...p} label="Test Suite" size="small" required
+              helperText={!localPlanId ? 'Pick a plan first' : undefined} />}
+          />
+          <Box>
+            <Button size="small" variant="outlined" disabled={!localPlanId || !localSuiteId || savingPlan}
+              onClick={savePlan}
+              startIcon={savingPlan ? <CircularProgress size={14} /> : undefined}>
+              Save & enable push
+            </Button>
+          </Box>
+        </Stack>
       )}
-      <Stack direction="row" spacing={1}>
-        <Button variant="contained" disabled={pushing || !canPush || approved === 0} onClick={doPush}
-          startIcon={pushing ? <CircularProgress size={16} /> : <PushPinIcon />}>
-          Push {approved > 0 ? `(${approved})` : ''}
-        </Button>
+
+      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+        {isDone
+          ? <Typography variant="body2" color="success.main">Pushed ✓</Typography>
+          : <Button variant="contained" disabled={pushing || isPushing || !canPush || approved === 0} onClick={doPush}
+              startIcon={(pushing || isPushing) ? <CircularProgress size={16} /> : <PushPinIcon />}>
+              {isPushing ? 'Pushing…' : `Push${approved > 0 ? ` (${approved})` : ''}`}
+            </Button>}
         {!['Done', 'Failed', 'Cancelled'].includes(session.status) && (
           <Button color="error" onClick={doCancel}>Cancel scan</Button>
         )}
       </Stack>
+
+      {pushedDrafts.length > 0 && (
+        <Card variant="outlined" sx={{ borderColor: 'success.main' }}>
+          <CardContent>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1 }}>
+              <CheckIcon color="success" fontSize="small" />
+              <Typography variant="subtitle2">{pushedDrafts.length} test case{pushedDrafts.length !== 1 ? 's' : ''} pushed to ADO</Typography>
+            </Stack>
+            <Tabs value={pushTab} onChange={(_, v) => setPushTab(v)} sx={{ mb: 1 }}>
+              {PUSH_LEVELS.map((l, i) => (
+                <Tab key={l} value={i} label={`${l} (${byPushLevel(l).length})`} sx={{ textTransform: 'none', minHeight: 36 }} />
+              ))}
+            </Tabs>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ width: 96 }}>TC ID</TableCell>
+                  <TableCell>Title</TableCell>
+                  <TableCell sx={{ width: 48 }} />
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {byPushLevel(PUSH_LEVELS[pushTab]).map(d => (
+                  <TableRow key={d.id}>
+                    <TableCell><strong>#{d.adoTestCaseId}</strong></TableCell>
+                    <TableCell>{stripTitleTag(d.title)}</TableCell>
+                    <TableCell>
+                      <Tooltip title="Open in Azure DevOps">
+                        <IconButton size="small" component="a" href={wiUrl(d.adoTestCaseId!)} target="_blank" rel="noreferrer">
+                          <OpenInNewIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {byPushLevel(PUSH_LEVELS[pushTab]).length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={3} sx={{ textAlign: 'center', color: 'text.secondary', py: 2 }}>
+                      No {PUSH_LEVELS[pushTab]} test cases pushed.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
     </Stack>
   )
 }
@@ -499,8 +630,8 @@ export function QaLoopDetailBody({ session, refetch, onError, fullScreen }: Deta
         </Box>
       )}
 
-      {tab === 'coverage' && <CoverageMatrix session={s} onSaved={() => { refetch(); setTab('drafts') }} />}
-      {tab === 'drafts' && <DraftsByLevel session={s} refetch={refetch} onGenerate={doGenerate} />}
+      {tab === 'coverage' && <CoverageMatrix session={s} onSaved={() => { refetch(); setTab('drafts') }} readOnly={!['Scanning', 'AwaitingReview'].includes(s.status)} />}
+      {tab === 'drafts' && <DraftsByLevel session={s} refetch={refetch} onGenerate={doGenerate} readOnly={s.status === 'Done'} />}
       {tab === 'push' && <PushPanel session={s} refetch={refetch} />}
     </Box>
   )

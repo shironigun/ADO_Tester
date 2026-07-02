@@ -139,6 +139,14 @@ export async function approveAllDrafts(id: number): Promise<void> {
   await api.post(`/api/qaloop/sessions/${id}/approve-all`)
 }
 
+/** Skip-null PATCH — set testPlanId/testSuiteId/workItemId on a session that was started without them. */
+export async function updateSessionPlan(
+  id: number, req: { testPlanId?: number; testSuiteId?: number; workItemId?: number },
+): Promise<ApiSessionDetail> {
+  const { data } = await api.patch<ApiSessionDetail>(`/api/qaloop/sessions/${id}/plan`, req)
+  return data
+}
+
 /** Reads Plan/Suite/Story from the session itself — no body. */
 export async function pushSession(id: number): Promise<void> {
   await api.post(`/api/qaloop/sessions/${id}/push`)

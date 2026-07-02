@@ -441,6 +441,14 @@ public sealed class QaLoopOrchestratorTests
             return Task.CompletedTask;
         }
 
+        public int NextSuiteId = 900_000;
+        public List<(int PlanId, int ParentId, string Name)> CreatedSuites { get; } = [];
+        public Task<int> CreateStaticTestSuiteAsync(int planId, int parentSuiteId, string name, CancellationToken ct = default)
+        {
+            CreatedSuites.Add((planId, parentSuiteId, name));
+            return Task.FromResult(NextSuiteId++);
+        }
+
         public Task LinkTestedByAsync(int storyId, int tcId, CancellationToken ct = default)
         {
             TestedByLinks.Add((storyId, tcId));

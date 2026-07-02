@@ -36,6 +36,15 @@ public static partial class TitleTag
     public static string PendingFor(int? caseIndex) =>
         caseIndex is { } i ? $"[<tcId-pending:{i}>]" : Pending;
 
+    /// <summary>Title-case a module name for display in test-case titles (e.g. "leads" → "Leads").
+    /// Leaves already-cased names alone; falls back to "Module" if empty.</summary>
+    public static string TitleCaseModule(string module)
+    {
+        if (string.IsNullOrWhiteSpace(module)) return "Module";
+        var trimmed = module.Trim();
+        return char.ToUpperInvariant(trimmed[0]) + trimmed[1..];
+    }
+
     /// <summary>Returns spec text guaranteed to contain a pending tag in the test title line. If the
     /// model omitted it, injects it at the start of the first test/describe title found.</summary>
     public static string EnsureInSpec(string specCode, string title, int? caseIndex = null)
@@ -106,8 +115,9 @@ public sealed class ContractGeneratorAgent
             _llm, AgentPrompts.ContractTestcaseSystem, userPrompt, '[', progress, emit,
             label: "ContractTestcase", cancellationToken: ct);
 
-        var tc = ParseTestCase(tcData) ?? FallbackTestCase(route);
-        tc.Title = TitleTag.EnsureTitle(tc.Title, $"Contract: {route.Method} {route.Route} - response shape matches schema");
+        var mod = TitleTag.TitleCaseModule(module);
+        var tc = ParseTestCase(tcData) ?? FallbackTestCase(module, route);
+        tc.Title = TitleTag.EnsureTitle(tc.Title, $"{mod} - Contract - {route.Method} - Verify that {route.Route} response shape matches the expected schema");
 
         var slug = Slug($"{route.Method}-{route.Route}");
         return new GeneratedSpec
@@ -147,16 +157,16 @@ public sealed class ContractGeneratorAgent
         };
     }
 
-    private static GeneratedTestCase FallbackTestCase(RouteInfo route) => new()
+    private static GeneratedTestCase FallbackTestCase(string module, RouteInfo route) => new()
     {
-        Title = $"{TitleTag.Pending} Contract: {route.Method} {route.Route} - response shape matches schema",
+        Title = $"{TitleTag.Pending} {TitleTag.TitleCaseModule(module)} - Contract - {route.Method} - Verify that {route.Route} response shape matches the expected schema",
         Preconditions = "",
         Steps =
         [
             new TestCaseStep { Action = "Obtain a valid bearer token for the INFINITY QA environment", Expected = "Token received" },
-            new TestCaseStep { Action = $"Send a {route.Method} request to {route.Route} with the bearer token", Expected = "Response received with status 200" },
+            new TestCaseStep { Action = $"Send a {route.Method} request to {route.Route} with the bearer token", Expected = "Response returns 200" },
             new TestCaseStep { Action = "Parse the JSON response body", Expected = "Valid JSON body returned" },
-            new TestCaseStep { Action = "Verify that the response body matches the expected schema", Expected = "All required fields are present with correct types" },
+            new TestCaseStep { Action = "Verify that the response body matches the expected schema", Expected = $"Response contains the fields declared by the {route.Method} {route.Route} response contract, each non-null and of the declared type" },
         ],
     };
 

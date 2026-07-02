@@ -33,8 +33,9 @@ public sealed class WorkflowGeneratorAgent
             _llm, AgentPrompts.WorkflowTestcaseSystem, userPrompt, '[', progress, emit,
             label: "WorkflowTestcase", cancellationToken: ct);
 
-        var tc = ParseTestCase(tcData) ?? FallbackTestCase(workflow);
-        tc.Title = TitleTag.EnsureTitle(tc.Title, $"Workflow: {workflow.Name}");
+        var mod = TitleTag.TitleCaseModule(module);
+        var tc = ParseTestCase(tcData) ?? FallbackTestCase(module, workflow);
+        tc.Title = TitleTag.EnsureTitle(tc.Title, $"{mod} - Workflow - Verify that the {workflow.Name} workflow completes end-to-end");
 
         var sourceRoutes = workflow.Steps.Select(s => s.Endpoint).Distinct().ToList();
         return new GeneratedSpec
@@ -80,18 +81,18 @@ public sealed class WorkflowGeneratorAgent
         };
     }
 
-    private static GeneratedTestCase FallbackTestCase(WorkflowInfo workflow) => new()
+    private static GeneratedTestCase FallbackTestCase(string module, WorkflowInfo workflow) => new()
     {
-        Title = $"{TitleTag.Pending} Workflow: {workflow.Name}",
+        Title = $"{TitleTag.Pending} {TitleTag.TitleCaseModule(module)} - Workflow - Verify that the {workflow.Name} workflow completes end-to-end",
         Preconditions = "",
-        Steps = workflow.Steps.Select((s, i) => new TestCaseStep
+        Steps = workflow.Steps.Select(s => new TestCaseStep
         {
-            Action = $"Send a request to {s.Endpoint} (step {i + 1}: {s.Role})",
-            Expected = "Response received with status 200",
+            Action = $"Send a request to {s.Endpoint}",
+            Expected = $"Response returns 200 and the body reflects the {s.Role} outcome (returned resource contains the fields set by this call)",
         }).Append(new TestCaseStep
         {
             Action = $"Verify that the {workflow.Name} workflow completes end-to-end successfully",
-            Expected = "All steps completed without errors",
+            Expected = "All prior calls succeeded and the final resource state matches the expected outcome of the flow",
         }).ToList(),
     };
 

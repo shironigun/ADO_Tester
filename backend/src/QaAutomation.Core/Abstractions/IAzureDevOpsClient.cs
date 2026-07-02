@@ -46,6 +46,10 @@ public interface IAzureDevOpsClient
     // ── Writes (Test Case create + suite add + Tested-By; Bug create + Related link) ──
     Task<int> CreateTestCaseAsync(string title, string preconditions, IReadOnlyList<TestCaseStep> steps, CancellationToken ct = default);
     Task AddTestCaseToSuiteAsync(int planId, int suiteId, int testCaseId, CancellationToken ct = default);
+
+    /// <summary>Create a static child Test Suite under <paramref name="parentSuiteId"/> in the plan;
+    /// returns the new suite id. Caller is responsible for de-duping by name.</summary>
+    Task<int> CreateStaticTestSuiteAsync(int planId, int parentSuiteId, string name, CancellationToken ct = default);
     Task LinkTestedByAsync(int storyId, int testCaseId, CancellationToken ct = default);
     Task<int> CreateBugAsync(
         string title, string severity, string preconditions, IReadOnlyList<string> reproSteps,

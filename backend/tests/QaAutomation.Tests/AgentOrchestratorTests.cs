@@ -231,6 +231,9 @@ public sealed class AgentOrchestratorTests
             return Task.CompletedTask;
         }
 
+        public Task<int> CreateStaticTestSuiteAsync(int planId, int parentSuiteId, string name, CancellationToken ct = default)
+            => throw new NotImplementedException();
+
         public Task LinkTestedByAsync(int storyId, int testCaseId, CancellationToken ct = default)
         {
             TestedByLinks.Add((storyId, testCaseId));

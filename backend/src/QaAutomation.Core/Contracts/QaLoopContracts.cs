@@ -42,6 +42,14 @@ public sealed class ApiAnalysisUpdate
     public SurfaceMatrix ToMatrix() => new(Module, Rows);
 }
 
+/// <summary>Per-field skip-null PATCH for a session's plan/suite/work-item (null = leave unchanged).</summary>
+public sealed class UpdateSessionPlanRequest
+{
+    public int? TestPlanId { get; set; }
+    public int? TestSuiteId { get; set; }
+    public int? WorkItemId { get; set; }
+}
+
 /// <summary>Per-field skip-null PATCH for a draft (null = leave unchanged).</summary>
 public sealed class UpdateApiDraftRequest
 {
