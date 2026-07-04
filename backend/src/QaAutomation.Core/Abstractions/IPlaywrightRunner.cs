@@ -22,6 +22,9 @@ public sealed class PlaywrightRunSpec
     public int? TriggerBuildId { get; init; }
     public string? TriggerCommitSha { get; init; }
     public int? AdoTestRunId { get; init; }
+    /// <summary>Serialized ImpactAnalysis for pipeline-triggered runs — surfaces trigger reasoning
+    /// (what changed, confidence, impacted-test count) in the Allure report metadata.</summary>
+    public string? ImpactAnalysisJson { get; init; }
     /// <summary>When false, Playwright stdout/stderr is not streamed to the event bus (QAL-060).</summary>
     public bool ActivityEnabled { get; init; } = true;
 }
@@ -63,5 +66,10 @@ public interface IPlaywrightRunner
     /// via the event bus, and returns parsed results.
     /// </summary>
     Task<PlaywrightRunResult> RunAsync(PlaywrightRunSpec spec, string eventKey,
+        CancellationToken ct = default);
+
+    /// <summary>Re-enrich + regenerate the Allure report from a past run's preserved
+    /// allure-results (no Playwright execution, no ADO writes). Null when no results exist.</summary>
+    Task<string?> RebuildReportAsync(PlaywrightRunSpec spec, string eventKey,
         CancellationToken ct = default);
 }

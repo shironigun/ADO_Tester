@@ -35,7 +35,7 @@
         "actions": [
           {
             "type": "Action.OpenUrl",
-            "title": "View ADO Test Run",
+            "title": "View Test Plan Run",
             "url": "{{ado_run_url}}"
           }
         ]

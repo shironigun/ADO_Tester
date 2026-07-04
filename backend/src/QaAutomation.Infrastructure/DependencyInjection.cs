@@ -287,6 +287,7 @@ public static class DependencyInjection
         services.AddSingleton<IAutomationAuthenticator, AutomationAuthenticator>();
 
         services.AddSingleton<IQaLoopOrchestrator, QaLoopOrchestrator>();
+        services.AddSingleton<AllureEnricher>();
         services.AddSingleton<IPlaywrightRunner, PlaywrightRunner>();
         services.AddScoped<RunExecutionService>();
         services.AddSingleton<ITeamsNotifier, TeamsNotifier>();

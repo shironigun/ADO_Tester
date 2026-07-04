@@ -555,6 +555,22 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
         using var _ = await SendDocAsync(HttpMethod.Patch, url, body, "application/json-patch+json", $"Link {fromId} <-> {toId} as Related", ct);
     }
 
+    public async Task LinkParentAsync(int childId, int parentId, CancellationToken ct = default)
+    {
+        var parentUrl = $"https://dev.azure.com/{Opts.Organization}/{Quote(Opts.Project)}/_apis/wit/workItems/{parentId}";
+        var body = new JsonArray
+        {
+            new JsonObject
+            {
+                ["op"] = "add",
+                ["path"] = "/relations/-",
+                ["value"] = new JsonObject { ["rel"] = "System.LinkTypes.Hierarchy-Reverse", ["url"] = parentUrl },
+            },
+        };
+        var url = $"{Opts.BaseUrl}/_apis/wit/workitems/{childId}?api-version={Opts.ApiVersion}";
+        using var _ = await SendDocAsync(HttpMethod.Patch, url, body, "application/json-patch+json", $"Link {childId} under parent {parentId}", ct);
+    }
+
     public async Task<string> UploadAttachmentAsync(string fileName, byte[] content, CancellationToken ct = default)
     {
         var safeName = Uri.EscapeDataString(string.IsNullOrWhiteSpace(fileName) ? "attachment" : fileName);
@@ -1139,11 +1155,13 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
     public async Task<IReadOnlyList<AdoBuild>> GetPipelineBuildsAsync(
         int pipelineId, int? minBuildId = null, CancellationToken ct = default)
     {
+        // NOTE: /build/builds has NO minBuildId query parameter — ADO silently ignores unknown
+        // params, so the old "&minBuildId=N" filtered nothing and every poll returned the full
+        // history (the pipeline watcher then re-ran runs for long-past executions). Filter
+        // client-side instead; $top bounds the fetch to the recent window.
         var url = $"{Opts.BaseUrl}/_apis/build/builds?definitions={pipelineId}" +
                   "&statusFilter=completed&resultFilter=succeeded&queryOrder=finishTimeDescending" +
-                  $"&api-version={Opts.ApiVersion}";
-        if (minBuildId.HasValue)
-            url += $"&minBuildId={minBuildId.Value + 1}";
+                  $"&$top=50&api-version={Opts.ApiVersion}";
 
         using var doc = await GetDocAsync(url, $"Get pipeline builds {pipelineId}", ct);
         var builds = new List<AdoBuild>();
@@ -1157,7 +1175,8 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
                 var finished = b.TryGetProperty("finishTime", out var ftP)
                     ? DateTime.Parse(ftP.GetString() ?? "", CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)
                     : DateTime.UtcNow;
-                if (id > 0) builds.Add(new AdoBuild(id, sha, repoId, finished));
+                if (id > 0 && (minBuildId is null || id > minBuildId.Value))
+                    builds.Add(new AdoBuild(id, sha, repoId, finished));
             }
         return builds;
     }

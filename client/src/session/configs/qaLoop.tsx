@@ -417,7 +417,7 @@ function DraftsByLevel({ session, refetch, onGenerate, readOnly }: { session: Ap
         <DraftDetailDialog
           open={openDraftId !== null}
           onClose={() => setOpenDraftId(null)}
-          draft={{ ...openDraft, title: stripTitleTag(openDraft.title) }}
+          draft={{ ...openDraft, title: stripTitleTag(openDraft.title), stepsJson: openDraft.stepsJson ?? '' }}
           readOnly={Boolean(readOnly) || openDraft.status === 'Pushed' || openDraft.status === 'Rejected'}
           onSave={saveOpenDraft}
           adoUrl={wiUrl}

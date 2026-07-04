@@ -231,6 +231,8 @@ public sealed class BugOrchestratorTests
             return Task.CompletedTask;
         }
 
+        public Task LinkParentAsync(int childId, int parentId, CancellationToken ct = default) => Task.CompletedTask;
+
         public Task<string> UploadAttachmentAsync(string fileName, byte[] content, CancellationToken ct = default) => Task.FromResult($"https://attachments/{fileName}");
         public Task AddWorkItemAttachmentLinkAsync(int workItemId, string attachmentUrl, string? comment = null, CancellationToken ct = default) => Task.CompletedTask;
 

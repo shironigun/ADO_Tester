@@ -291,8 +291,11 @@ public sealed class ResultsIngestService : IResultsIngestService
 
     public async Task<TriageResult> TriageAsync(int runId, CancellationToken ct = default)
     {
+        // Every failure already carries a deterministic BugDraftJson from run time. "AI enrich"
+        // re-triages the un-filed ones: reclassify (real bug vs test issue) and, for real bugs,
+        // replace the draft with the richer LLM-composed version.
         var failures = await _db.TestFailures
-            .Where(f => f.RunId == runId && f.BugDraftJson == null)
+            .Where(f => f.RunId == runId && f.BugId == null)
             .ToListAsync(ct);
 
         if (failures.Count == 0) return new TriageResult(0, 0);
@@ -381,10 +384,15 @@ public sealed class ResultsIngestService : IResultsIngestService
                     actual: "", suggestedFix: "",
                     systemInfo: systemInfo, reproHtml: reproHtml, ct: ct);
 
+                // Test case linked as Tested By/Tests (same link type as test-case→story pushes),
+                // NOT Related — so the bug's test case shows under the Tests relation in ADO.
                 if (failure.AdoTestCaseId is int tcId)
-                    await TryLinkAsync(bugId, tcId, "test case");
+                    try { await _ado.LinkTestedByAsync(bugId, tcId, ct); }
+                    catch (Exception e) { _log.LogWarning(e, "Could not link Bug #{Bug} tested-by TC #{Tc}", bugId, tcId); }
+                // The user-picked ticket is the bug's PARENT (nested under it in ADO), not Related.
                 if (storyId is int story)
-                    await TryLinkAsync(bugId, story, "story");
+                    try { await _ado.LinkParentAsync(bugId, story, ct); }
+                    catch (Exception e) { _log.LogWarning(e, "Could not parent Bug #{Bug} under #{Story}", bugId, story); }
 
                 failure.BugId = bugId;
                 bugIds.Add(bugId);

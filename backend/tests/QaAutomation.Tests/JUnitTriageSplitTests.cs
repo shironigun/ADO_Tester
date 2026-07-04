@@ -99,10 +99,10 @@ public sealed class JUnitTriageSplitTests
     }
 
     [Fact]
-    public async Task TriageAsync_skips_failures_that_already_have_BugDraftJson()
+    public async Task TriageAsync_skips_failures_that_are_already_filed()
     {
         using var h = IngestHarness.Create(new StubLlmClient());   // empty — must not be called
-        var (runId, _) = await h.SeedRunAsync("Already triaged", bugDraftJson: "{}");
+        var (runId, _) = await h.SeedRunAsync("Already filed", bugDraftJson: "{}", bugId: 4242);
 
         var result = await h.Service.TriageAsync(runId);
 
@@ -248,14 +248,14 @@ public sealed class JUnitTriageSplitTests
             return new IngestHarness(provider, svc, ado, svcScope, dbPath);
         }
 
-        public async Task<(int runId, int failureId)> SeedRunAsync(string testTitle, string? bugDraftJson = null)
+        public async Task<(int runId, int failureId)> SeedRunAsync(string testTitle, string? bugDraftJson = null, int? bugId = null)
         {
             using var scope = Provider.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
             var run = new TestRun { ProjectId = 1, Status = TestRunStatus.Running, CreatedAt = DateTime.UtcNow };
             db.TestRuns.Add(run);
             await db.SaveChangesAsync();
-            var failure = new TestFailure { RunId = run.Id, TestTitle = testTitle, BugDraftJson = bugDraftJson };
+            var failure = new TestFailure { RunId = run.Id, TestTitle = testTitle, BugDraftJson = bugDraftJson, BugId = bugId };
             db.TestFailures.Add(failure);
             await db.SaveChangesAsync();
             return (run.Id, failure.Id);
@@ -385,6 +385,7 @@ public sealed class JUnitTriageSplitTests
         }
 
         public Task LinkRelatedAsync(int fromId, int toId, CancellationToken ct = default) => Task.CompletedTask;
+        public Task LinkParentAsync(int childId, int parentId, CancellationToken ct = default) => Task.CompletedTask;
 
         // ── unused ──
         public Task<AdoWorkItem> GetWorkItemAsync(int workItemId, bool forceRefresh = false, CancellationToken ct = default) => throw new NotImplementedException();
@@ -465,6 +466,7 @@ public sealed class JUnitTriageSplitTests
         public Task<IReadOnlyList<ReportTicket>> EnrichTicketsForReportAsync(IReadOnlyList<ReportTicket> tickets, int limit = 150, int concurrency = 8, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<int> CreateBugAsync(string title, string severity, string preconditions, IReadOnlyList<string> reproSteps, string expected, string actual, string suggestedFix, string systemInfo = "", string reproHtml = "", string foundWith = "Manual Test", CancellationToken ct = default) => throw new NotImplementedException();
         public Task LinkRelatedAsync(int fromId, int toId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task LinkParentAsync(int childId, int parentId, CancellationToken ct = default) => Task.CompletedTask;
         public Task<string> UploadAttachmentAsync(string fileName, byte[] content, CancellationToken ct = default) => throw new NotImplementedException();
         public Task AddWorkItemAttachmentLinkAsync(int workItemId, string attachmentUrl, string? comment = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<AdoNamedRef>> ListRepositoriesAsync(CancellationToken ct = default) => throw new NotImplementedException();

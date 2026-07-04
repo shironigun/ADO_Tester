@@ -10,13 +10,13 @@
         "body": [
           {
             "type": "TextBlock",
-            "text": "Good day, Mahmood — here is your scheduled QA Loop summary.",
+            "text": "{{greeting}}",
             "wrap": true,
             "size": "Medium"
           },
           {
             "type": "TextBlock",
-            "text": "**Module:** {{module}}  |  **Profile:** {{profile}}  |  **Env:** {{env}}",
+            "text": "**Module:** {{module}}  |  **DMS:** {{profile}}  |  **Trigger:** {{trigger}}",
             "wrap": true,
             "separator": true
           },
@@ -44,19 +44,31 @@
           },
           {
             "type": "TextBlock",
-            "text": "**Results by level**",
+            "text": "**Results by Test Level**",
             "weight": "Bolder",
             "separator": true
           },
           {
-            "type": "TextBlock",
-            "text": "{{level_table}}",
-            "wrap": true,
-            "fontType": "Monospace"
+            "type": "ColumnSet",
+            "separator": true,
+            "columns": [
+              { "type": "Column", "width": "2", "items": [ { "type": "TextBlock", "text": "**Level**", "wrap": true } ] },
+              { "type": "Column", "width": "1", "items": [ { "type": "TextBlock", "text": "**Executed**", "wrap": true } ] },
+              { "type": "Column", "width": "1", "items": [ { "type": "TextBlock", "text": "**Passed**", "wrap": true } ] },
+              { "type": "Column", "width": "1", "items": [ { "type": "TextBlock", "text": "**Failed**", "wrap": true } ] }
+            ]
           },
+          {{level_rows}},
           {
             "type": "TextBlock",
             "text": "Duration: {{duration}}",
+            "wrap": true,
+            "separator": true,
+            "isSubtle": true
+          },
+          {
+            "type": "TextBlock",
+            "text": "If you have any concern related to this automation execution results please reply to [Mahmood Ahmad](mailto:mahmood.ahmad@constellationdealer.com).",
             "wrap": true,
             "separator": true,
             "isSubtle": true
@@ -65,13 +77,8 @@
         "actions": [
           {
             "type": "Action.OpenUrl",
-            "title": "View ADO Test Run",
+            "title": "View Test Plan Run",
             "url": "{{ado_run_url}}"
-          },
-          {
-            "type": "Action.OpenUrl",
-            "title": "Email Mahmood",
-            "url": "mailto:mahmood.ahmad@constellationdealer.com?subject=QA%20Loop%20Run%20%E2%80%94%20{{module}}&body={{email_body}}"
           }
         ]
       }

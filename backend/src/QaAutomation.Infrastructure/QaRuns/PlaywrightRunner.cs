@@ -24,6 +24,7 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
     private readonly IEventBus _bus;
     private readonly PipelineConcurrency _concurrency;
     private readonly IAutomationAuthenticator _authenticator;
+    private readonly AllureEnricher _enricher;
     private readonly string _scriptsDir;
     private readonly string _runsDir;
     private readonly string _runtimeDir;
@@ -38,6 +39,7 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
 
     public PlaywrightRunner(
         IEventBus bus, PipelineConcurrency concurrency, IAutomationAuthenticator authenticator,
+        AllureEnricher enricher,
         IOptions<StorageOptions> storage, IOptions<QaLoopOptions> qaLoop,
         IOptions<AzureDevOpsOptions> ado,
         ILogger<PlaywrightRunner> log)
@@ -45,6 +47,7 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
         _bus = bus;
         _concurrency = concurrency;
         _authenticator = authenticator;
+        _enricher = enricher;
         var dataDir = storage.Value.DataDirectory;
         _scriptsDir      = Path.GetFullPath(Path.Combine(dataDir, qaLoop.Value.ScriptsFolderName));
         _runsDir         = Path.GetFullPath(Path.Combine(dataDir, qaLoop.Value.RunsFolderName));
@@ -129,6 +132,9 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
 
         sw.Stop();
         WriteAllureContext(runDir, spec);
+        var allureResultsDir = Path.Combine(runDir, "allure-results");
+        if (Directory.Exists(allureResultsDir))
+            await _enricher.EnrichAsync(allureResultsDir, spec, eventKey, ct);
         var reportPath = await GenerateAllureReportAsync(runDir, spec, eventKey, ct);
         var junit = ParseJUnit(junitPath);
 
@@ -149,6 +155,21 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
             ReportPath      = reportPath,
             FailedTests     = junit.FailedTests,
         };
+    }
+
+    /// <summary>Re-enrich + regenerate the Allure report for an already-executed run from its
+    /// preserved allure-results — no Playwright execution, no ADO writes. Returns the new report
+    /// index.html path, or null when the run left no allure-results behind.</summary>
+    public async Task<string?> RebuildReportAsync(PlaywrightRunSpec spec, string eventKey, CancellationToken ct = default)
+    {
+        await EnsureRuntimeAsync(eventKey, ct);
+        var runDir = Path.Combine(_runsDir, spec.RunId.ToString());
+        var resultsDir = Path.Combine(runDir, "allure-results");
+        if (!Directory.Exists(resultsDir)) return null;
+
+        WriteAllureContext(runDir, spec);
+        await _enricher.EnrichAsync(resultsDir, spec, eventKey, ct);
+        return await GenerateAllureReportAsync(runDir, spec, eventKey, ct);
     }
 
     // ── Runtime provisioning (once) ──────────────────────────────────────────
@@ -316,32 +337,36 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
             return FallbackReportPath(runDir);
         }
 
-        // Seed history store into allure-results/history/ for trend continuity
-        SeedHistory(resultsDir, spec);
-
         try
         {
             Pub(eventKey, EventKinds.System, "run", "Generating Allure report…");
-            // Allure 3's `generate` has no --single-file or --clean flag (confirmed via `allure
-            // generate --help`: only --config/-o/--cwd/--report-name/--dump/--open/--port/
-            // --history-limit/--hide-labels exist) — passing either produced "Unknown Syntax
-            // Error" and silently fell back to no report on every run. Delete reportDir ourselves
-            // to get --clean's effect; the report is unavoidably a multi-file directory, served via
-            // the report/{subPath} catch-all in QaRunsController.
+            // `allure awesome` (not `generate`) because it exposes the two things the report needs
+            // (confirmed against the installed 3.14 CLI source):
+            //  - --history-path: Allure 3 keeps history in a single .jsonl the generator both reads
+            //    AND appends — the Allure-2-style history/ folder copying never did anything here.
+            //  - default --group-by is parentSuite,suite,subSuite — exactly the labels
+            //    AllureEnricher rewrites, so the tree groups by Contract/Endpoint/Workflow level.
+            // No --clean flag exists; delete reportDir ourselves. The report is unavoidably a
+            // multi-file directory, served via the report/{subPath} catch-all in QaRunsController.
             if (Directory.Exists(reportDir))
                 Directory.Delete(reportDir, recursive: true);
+            var historyFile = HistoryFile(spec);
+            Directory.CreateDirectory(Path.GetDirectoryName(historyFile)!);
+            // ASCII-only name, and NO --history-limit: `allure awesome` doesn't define that option
+            // (only `generate`/`history` do) and clipanion fails the whole command with
+            // "Unknown Syntax Error: Command not found" on any unknown flag.
+            var reportName = $"QA Loop Run {spec.RunId} - {spec.Module}";
             var genExit = await SpawnAsync(
-                "npx", $"allure generate {EscPath(resultsDir)} -o {EscPath(reportDir)}",
+                "npx",
+                $"allure awesome {EscPath(resultsDir)} -o {EscPath(reportDir)} " +
+                $"--history-path {EscPath(historyFile)} --report-name \"{reportName}\"",
                 runDir, profile: null, eventKey, ct);
 
             if (genExit != 0)
             {
-                _log.LogWarning("Run {RunId}: allure generate exited {Code}", spec.RunId, genExit);
+                _log.LogWarning("Run {RunId}: allure awesome exited {Code}", spec.RunId, genExit);
                 return FallbackReportPath(runDir);
             }
-
-            // Copy fresh history back to server-side store
-            CopyHistoryBack(resultsDir, spec);
 
             // Single-file is typically index.html; fall back to any .html in the report dir
             var singleFile = Path.Combine(reportDir, "index.html");
@@ -370,31 +395,13 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
         return File.Exists(pwHtml) ? pwHtml : null;
     }
 
-    private void SeedHistory(string resultsDir, PlaywrightRunSpec spec)
-    {
-        var storeDir = HistoryStoreDir(spec);
-        if (!Directory.Exists(storeDir)) return;
-        var histDest = Path.Combine(resultsDir, "history");
-        Directory.CreateDirectory(histDest);
-        foreach (var f in Directory.EnumerateFiles(storeDir))
-            File.Copy(f, Path.Combine(histDest, Path.GetFileName(f)), overwrite: true);
-    }
-
-    private void CopyHistoryBack(string resultsDir, PlaywrightRunSpec spec)
-    {
-        var histSrc = Path.Combine(resultsDir, "history");
-        if (!Directory.Exists(histSrc)) return;
-        var storeDir = HistoryStoreDir(spec);
-        Directory.CreateDirectory(storeDir);
-        foreach (var f in Directory.EnumerateFiles(histSrc))
-            File.Copy(f, Path.Combine(storeDir, Path.GetFileName(f)), overwrite: true);
-    }
-
-    private string HistoryStoreDir(PlaywrightRunSpec spec)
+    /// <summary>Allure 3 history file (.jsonl, read + appended by `allure awesome`), kept per
+    /// module+pipeline so trend charts compare like-for-like runs.</summary>
+    private string HistoryFile(PlaywrightRunSpec spec)
     {
         var moduleKey   = string.IsNullOrEmpty(spec.Module) ? "_all" : spec.Module;
         var pipelineKey = spec.TriggerPipelineId?.ToString() ?? "manual";
-        return Path.Combine(_historyDir, moduleKey, pipelineKey);
+        return Path.Combine(_historyDir, moduleKey, pipelineKey, "history.jsonl");
     }
 
     // ── Allure context files (QAL-056) ───────────────────────────────────────
@@ -408,24 +415,37 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
 
             // environment.properties
             var env = new StringBuilder();
+            env.AppendLine($"run.id={spec.RunId}");
             env.AppendLine($"profile={spec.Profile}");
             env.AppendLine($"module={spec.Module}");
+            if (!string.IsNullOrEmpty(spec.LevelFilter)) env.AppendLine($"level.filter={spec.LevelFilter}");
             env.AppendLine($"trigger.source={spec.TriggerSourceWire}");
             if (spec.TriggerBuildId.HasValue)  env.AppendLine($"build.id={spec.TriggerBuildId}");
             if (!string.IsNullOrEmpty(spec.TriggerCommitSha)) env.AppendLine($"commit={spec.TriggerCommitSha}");
             if (spec.AdoTestRunId.HasValue)    env.AppendLine($"ado.test.run.id={spec.AdoTestRunId}");
+
+            // Impact analysis (pipeline-triggered runs): why this run happened and what changed.
+            if (!string.IsNullOrEmpty(spec.ImpactAnalysisJson))
+            {
+                try
+                {
+                    var impact = JsonSerializer.Deserialize<ImpactAnalysis>(spec.ImpactAnalysisJson);
+                    if (impact is not null)
+                    {
+                        env.AppendLine($"impact.impacted.tests={impact.ImpactedDraftIds.Count}");
+                        env.AppendLine($"impact.confidence={impact.Confidence}");
+                        var reasoning = impact.Reasoning.ReplaceLineEndings(" ").Trim();
+                        if (reasoning.Length > 400) reasoning = reasoning[..400] + "…";
+                        if (reasoning.Length > 0) env.AppendLine($"impact.reasoning={reasoning}");
+                    }
+                }
+                catch (JsonException) { /* malformed impact JSON — report still generates */ }
+            }
             File.WriteAllText(Path.Combine(resultsDir, "environment.properties"), env.ToString());
 
-            // categories.json — maps Allure failure statuses to our triage taxonomy
-            var categories = """
-                [
-                  { "name": "Real Bug",    "matchedStatuses": ["failed"] },
-                  { "name": "Flaky",       "matchedStatuses": ["failed"] },
-                  { "name": "Test Issue",  "matchedStatuses": ["broken"] },
-                  { "name": "Stale Test",  "matchedStatuses": ["skipped"] }
-                ]
-                """;
-            File.WriteAllText(Path.Combine(resultsDir, "categories.json"), categories);
+            // No categories.json: Allure 3 ignores the Allure-2 file and ships a built-in
+            // "Product errors" view that groups failures by assertion message — which already
+            // separates "Expected 200 / Received 500" from "Expected 500 / Received [400,422]" etc.
 
             // executor.json — deep links to ADO build + ADO Test Run
             var buildUrl = spec.TriggerBuildId.HasValue
@@ -592,6 +612,27 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
 
     // ── JUnit parser ─────────────────────────────────────────────────────────
 
+    /// <summary>Pull the meaningful assertion out of a Playwright JUnit failure/error body. The raw
+    /// text starts with the "[chromium] › file.spec.ts:line › …" locator; we skip that and surface the
+    /// Error/Expected/Received lines so the failure reason + bug draft show WHY it failed.</summary>
+    private static string? ExtractErrorMessage(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        var lines = raw.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+        static bool IsLocator(string l) => l.StartsWith('[') && (l.Contains('\u203a') || l.Contains(".spec.ts"));
+        var meaningful = lines.Where(l => !IsLocator(l)).ToList();
+        if (meaningful.Count == 0) meaningful = lines;
+        var errorLine = meaningful.FirstOrDefault(l =>
+            l.StartsWith("Error:", StringComparison.OrdinalIgnoreCase) || l.Contains("expect(", StringComparison.OrdinalIgnoreCase));
+        var expected = meaningful.FirstOrDefault(l => l.StartsWith("Expected:", StringComparison.OrdinalIgnoreCase));
+        var received = meaningful.FirstOrDefault(l => l.StartsWith("Received:", StringComparison.OrdinalIgnoreCase));
+        var parts = new List<string>();
+        if (errorLine is not null) parts.Add(errorLine);
+        if (expected is not null) parts.Add(expected);
+        if (received is not null) parts.Add(received);
+        return parts.Count > 0 ? string.Join("  ", parts) : meaningful[0];
+    }
+
     private (int Passed, int Failed, int Skipped, IReadOnlyList<FailedTestResult> FailedTests)
         ParseJUnit(string junitPath)
     {
@@ -628,8 +669,7 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
                     return new FailedTestResult
                     {
                         TestTitle    = tc.Attribute("name")?.Value ?? "",
-                        ErrorMessage = (tc.Element("failure") ?? tc.Element("error"))?.Value
-                            ?.Split('\n').FirstOrDefault()?.Trim(),
+                        ErrorMessage = ExtractErrorMessage((tc.Element("failure") ?? tc.Element("error"))?.Value),
                         SpecFilePath = string.IsNullOrEmpty(suiteFile) ? null : suiteFile,
                     };
                 })

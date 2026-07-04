@@ -35,8 +35,14 @@ public sealed class TestRun
     /// <summary>Captures qaloop.activity_enabled at row creation; false suppresses Playwright stdout streaming.</summary>
     public bool ActivityEnabled { get; set; } = true;
 
+    /// <summary>Serialized List&lt;LevelStat&gt; — per-level executed/passed/failed, set at run completion.</summary>
+    public string? LevelBreakdownJson { get; set; }
+
     public List<TestFailure> Failures { get; set; } = [];
 }
+
+/// <summary>Per-level run stats serialized into <see cref="TestRun.LevelBreakdownJson"/>.</summary>
+public sealed record LevelStat(string Level, int Executed, int Passed, int Failed);
 
 /// <summary>One failed test from a TestRun, with AI triage state. Table: TestFailures.</summary>
 public sealed class TestFailure
