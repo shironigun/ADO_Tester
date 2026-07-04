@@ -1,7 +1,7 @@
-# QA Automation — YourProduct / Your Project
+# QA Automation
 
-Locally-hosted web app for Mahmood (BA, YourOrg). It turns Azure DevOps stories into
-test cases and bug reports in his QA style, runs a 3-level **API-test automation loop** (scan a
+Locally-hosted web app that turns Azure DevOps stories into
+test cases and bug reports in a QA author's house style, runs a 3-level **API-test automation loop** (scan a
 module → generate Playwright specs + ADO Test Cases → execute impact-selected runs off a watched
 pipeline → triage failures into draft bugs → post to Teams), and produces a weekly HTML report of
 board activity. Every page — and how it works under the hood — is documented in **[§7 — Features](#7--features-what-the-app-does-and-how-it-works)**.
@@ -51,7 +51,7 @@ Install these once. Confirm each with the version command.
 You also need at least one of these credentials:
 
 - **Azure DevOps PAT** with scopes **Work Items R/W**, **Test Management R/W**, **Code Read** —
-  create at <https://dev.azure.com/your-org/_usersSettings/tokens>
+  create at <https://dev.azure.com/{your-org}/_usersSettings/tokens>
 - **At least one LLM provider** — pick any:
   - **Claude CLI** *(default — no key, no per-run cost)* — uses your local `claude` CLI login (Pro/Max sub)
   - Anthropic API key (paid) → <https://console.anthropic.com>
@@ -65,7 +65,7 @@ You also need at least one of these credentials:
 ### 2.1 Locate the project
 
 ```powershell
-cd C:\Users\ahmadmah\Downloads\Projects\ADO_Tester
+cd C:\path\to\ADO_Tester
 ```
 
 ### 2.2 Create the `.env` file (secrets)
@@ -102,12 +102,12 @@ OPENAI_API_KEY=<GitHub PAT or OpenAI key>
 OPENAI_MODEL=gpt-4o-mini
 ```
 
-ADO org/project default to `YourOrg` / `Your Project`. Override in **Settings** page later.
+Set your ADO org and project on the **Settings** page (values saved there override anything in `.env`).
 
 ### 2.3 Backend — restore + build
 
 ```powershell
-cd C:\Users\ahmadmah\Downloads\Projects\ADO_Tester\backend
+cd C:\path\to\ADO_Tester\backend
 dotnet restore
 dotnet build
 ```
@@ -119,7 +119,7 @@ and seeds the default project.
 ### 2.4 Frontend — install npm deps
 
 ```powershell
-cd C:\Users\ahmadmah\Downloads\Projects\ADO_Tester\client
+cd C:\path\to\ADO_Tester\client
 npm install
 ```
 
@@ -132,7 +132,7 @@ You need **two terminals** — one for backend, one for frontend.
 ### Terminal 1 — Backend
 
 ```powershell
-cd C:\Users\ahmadmah\Downloads\Projects\ADO_Tester\backend
+cd C:\path\to\ADO_Tester\backend
 dotnet run --project src\QaAutomation.Api
 ```
 
@@ -142,7 +142,7 @@ This launches on <http://localhost:5250> (the `http` profile) in Development mod
 ### Terminal 2 — Frontend
 
 ```powershell
-cd C:\Users\ahmadmah\Downloads\Projects\ADO_Tester\client
+cd C:\path\to\ADO_Tester\client
 npm run dev
 ```
 
@@ -170,7 +170,7 @@ After both terminals are up, open the app and:
 
 1. **Settings → System diagnostics → Check** — should show ADOACCESS_PAT = Present and your
    chosen LLM provider = Present.
-2. **Settings → System diagnostics → Azure DevOps** — type any work item ID (e.g. `171740`) →
+2. **Settings → System diagnostics → Azure DevOps** — type any valid work item ID from your project →
    **Read** → title/description fills.
 3. **Settings → System diagnostics → LLM ping → Ping** — should return `[ProviderName] OK`.
 
@@ -208,7 +208,7 @@ Settings → LLM Providers → Claude CLI:
 ### Run unit tests
 
 ```powershell
-cd C:\Users\ahmadmah\Downloads\Projects\ADO_Tester\backend
+cd C:\path\to\ADO_Tester\backend
 dotnet test
 ```
 
@@ -218,7 +218,7 @@ EF Core migrations apply automatically on the next backend start, so you only ne
 Install the EF tool once with `dotnet tool install --global dotnet-ef`, then:
 
 ```powershell
-cd C:\Users\ahmadmah\Downloads\Projects\ADO_Tester\backend
+cd C:\path\to\ADO_Tester\backend
 dotnet ef migrations add DescribeTheChange `
   --project src\QaAutomation.Infrastructure `
   --startup-project src\QaAutomation.Api
@@ -231,14 +231,14 @@ Deletes the SQLite DB, all uploaded `.md` knowledgebase files, and all generated
 Keeps `.env`. The DB + FTS index are rebuilt automatically on the next backend start.
 
 ```powershell
-cd C:\Users\ahmadmah\Downloads\Projects\ADO_Tester
+cd C:\path\to\ADO_Tester
 Remove-Item -Recurse -Force backend\data
 ```
 
 ### Build the frontend for production preview
 
 ```powershell
-cd C:\Users\ahmadmah\Downloads\Projects\ADO_Tester\client
+cd C:\path\to\ADO_Tester\client
 npm run build
 npm run preview         # serves the built bundle on http://localhost:4173
 ```
@@ -249,7 +249,7 @@ same-origin / Vite dev proxy.
 ### Build the whole backend solution
 
 ```powershell
-cd C:\Users\ahmadmah\Downloads\Projects\ADO_Tester\backend
+cd C:\path\to\ADO_Tester\backend
 dotnet build QaAutomation.sln
 ```
 
@@ -369,8 +369,8 @@ Also supports "bug from a failed test verdict" (instant, or agent-reviewed). Orc
 
 **What:** run the generated specs and turn failures into bugs. **How (the flow):**
 
-1. **Start** — pick a module (optionally filtered by level/tag) and a **DMS profile** (*Infinity* is
-   the credentialed MVP target; Ideal/Aspen/Quantum are reserved). Runs can also be fired for you by a
+1. **Start** — pick a module (optionally filtered by level/tag) and a target **DMS profile** (one
+   profile is credentialed for the MVP; the others are reserved). Runs can also be fired for you by a
    pipeline watcher (§7.7).
 2. **Execute** — `PlaywrightRunner` provisions a Node runtime once, then runs the selected specs
    against the profile's base URL + bearer token; results are parsed from JUnit XML into
@@ -405,7 +405,7 @@ Orchestrated by `RunExecutionService` + `ResultsIngestService`, with `TeamsNotif
 range + boards + theme → the backend pulls the tickets, an LLM summarizer groups them into
 themes / wins / risks, and `ReportHtmlBuilder` renders a fully self-contained `.html` file (Executive /
 Standup / Branded themes) saved under `backend/data/reports/` and viewable or downloadable in-app. A
-hosted scheduler auto-fires it **Thursday 11:00 Asia/Karachi** (toggle + defaults live in Settings)
+hosted scheduler auto-fires it **Thursday 11:00 (local time)** (toggle + defaults live in Settings)
 whenever the app is running — there is no catch-up for a missed slot.
 
 ### 7.9 — Settings & Diagnostics (`/settings`)
@@ -436,7 +436,7 @@ whenever the app is running — there is no catch-up for a missed slot.
 | `x-api-key header is required` / Anthropic 401                              | You selected Anthropic in the dropdown but `ANTHROPIC_API_KEY` is empty. Either fill it, or switch to a different provider (e.g. Claude CLI) in the AppBar.   |
 | `Claude CLI '...' not found on PATH`                                        | Either install Claude Code and log in (`claude --version` should work in a fresh terminal), or set an absolute path in Settings → LLM Providers → Claude CLI. |
 | LLM ping times out                                                          | Increase **Timeout** in Settings, or switch provider. CLI calls take 2–5s by nature.                                                                          |
-| Thursday auto-report didn't fire                                            | The backend must be running at 11:00 Asia/Karachi on Thursday. If the machine was asleep, just hit **Generate** on the Reports page for the past 7 days.      |
+| Thursday auto-report didn't fire                                            | The backend must be running at 11:00 (local time) on Thursday. If the machine was asleep, just hit **Generate** on the Reports page for the past 7 days.      |
 | Port 5250 / 5173 already in use                                             | `Get-NetTCPConnection -LocalPort 5250 -State Listen \| Select-Object -ExpandProperty OwningProcess \| Stop-Process -Force`                                    |
 
 ---
