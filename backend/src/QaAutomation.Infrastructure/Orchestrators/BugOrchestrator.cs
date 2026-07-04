@@ -756,7 +756,7 @@ public sealed class BugOrchestrator : IBugOrchestrator
                 var reproSteps = ParseStringList(draft.ReproStepsJson);
                 var bugId = await _ado.CreateBugAsync(
                     draft.Title, draft.Severity.ToString(), draft.Preconditions, reproSteps,
-                    draft.ExpectedBehavior, draft.ActualBehavior, draft.SuggestedFix, ct);
+                    draft.ExpectedBehavior, draft.ActualBehavior, draft.SuggestedFix, ct: ct);
 
                 session.CurrentActivity = $"Pushing {n}/{drafts.Count}: linking Bug #{bugId} to story";
                 await db.SaveChangesAsync(ct);

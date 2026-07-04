@@ -26,6 +26,13 @@ public sealed class QaDbContext : DbContext
     public DbSet<Batch> Batches => Set<Batch>();
     public DbSet<ErrorLog> ErrorLogs => Set<ErrorLog>();
 
+    // ── QA Loop DbSets ────────────────────────────────────────────────────────
+    public DbSet<ApiTestSession> ApiTestSessions => Set<ApiTestSession>();
+    public DbSet<ApiTestDraft> ApiTestDrafts => Set<ApiTestDraft>();
+    public DbSet<TestRun> TestRuns => Set<TestRun>();
+    public DbSet<TestFailure> TestFailures => Set<TestFailure>();
+    public DbSet<PipelineWatch> PipelineWatches => Set<PipelineWatch>();
+
     protected override void OnModelCreating(ModelBuilder model)
     {
         // BatchModule/BatchMode store their kebab/lowercase wire value (NOT the C# member name).
@@ -34,6 +41,16 @@ public sealed class QaDbContext : DbContext
         var modeConverter = new ValueConverter<BatchMode?, string?>(
             v => v == null ? null : v.Value.ToWire(),
             v => v == null ? null : BatchEnumExtensions.ToBatchMode(v));
+
+        // QA Loop wire-string enum converters (kebab/snake_case DB values).
+        var testLevelConverter = new ValueConverter<TestLevel, string>(
+            v => v.ToWire(), v => QaLoopEnumExtensions.ToTestLevel(v));
+        var failureClassConverter = new ValueConverter<FailureClassification, string>(
+            v => v.ToWire(), v => QaLoopEnumExtensions.ToFailureClassification(v));
+        var triggerSourceConverter = new ValueConverter<TriggerSource, string>(
+            v => v.ToWire(), v => QaLoopEnumExtensions.ToTriggerSource(v));
+        var dmsProfileConverter = new ValueConverter<DmsProfile, string>(
+            v => v.ToWire(), v => QaLoopEnumExtensions.ToDmsProfile(v));
 
         model.Entity<Project>(e =>
         {
@@ -198,6 +215,134 @@ public sealed class QaDbContext : DbContext
             e.Property(x => x.Path).HasColumnName("Path");
             e.Property(x => x.Context).HasColumnName("Context");
             e.HasIndex(x => x.CreatedAt).HasDatabaseName("ix_ErrorLogs_CreatedAt");
+        });
+
+        // ── QA Loop tables (AddQaLoopReshape migration) ───────────────────────
+
+        model.Entity<ApiTestSession>(e =>
+        {
+            e.ToTable("ApiTestSessions");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("Id").ValueGeneratedOnAdd();
+            e.Property(x => x.ProjectId).HasColumnName("ProjectId").IsRequired();
+            e.Property(x => x.Module).HasColumnName("Module").IsRequired();
+            e.Property(x => x.Repository).HasColumnName("Repository");
+            e.Property(x => x.Branch).HasColumnName("Branch");
+            e.Property(x => x.WorkItemId).HasColumnName("WorkItemId");
+            e.Property(x => x.WorkItemTitle).HasColumnName("WorkItemTitle");
+            e.Property(x => x.TestPlanId).HasColumnName("TestPlanId");
+            e.Property(x => x.TestSuiteId).HasColumnName("TestSuiteId");
+            e.Property(x => x.SourceDirsJson).HasColumnName("SourceDirsJson");
+            e.Property(x => x.FrontendModule).HasColumnName("FrontendModule");
+            e.Property(x => x.FrontendPath).HasColumnName("FrontendPath");
+            e.Property(x => x.Status).HasColumnName("Status").HasConversion<string>().IsRequired();
+            e.Property(x => x.InventoryJson).HasColumnName("InventoryJson");
+            e.Property(x => x.AnalysisJson).HasColumnName("AnalysisJson");
+            e.Property(x => x.EventLogJson).HasColumnName("EventLogJson");
+            e.Property(x => x.ErrorMessage).HasColumnName("ErrorMessage");
+            e.Property(x => x.AutoHandoff).HasColumnName("AutoHandoff").IsRequired();
+            e.Property(x => x.ActivityEnabled).HasColumnName("ActivityEnabled").IsRequired().HasDefaultValue(true);
+            e.Property(x => x.CreatedAt).HasColumnName("CreatedAt").IsRequired();
+            e.Property(x => x.UpdatedAt).HasColumnName("UpdatedAt").IsRequired();
+            e.HasIndex(x => new { x.ProjectId, x.CreatedAt }).HasDatabaseName("ix_ApiTestSessions_ProjectId_CreatedAt");
+            e.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.Drafts).WithOne().HasForeignKey(d => d.SessionId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        model.Entity<ApiTestDraft>(e =>
+        {
+            e.ToTable("ApiTestDrafts");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("Id").ValueGeneratedOnAdd();
+            e.Property(x => x.SessionId).HasColumnName("SessionId").IsRequired();
+            e.Property(x => x.Level).HasColumnName("Level").HasConversion(testLevelConverter).IsRequired();
+            e.Property(x => x.Title).HasColumnName("Title").IsRequired();
+            e.Property(x => x.Preconditions).HasColumnName("Preconditions").IsRequired();
+            e.Property(x => x.StepsJson).HasColumnName("StepsJson").IsRequired();
+            e.Property(x => x.SchemaJson).HasColumnName("SchemaJson");
+            e.Property(x => x.SpecCode).HasColumnName("SpecCode").IsRequired();
+            e.Property(x => x.SpecFilePath).HasColumnName("SpecFilePath");
+            e.Property(x => x.CaseIndex).HasColumnName("CaseIndex");
+            e.Property(x => x.Tags).HasColumnName("Tags");
+            e.Property(x => x.SourceRoutesJson).HasColumnName("SourceRoutesJson");
+            e.Property(x => x.ErrorMessage).HasColumnName("ErrorMessage");
+            e.Property(x => x.Status).HasColumnName("Status").HasConversion<string>().IsRequired();
+            e.Property(x => x.AdoTestCaseId).HasColumnName("AdoTestCaseId");
+            e.Property(x => x.SortOrder).HasColumnName("SortOrder").IsRequired();
+            e.Property(x => x.CreatedAt).HasColumnName("CreatedAt").IsRequired();
+            e.Property(x => x.UpdatedAt).HasColumnName("UpdatedAt").IsRequired();
+            e.HasIndex(x => x.SessionId).HasDatabaseName("ix_ApiTestDrafts_SessionId");
+        });
+
+        model.Entity<TestRun>(e =>
+        {
+            e.ToTable("TestRuns");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("Id").ValueGeneratedOnAdd();
+            e.Property(x => x.ProjectId).HasColumnName("ProjectId").IsRequired();
+            e.Property(x => x.Module).HasColumnName("Module");
+            e.Property(x => x.LevelFilter).HasColumnName("LevelFilter");
+            e.Property(x => x.TagFilter).HasColumnName("TagFilter");
+            e.Property(x => x.Profile).HasColumnName("Profile").HasConversion(dmsProfileConverter).IsRequired();
+            e.Property(x => x.TestPlanId).HasColumnName("TestPlanId");
+            e.Property(x => x.TestSuiteId).HasColumnName("TestSuiteId");
+            e.Property(x => x.TriggerSource).HasColumnName("TriggerSource").HasConversion(triggerSourceConverter).IsRequired();
+            e.Property(x => x.TriggerPipelineId).HasColumnName("TriggerPipelineId");
+            e.Property(x => x.TriggerBuildId).HasColumnName("TriggerBuildId");
+            e.Property(x => x.TriggerCommitSha).HasColumnName("TriggerCommitSha");
+            e.Property(x => x.ImpactAnalysisJson).HasColumnName("ImpactAnalysisJson");
+            e.Property(x => x.Status).HasColumnName("Status").HasConversion<string>().IsRequired();
+            e.Property(x => x.Passed).HasColumnName("Passed").IsRequired();
+            e.Property(x => x.Failed).HasColumnName("Failed").IsRequired();
+            e.Property(x => x.Skipped).HasColumnName("Skipped").IsRequired();
+            e.Property(x => x.DurationMs).HasColumnName("DurationMs").IsRequired();
+            e.Property(x => x.JunitPath).HasColumnName("JunitPath");
+            e.Property(x => x.ReportPath).HasColumnName("ReportPath");
+            e.Property(x => x.AdoTestRunId).HasColumnName("AdoTestRunId");
+            e.Property(x => x.ErrorMessage).HasColumnName("ErrorMessage");
+            e.Property(x => x.StartedAt).HasColumnName("StartedAt");
+            e.Property(x => x.FinishedAt).HasColumnName("FinishedAt");
+            e.Property(x => x.CreatedAt).HasColumnName("CreatedAt").IsRequired();
+            e.Property(x => x.ActivityEnabled).HasColumnName("ActivityEnabled").IsRequired().HasDefaultValue(true);
+            e.HasIndex(x => new { x.ProjectId, x.CreatedAt }).HasDatabaseName("ix_TestRuns_ProjectId_CreatedAt");
+            e.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.Failures).WithOne().HasForeignKey(f => f.RunId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        model.Entity<TestFailure>(e =>
+        {
+            e.ToTable("TestFailures");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("Id").ValueGeneratedOnAdd();
+            e.Property(x => x.RunId).HasColumnName("RunId").IsRequired();
+            e.Property(x => x.TestTitle).HasColumnName("TestTitle").IsRequired();
+            e.Property(x => x.AdoTestCaseId).HasColumnName("AdoTestCaseId");
+            e.Property(x => x.Classification).HasColumnName("Classification").HasConversion(failureClassConverter).IsRequired();
+            e.Property(x => x.Confidence).HasColumnName("Confidence").IsRequired();
+            e.Property(x => x.Reason).HasColumnName("Reason").IsRequired();
+            e.Property(x => x.BugDraftJson).HasColumnName("BugDraftJson");
+            e.Property(x => x.BugId).HasColumnName("BugId");
+            e.Property(x => x.ArtifactPaths).HasColumnName("ArtifactPaths");
+            e.HasIndex(x => x.RunId).HasDatabaseName("ix_TestFailures_RunId");
+        });
+
+        model.Entity<PipelineWatch>(e =>
+        {
+            e.ToTable("PipelineWatches");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("Id").ValueGeneratedOnAdd();
+            e.Property(x => x.ProjectId).HasColumnName("ProjectId").IsRequired();
+            e.Property(x => x.AdoPipelineId).HasColumnName("AdoPipelineId").IsRequired();
+            e.Property(x => x.AdoPipelineName).HasColumnName("AdoPipelineName").IsRequired();
+            e.Property(x => x.Module).HasColumnName("Module").IsRequired();
+            e.Property(x => x.LastSeenBuildId).HasColumnName("LastSeenBuildId");
+            e.Property(x => x.LastPollAt).HasColumnName("LastPollAt");
+            e.Property(x => x.LastPollError).HasColumnName("LastPollError");
+            e.Property(x => x.Enabled).HasColumnName("Enabled").IsRequired().HasDefaultValue(true);
+            e.Property(x => x.CreatedAt).HasColumnName("CreatedAt").IsRequired();
+            e.Property(x => x.UpdatedAt).HasColumnName("UpdatedAt").IsRequired();
+            e.HasIndex(x => new { x.ProjectId, x.AdoPipelineId }).IsUnique().HasDatabaseName("ix_PipelineWatches_ProjectId_AdoPipelineId");
+            e.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

@@ -117,9 +117,10 @@ public sealed class AuthorTestsController : ControllerBase
         skip = Math.Max(0, skip);
         try
         {
-            var total = await _db.TestSessions.CountAsync(s => s.ProjectId == projectId, cancellationToken);
+            // Standalone sessions only — epic-run children (BatchId set) live under the Epic runs tab.
+            var total = await _db.TestSessions.CountAsync(s => s.ProjectId == projectId && s.BatchId == null, cancellationToken);
             var items = await _db.TestSessions
-                .Where(s => s.ProjectId == projectId)
+                .Where(s => s.ProjectId == projectId && s.BatchId == null)
                 .OrderByDescending(s => s.CreatedAt)
                 .Skip(skip).Take(take)
                 .ToListAsync(cancellationToken);
@@ -212,5 +213,27 @@ public sealed class AuthorTestsController : ControllerBase
     {
         await _orchestrator.PushToAdoAsync(sessionId, request.TestPlanId, request.TestSuiteId, cancellationToken);
         return StatusCode(202, new AcceptedResponse { Started = true });
+    }
+
+    [HttpPost("drafts/{draftId:int}/push")]
+    public async Task<IActionResult> PushDraft(int draftId, [FromBody] PushRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var draft = await _orchestrator.PushDraftAsync(draftId, request.TestPlanId, request.TestSuiteId, cancellationToken);
+            return Ok(TestCaseDraftDto.From(draft));
+        }
+        catch (AdoApiError e)
+        {
+            return StatusCode(502, new { detail = e.Message });
+        }
+        catch (InvalidOperationException e)
+        {
+            return StatusCode(404, new { detail = e.Message });
+        }
+        catch (Exception e)
+        {
+            return StatusCode(500, new { detail = e.Message });
+        }
     }
 }

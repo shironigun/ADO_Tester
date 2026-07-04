@@ -21,6 +21,28 @@ public sealed class SettingsController : ControllerBase
     private const string ClaudeModelNotes =
         "Aliases like 'sonnet'/'opus'/'haiku' auto-resolve to the current latest. Leave blank to use whatever the CLI defaults to (matches your Claude Code config).";
 
+    // Frozen suggestion list + notes for the copilot-cli model picker (GitHub Copilot CLI --model).
+    // Run `copilot -p "List all models" --allow-all-tools` to refresh this list.
+    private static readonly string[] CopilotModelSuggestions =
+    [
+        // Claude — Sonnet 4.6 (200k) and Opus 4.7/4.8 (1M context)
+        "claude-sonnet-4.6",
+        "claude-sonnet-4.5",
+        "claude-haiku-4.5",
+        "claude-opus-4.8",
+        "claude-opus-4.7",
+        "claude-opus-4.6",
+        "claude-opus-4.5",
+        // OpenAI
+        "gpt-5.4",
+        "gpt-5.3-codex",
+        "gpt-5-mini",
+        // Google
+        "gemini-3.1-pro-preview",
+    ];
+    private const string CopilotModelNotes =
+        "Leave blank to use the CLI's default. Run `copilot -p \"List all models\" --allow-all-tools` in a terminal to see your current entitlements — model availability depends on your Copilot plan.";
+
     private readonly ILlmProviderState _providerState;
     private readonly IAppSettingsService _settings;
     private readonly IAzureDevOpsClient _ado;
@@ -102,6 +124,10 @@ public sealed class SettingsController : ControllerBase
     public IActionResult ClaudeModels()
         => Ok(new { suggestions = ClaudeModelSuggestions, notes = ClaudeModelNotes });
 
+    [HttpGet("copilot-cli/models")]
+    public IActionResult CopilotModels()
+        => Ok(new { suggestions = CopilotModelSuggestions, notes = CopilotModelNotes });
+
     [HttpGet("ado/area-paths")]
     public async Task<IActionResult> AdoAreaPaths([FromQuery] string? organization, [FromQuery] string? project, CancellationToken cancellationToken)
     {
@@ -117,6 +143,64 @@ public sealed class SettingsController : ControllerBase
         catch (Exception e)
         {
             _log.LogWarning("ADO discover area paths failed for {Org} / {Proj}: {Error}", org, proj, e.Message);
+            return StatusCode(502, new { detail = e.Message });
+        }
+    }
+
+    [HttpGet("ado/repositories")]
+    public async Task<IActionResult> AdoRepositories(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var repos = await _ado.ListRepositoriesAsync(cancellationToken);
+            return Ok(new { repositories = repos.Select(r => r.Name) });
+        }
+        catch (Exception e)
+        {
+            _log.LogWarning("ADO discover repositories failed: {Error}", e.Message);
+            return StatusCode(502, new { detail = e.Message });
+        }
+    }
+
+    [HttpGet("ado/test-plans")]
+    public async Task<IActionResult> AdoTestPlans(CancellationToken cancellationToken)
+    {
+        try { return Ok(new { plans = await _ado.GetTestPlansAsync(cancellationToken) }); }
+        catch (Exception e) { _log.LogWarning("ADO test plans failed: {Error}", e.Message); return StatusCode(502, new { detail = e.Message }); }
+    }
+
+    [HttpGet("ado/test-suites")]
+    public async Task<IActionResult> AdoTestSuites([FromQuery] int planId, CancellationToken cancellationToken)
+    {
+        if (planId <= 0) return StatusCode(400, new { detail = "planId is required." });
+        try { return Ok(new { suites = await _ado.GetTestSuitesAsync(planId, cancellationToken) }); }
+        catch (Exception e) { _log.LogWarning("ADO test suites failed: {Error}", e.Message); return StatusCode(502, new { detail = e.Message }); }
+    }
+
+    [HttpGet("ado/test-cases")]
+    public async Task<IActionResult> AdoSuiteTestCases(
+        [FromQuery] int planId, [FromQuery] int suiteId, [FromQuery] bool recurse = true, CancellationToken cancellationToken = default)
+    {
+        if (planId <= 0 || suiteId <= 0) return StatusCode(400, new { detail = "planId and suiteId are required." });
+        try
+        {
+            var cases = await _ado.GetSuiteTestCasesAsync(planId, suiteId, recurse, cancellationToken);
+            return Ok(new { count = cases.Count, testCases = cases.Select(c => new { c.Id, c.Title, stepCount = c.Steps.Count }) });
+        }
+        catch (Exception e) { _log.LogWarning("ADO suite test cases failed: {Error}", e.Message); return StatusCode(502, new { detail = e.Message }); }
+    }
+
+    [HttpGet("ado/branches")]
+    public async Task<IActionResult> AdoBranches([FromQuery] string? repository, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var branches = await _ado.DiscoverBranchesAsync(repository, cancellationToken);
+            return Ok(new { branches });
+        }
+        catch (Exception e)
+        {
+            _log.LogWarning("ADO discover branches failed: {Error}", e.Message);
             return StatusCode(502, new { detail = e.Message });
         }
     }

@@ -32,6 +32,11 @@ export async function getClaudeCliModels(): Promise<string[]> {
   return data.suggestions ?? []
 }
 
+export async function getCopilotCliModels(): Promise<string[]> {
+  const { data } = await api.get<{ suggestions: string[] }>('/api/settings/copilot-cli/models')
+  return data.suggestions ?? []
+}
+
 export async function getAdoOrgs(): Promise<string[]> {
   const { data } = await api.get<{ organizations: string[] }>('/api/settings/ado/orgs')
   return data.organizations ?? []
@@ -51,6 +56,34 @@ export async function getAdoAreaPaths(organization?: string, project?: string): 
   if (project) params.project = project
   const { data } = await api.get<{ areaPaths: string[] }>('/api/settings/ado/area-paths', { params })
   return data.areaPaths ?? []
+}
+
+export async function getAdoRepositories(): Promise<string[]> {
+  const { data } = await api.get<{ repositories: string[] }>('/api/settings/ado/repositories')
+  return data.repositories ?? []
+}
+
+// Optional repository arg: when omitted the backend falls back to the saved ado.repository.
+export async function getAdoBranches(repository?: string): Promise<string[]> {
+  const params: Record<string, string> = {}
+  if (repository) params.repository = repository
+  const { data } = await api.get<{ branches: string[] }>('/api/settings/ado/branches', { params })
+  return data.branches ?? []
+}
+
+// Test plans / suites — for the QA Loop module-analysis searchable dropdowns.
+export interface AdoTestPlan { id: number; name: string }
+export interface AdoTestSuite { id: number; name: string; parentId?: number | null }
+
+export async function getAdoTestPlans(): Promise<AdoTestPlan[]> {
+  const { data } = await api.get<{ plans: AdoTestPlan[] }>('/api/settings/ado/test-plans')
+  return data.plans ?? []
+}
+
+export async function getAdoTestSuites(planId: number): Promise<AdoTestSuite[]> {
+  const { data } = await api.get<{ suites: AdoTestSuite[] }>('/api/settings/ado/test-suites',
+    { params: { planId } })
+  return data.suites ?? []
 }
 
 export type { AdoProject }

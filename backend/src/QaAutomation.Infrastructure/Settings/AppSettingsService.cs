@@ -25,14 +25,20 @@ public sealed class AppSettingsService : IAppSettingsService
         "azure_openai.endpoint", "azure_openai.api_key", "azure_openai.deployment",
         "openai.base_url", "openai.api_key", "openai.model",
         "claude_cli.path", "claude_cli.model", "claude_cli.timeout_seconds",
+        "copilot_cli.path", "copilot_cli.model", "copilot_cli.context", "copilot_cli.timeout_seconds",
         "defaults.test_plan_id", "defaults.test_suite_id",
         "reports.default_boards", "reports.schedule_enabled", "reports.default_range_days",
         "reports.team_name", "reports.ticket_types",
         "find_bugs.verify_detail", "find_bugs.verify_step_scope", "find_bugs.bug_from_case_mode",
+        "teams.webhook_url", "teams.template",
+        "qaloop.poll_interval_minutes", "qaloop.report_provider", "qaloop.activity_enabled",
+        "qaloop.frontend_repo", "qaloop.frontend_root", "qaloop.frontend_base_url",
+        "qaloop.default_repository", "qaloop.default_branch",
+        "qaloop.default_plan_id", "qaloop.default_suite_id",
     ];
 
     public static readonly IReadOnlySet<string> SecretKeys =
-        new HashSet<string> { "ado.pat", "anthropic.api_key", "azure_openai.api_key", "openai.api_key" };
+        new HashSet<string> { "ado.pat", "anthropic.api_key", "azure_openai.api_key", "openai.api_key", "teams.webhook_url" };
 
     /// <summary>The option-backed keys whose effective value lives in the typed options (DB-or-env).</summary>
     private static readonly IReadOnlySet<string> OptionKeys = new HashSet<string>
@@ -42,6 +48,10 @@ public sealed class AppSettingsService : IAppSettingsService
         "azure_openai.endpoint", "azure_openai.api_key", "azure_openai.deployment",
         "openai.base_url", "openai.api_key", "openai.model",
         "claude_cli.path", "claude_cli.model", "claude_cli.timeout_seconds",
+        "copilot_cli.path", "copilot_cli.model", "copilot_cli.context", "copilot_cli.timeout_seconds",
+        "teams.webhook_url", "teams.template",
+        "qaloop.poll_interval_minutes", "qaloop.report_provider", "qaloop.activity_enabled",
+        "qaloop.frontend_repo", "qaloop.frontend_root", "qaloop.frontend_base_url",
     };
 
     // Static defaults for the non-option keys when unset (frozen env-default map).
@@ -53,6 +63,8 @@ public sealed class AppSettingsService : IAppSettingsService
         ["reports.ticket_types"] = "User Story;Bug;Defect;Task",
         ["find_bugs.verify_detail"] = "step", ["find_bugs.verify_step_scope"] = "fails_only",
         ["find_bugs.bug_from_case_mode"] = "instant",
+        ["qaloop.default_repository"] = "", ["qaloop.default_branch"] = "",
+        ["qaloop.default_plan_id"] = "", ["qaloop.default_suite_id"] = "",
     };
 
     private const string Mask = "••••••••";   // 8 bullets
@@ -64,21 +76,28 @@ public sealed class AppSettingsService : IAppSettingsService
     private readonly IOptionsMonitor<AzureOpenAiOptions> _azure;
     private readonly IOptionsMonitor<OpenAiCompatibleOptions> _openai;
     private readonly IOptionsMonitor<ClaudeCliOptions> _claudeCli;
+    private readonly IOptionsMonitor<CopilotCliOptions> _copilotCli;
+    private readonly IOptionsMonitor<QaLoopOptions> _qaLoop;
     private readonly IOptionsMonitorCache<AzureDevOpsOptions> _adoCache;
     private readonly IOptionsMonitorCache<AnthropicOptions> _anthropicCache;
     private readonly IOptionsMonitorCache<AzureOpenAiOptions> _azureCache;
     private readonly IOptionsMonitorCache<OpenAiCompatibleOptions> _openaiCache;
     private readonly IOptionsMonitorCache<ClaudeCliOptions> _claudeCliCache;
+    private readonly IOptionsMonitorCache<CopilotCliOptions> _copilotCliCache;
+    private readonly IOptionsMonitorCache<QaLoopOptions> _qaLoopCache;
     private readonly ILogger<AppSettingsService> _log;
 
     public AppSettingsService(
         IServiceScopeFactory scopes, RuntimeSettings runtime,
         IOptionsMonitor<AzureDevOpsOptions> ado, IOptionsMonitor<AnthropicOptions> anthropic,
         IOptionsMonitor<AzureOpenAiOptions> azure, IOptionsMonitor<OpenAiCompatibleOptions> openai,
-        IOptionsMonitor<ClaudeCliOptions> claudeCli,
+        IOptionsMonitor<ClaudeCliOptions> claudeCli, IOptionsMonitor<CopilotCliOptions> copilotCli,
+        IOptionsMonitor<QaLoopOptions> qaLoop,
         IOptionsMonitorCache<AzureDevOpsOptions> adoCache, IOptionsMonitorCache<AnthropicOptions> anthropicCache,
         IOptionsMonitorCache<AzureOpenAiOptions> azureCache, IOptionsMonitorCache<OpenAiCompatibleOptions> openaiCache,
-        IOptionsMonitorCache<ClaudeCliOptions> claudeCliCache, ILogger<AppSettingsService> log)
+        IOptionsMonitorCache<ClaudeCliOptions> claudeCliCache, IOptionsMonitorCache<CopilotCliOptions> copilotCliCache,
+        IOptionsMonitorCache<QaLoopOptions> qaLoopCache,
+        ILogger<AppSettingsService> log)
     {
         _scopes = scopes;
         _runtime = runtime;
@@ -87,11 +106,15 @@ public sealed class AppSettingsService : IAppSettingsService
         _azure = azure;
         _openai = openai;
         _claudeCli = claudeCli;
+        _copilotCli = copilotCli;
+        _qaLoop = qaLoop;
         _adoCache = adoCache;
         _anthropicCache = anthropicCache;
         _azureCache = azureCache;
         _openaiCache = openaiCache;
         _claudeCliCache = claudeCliCache;
+        _copilotCliCache = copilotCliCache;
+        _qaLoopCache = qaLoopCache;
         _log = log;
     }
 
@@ -167,6 +190,8 @@ public sealed class AppSettingsService : IAppSettingsService
         _azureCache.Clear();
         _openaiCache.Clear();
         _claudeCliCache.Clear();
+        _copilotCliCache.Clear();
+        _qaLoopCache.Clear();
     }
 
     private async Task<Dictionary<string, string>> LoadAsync(CancellationToken cancellationToken)
@@ -204,6 +229,18 @@ public sealed class AppSettingsService : IAppSettingsService
         "claude_cli.path" => _claudeCli.CurrentValue.Path,
         "claude_cli.model" => _claudeCli.CurrentValue.Model,
         "claude_cli.timeout_seconds" => _claudeCli.CurrentValue.TimeoutSeconds.ToString(),
+        "copilot_cli.path" => _copilotCli.CurrentValue.Path,
+        "copilot_cli.model" => _copilotCli.CurrentValue.Model,
+        "copilot_cli.context" => _copilotCli.CurrentValue.Context,
+        "copilot_cli.timeout_seconds" => _copilotCli.CurrentValue.TimeoutSeconds.ToString(),
+        "teams.webhook_url" => _qaLoop.CurrentValue.TeamsWebhookUrl,
+        "teams.template" => _qaLoop.CurrentValue.TeamsTemplate,
+        "qaloop.poll_interval_minutes" => _qaLoop.CurrentValue.PollIntervalMinutes.ToString(),
+        "qaloop.report_provider" => _qaLoop.CurrentValue.ReportProvider,
+        "qaloop.activity_enabled" => _qaLoop.CurrentValue.ActivityEnabled.ToString().ToLowerInvariant(),
+        "qaloop.frontend_repo" => _qaLoop.CurrentValue.FrontendRepo,
+        "qaloop.frontend_root" => _qaLoop.CurrentValue.FrontendRoot,
+        "qaloop.frontend_base_url" => _qaLoop.CurrentValue.FrontendBaseUrl,
         _ => "",
     };
 }

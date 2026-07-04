@@ -22,10 +22,25 @@ public sealed record TicketComment(string Author, string? Date, string Html);
 public sealed record TimelineEvent(string? Date, string Actor, string Kind, string Detail);
 
 public sealed record AdoTestPlan(int Id, string Name);
-public sealed record AdoTestSuite(int Id, string Name);
+public sealed record AdoTestSuite(int Id, string Name, int? ParentId = null);
+
+/// <summary>A pending outcome update for one auto-created ADO test result (PATCH by result id).</summary>
+public sealed record AdoTestResultUpdate(int ResultId, string Outcome, string? ErrorMessage, long DurationMs);
+
+// ── Build / pipeline reads ────────────────────────────────────────────────────
+public sealed record AdoBuild(int Id, string SourceVersion, string RepositoryId, DateTime FinishedAt);
+public sealed record AdoBuildChange(string Id, string Message);
 
 /// <summary>An id/name pair (discover projects, list repositories).</summary>
 public sealed record AdoNamedRef(string Id, string Name);
+
+/// <summary>A product frontend module discovered by parsing the SPA route file. Drives the QA Loop
+/// "New Scan" module dropdown; the scan reads ComponentPath's apis/ to trace the backend (QAL frontend-driven).</summary>
+/// <param name="ModuleName">First path segment after components/ (e.g. "deals"); becomes the session Module.</param>
+/// <param name="RoutePath">The SPA route (e.g. "/deals").</param>
+/// <param name="ComponentPath">Repo-relative frontend folder (e.g. "web-app/.../components/deals").</param>
+/// <param name="Url">Deployed URL for reference/display (baseUrl + RoutePath).</param>
+public sealed record FrontendModule(string ModuleName, string RoutePath, string ComponentPath, string Url);
 
 /// <summary>A work item's linked Git refs, parsed from its ArtifactLink relations.</summary>
 public sealed record GitRefs(IReadOnlyList<string> PullRequestIds, IReadOnlyList<string> CommitShas);

@@ -21,6 +21,11 @@ export const statusColors: Record<string, ChipColor> = {
   Done: 'success',
   Failed: 'error',
   Cancelled: 'default',
+  // TestRun statuses
+  Queued: 'info',
+  Running: 'warning',
+  Passed: 'success',
+  Error: 'error',
 }
 
 // Draft lifecycle (test-case + bug drafts).
@@ -34,4 +39,4 @@ export const sevColors: Record<string, ChipColor> = {
 }
 
 /** Statuses that mean an agent / background job is actively running. */
-export const IN_FLIGHT = ['Analyzing', 'Verifying', 'Drafting', 'Pushing', 'Generating']
+export const IN_FLIGHT = ['Analyzing', 'Verifying', 'Drafting', 'Pushing', 'Generating', 'Queued', 'Running']

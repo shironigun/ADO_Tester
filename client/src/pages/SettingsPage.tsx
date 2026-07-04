@@ -1,10 +1,9 @@
 /**
- * Settings — modern admin console.
+ * Settings — connections, providers, and defaults.
  *
- * Vertical tab nav (6 tabs) on the left, animated content on the right. On
- * narrow screens (<900px) the tabs flip to a scrollable bar across the top.
- * All save logic + API calls are preserved verbatim — only the render tree and
- * styling changed (now driven by the shared theme + components, no local serif).
+ * Vertical tab nav on the left, content on the right (tabs flip to a top bar
+ * under 900px). Save logic + API calls are unchanged — the UI was simplified:
+ * no raw setting-key labels, no per-field paragraphs, leaner headers.
  */
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import {
@@ -20,7 +19,6 @@ import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import SaveIcon from '@mui/icons-material/Save'
 import RefreshIcon from '@mui/icons-material/Refresh'
-import DashboardOutlinedIcon from '@mui/icons-material/DashboardOutlined'
 import CloudOutlinedIcon from '@mui/icons-material/CloudOutlined'
 import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined'
 import RuleOutlinedIcon from '@mui/icons-material/RuleOutlined'
@@ -28,6 +26,7 @@ import AssessmentOutlinedIcon from '@mui/icons-material/AssessmentOutlined'
 import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined'
 import HealthAndSafetyOutlinedIcon from '@mui/icons-material/HealthAndSafetyOutlined'
 import RadioButtonCheckedIcon from '@mui/icons-material/RadioButtonChecked'
+import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined'
 import PageHeader from '../components/PageHeader'
 import Section from '../components/Section'
 import { FadeIn, Stagger, StaggerItem } from '../motion/primitives'
@@ -35,13 +34,13 @@ import { MONO_FONT } from '../theme/tokens'
 import { apiUrl } from '../config/env'
 import { axiosMessage } from '../common/errors'
 import {
-  getConfig, saveConfig, getClaudeCliModels, getAdoOrgs, getAdoProjects, getAdoAreaPaths,
+  getConfig, saveConfig, getClaudeCliModels, getCopilotCliModels, getAdoOrgs, getAdoProjects, getAdoAreaPaths, getAdoBranches, getAdoRepositories,
   type Config, type AdoProject,
 } from '../api/settings'
 import { getEnvStatus, getWorkItem, pingLlm, type EnvStatus, type WorkItem } from '../api/diagnostics'
 import { getPlans, getSuites, type TestPlan, type TestSuite } from '../api/authorTests'
 
-// ── Type system + setting keys ─────────────────────────────────────────────
+// ── Setting keys ───────────────────────────────────────────────────────────
 const K = {
   ADO_ORG: 'ado.organization',
   ADO_PROJECT: 'ado.project',
@@ -59,6 +58,10 @@ const K = {
   CLAUDE_CLI_PATH: 'claude_cli.path',
   CLAUDE_CLI_MODEL: 'claude_cli.model',
   CLAUDE_CLI_TIMEOUT: 'claude_cli.timeout_seconds',
+  COPILOT_CLI_PATH: 'copilot_cli.path',
+  COPILOT_CLI_MODEL: 'copilot_cli.model',
+  COPILOT_CLI_CONTEXT: 'copilot_cli.context',
+  COPILOT_CLI_TIMEOUT: 'copilot_cli.timeout_seconds',
   DEFAULT_PLAN_ID: 'defaults.test_plan_id',
   DEFAULT_SUITE_ID: 'defaults.test_suite_id',
   DEFAULT_BOARDS: 'reports.default_boards',
@@ -69,124 +72,94 @@ const K = {
   VERIFY_DETAIL: 'find_bugs.verify_detail',
   VERIFY_STEP_SCOPE: 'find_bugs.verify_step_scope',
   BUG_FROM_CASE_MODE: 'find_bugs.bug_from_case_mode',
+  TEAMS_WEBHOOK: 'teams.webhook_url',
+  TEAMS_TEMPLATE: 'teams.template',
+  QALOOP_POLL: 'qaloop.poll_interval_minutes',
+  QALOOP_REPORT: 'qaloop.report_provider',
+  QALOOP_ACTIVITY: 'qaloop.activity_enabled',
+  QALOOP_DEFAULT_REPO: 'qaloop.default_repository',
+  QALOOP_DEFAULT_BRANCH: 'qaloop.default_branch',
+  QALOOP_DEFAULT_PLAN: 'qaloop.default_plan_id',
+  QALOOP_DEFAULT_SUITE: 'qaloop.default_suite_id',
 }
 
 const REPORT_TYPE_OPTIONS = ['User Story', 'Bug', 'Defect', 'Task', 'Issue', 'Feature']
 
-// Config / EnvStatus / WorkItem / TestPlan / TestSuite / AdoProject and axiosMessage are imported
-// from the api/* feature modules + common/errors (F1).
-
 // ── Reusable parts ─────────────────────────────────────────────────────────
 
-/** Section heading with a small mono "eyebrow" label — console feel. */
-function SectionHeader({
-  eyebrow, title, subtitle,
-}: { eyebrow: string; title: string; subtitle?: string }) {
+/** Compact tab heading — a title and one optional line. */
+function TabTitle({ title, hint }: { title: string; hint?: string }) {
   return (
-    <Box sx={{ mb: 3 }}>
-      <Typography variant="overline" sx={{ color: 'text.secondary', display: 'block' }}>{eyebrow}</Typography>
-      <Typography variant="h4" sx={{ lineHeight: 1.1, mb: subtitle ? 1 : 0 }}>{title}</Typography>
-      {subtitle && (
-        <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 760 }}>
-          {subtitle}
-        </Typography>
-      )}
+    <Box sx={{ mb: 2.5 }}>
+      <Typography variant="h5" sx={{ mb: hint ? 0.5 : 0 }}>{title}</Typography>
+      {hint && <Typography variant="body2" color="text.secondary">{hint}</Typography>}
     </Box>
   )
 }
 
 /** Subsection card — thin wrapper over the shared Section. */
-function Panel({
-  title, hint, children, action,
-}: { title?: string; hint?: string; children: ReactNode; action?: ReactNode }) {
-  return (
-    <Section title={title} subtitle={hint} action={action} dense={!!hint} padding={3}>
-      {children}
-    </Section>
-  )
-}
-
-/** mono "key" label rendered above a control — like a code identifier. */
-function FieldKey({ k }: { k: string }) {
-  return (
-    <Typography sx={{
-      fontFamily: MONO_FONT, fontSize: 10.5, letterSpacing: '0.08em',
-      color: 'text.secondary', textTransform: 'lowercase', mb: 0.6,
-    }}>{k}</Typography>
-  )
+function Panel({ title, children, action }: { title?: string; children: ReactNode; action?: ReactNode }) {
+  return <Section title={title} action={action} padding={3}>{children}</Section>
 }
 
 /** Save button — anchored to the right. */
 function SaveBar({ onClick, label = 'Save changes' }: { onClick: () => void; label?: string }) {
   return (
     <Stack direction="row" sx={{ justifyContent: 'flex-end', mt: 3 }}>
-      <Button variant="contained" startIcon={<SaveIcon />} onClick={onClick}>
-        {label}
-      </Button>
+      <Button variant="contained" startIcon={<SaveIcon />} onClick={onClick}>{label}</Button>
     </Stack>
   )
 }
 
-/** Status pill — used by the top status strip + diagnostics. */
+/** Status item — used by the header strip + diagnostics. */
 function StatusPill({ ok, label, value }: { ok: boolean; label: string; value?: string }) {
   return (
-    <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+    <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
       {ok
         ? <CheckCircleIcon fontSize="small" sx={{ color: 'success.main' }} />
         : <ErrorIcon fontSize="small" sx={{ color: 'error.main' }} />}
-      <Box>
-        <Typography sx={{
-          fontFamily: MONO_FONT, fontSize: 10, letterSpacing: '0.12em',
-          color: 'text.secondary', textTransform: 'uppercase',
-        }}>{label}</Typography>
-        <Typography variant="body2" sx={{
-          fontWeight: 600, color: ok ? 'success.main' : 'error.main',
-        }}>{value ?? (ok ? 'Configured' : 'Missing')}</Typography>
-      </Box>
+      <Typography variant="body2">
+        <Box component="span" sx={{ color: 'text.secondary' }}>{label}: </Box>
+        <Box component="span" sx={{ fontWeight: 600 }}>{value ?? (ok ? 'OK' : 'Missing')}</Box>
+      </Typography>
     </Stack>
   )
 }
 
 /** Secret-aware text input. Backend never echoes the value — only a `.set` flag. */
-function SecretField({ label, value, set, isSet, keyName }: {
-  label: string; value: string; set: (v: string) => void; isSet: boolean; keyName?: string
+function SecretField({ label, value, set, isSet }: {
+  label: string; value: string; set: (v: string) => void; isSet: boolean
 }) {
   const [shown, setShown] = useState(false)
   return (
-    <Box>
-      {keyName && <FieldKey k={keyName} />}
-      <TextField
-        label={isSet ? `${label} — Configured` : label}
-        size="small" fullWidth
-        type={shown ? 'text' : 'password'}
-        value={value}
-        onChange={e => set(e.target.value)}
-        placeholder={isSet ? 'Configured — leave blank to keep current value' : 'Not set'}
-        helperText={isSet
-          ? 'A value is stored. Type a new one to replace, or leave blank to keep it.'
-          : 'Not configured yet.'}
-        slotProps={{
-          input: {
-            startAdornment: isSet ? (
-              <InputAdornment position="start">
-                <Chip size="small" label="set" color="success" sx={{ height: 20, fontSize: 11 }} />
-              </InputAdornment>
-            ) : undefined,
-            endAdornment: (
-              <InputAdornment position="end">
-                <IconButton size="small" onClick={() => setShown(s => !s)} disabled={!value}>
-                  {shown ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
-                </IconButton>
-              </InputAdornment>
-            ),
-          },
-        }}
-      />
-    </Box>
+    <TextField
+      label={label}
+      size="small" fullWidth
+      type={shown ? 'text' : 'password'}
+      value={value}
+      onChange={e => set(e.target.value)}
+      placeholder={isSet ? 'Saved — leave blank to keep' : ''}
+      slotProps={{
+        input: {
+          startAdornment: isSet ? (
+            <InputAdornment position="start">
+              <Chip size="small" label="set" color="success" sx={{ height: 20, fontSize: 11 }} />
+            </InputAdornment>
+          ) : undefined,
+          endAdornment: (
+            <InputAdornment position="end">
+              <IconButton size="small" onClick={() => setShown(s => !s)} disabled={!value}>
+                {shown ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+              </IconButton>
+            </InputAdornment>
+          ),
+        },
+      }}
+    />
   )
 }
 
-/** LLM provider card for the LLM Providers tab. */
+/** LLM provider card. */
 function ProviderCard({
   name, blurb, active, ready, children,
 }: { name: string; blurb: string; active: boolean; ready: boolean; children: ReactNode }) {
@@ -195,32 +168,24 @@ function ProviderCard({
       height: '100%',
       borderColor: active ? 'primary.main' : 'divider',
       borderWidth: active ? 2 : 1,
-      position: 'relative',
       transition: 'all 200ms ease',
-      ...(active && {
-        boxShadow: theme => `0 0 0 4px ${theme.palette.primary.main}14`,
-      }),
+      ...(active && { boxShadow: theme => `0 0 0 4px ${theme.palette.primary.main}14` }),
     }}>
       <CardContent sx={{ p: 2.5 }}>
-        <Stack direction="row" sx={{ alignItems: 'flex-start', mb: 1.5 }}>
-          <Box sx={{ flex: 1 }}>
-            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 0.3 }}>
-              <Typography variant="h6">{name}</Typography>
-              {active && (
-                <Chip size="small" label="active" color="primary"
-                  icon={<RadioButtonCheckedIcon sx={{ fontSize: 12 }} />}
-                  sx={{ height: 20, fontSize: 10.5, fontFamily: MONO_FONT, letterSpacing: '0.08em' }} />
-              )}
-              {!active && ready && (
-                <Chip size="small" label="ready" variant="outlined" color="success"
-                  sx={{ height: 20, fontSize: 10.5, fontFamily: MONO_FONT, letterSpacing: '0.08em' }} />
-              )}
-            </Stack>
-            <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.45 }}>
-              {blurb}
-            </Typography>
-          </Box>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 0.3 }}>
+          <Typography variant="h6">{name}</Typography>
+          {active && (
+            <Chip size="small" label="active" color="primary"
+              icon={<RadioButtonCheckedIcon sx={{ fontSize: 12 }} />}
+              sx={{ height: 20, fontSize: 10.5 }} />
+          )}
+          {!active && ready && (
+            <Chip size="small" label="ready" variant="outlined" color="success" sx={{ height: 20, fontSize: 10.5 }} />
+          )}
         </Stack>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5, lineHeight: 1.45 }}>
+          {blurb}
+        </Typography>
         <Stack spacing={1.5}>{children}</Stack>
       </CardContent>
     </Card>
@@ -230,13 +195,13 @@ function ProviderCard({
 // ── Main component ─────────────────────────────────────────────────────────
 
 const TABS = [
-  { key: 'overview',   label: 'Overview',     icon: <DashboardOutlinedIcon fontSize="small" /> },
-  { key: 'ado',        label: 'Azure DevOps', icon: <CloudOutlinedIcon fontSize="small" /> },
-  { key: 'llm',        label: 'LLM Providers', icon: <SmartToyOutlinedIcon fontSize="small" /> },
-  { key: 'tests',      label: 'Author Tests', icon: <RuleOutlinedIcon fontSize="small" /> },
-  { key: 'findbugs',   label: 'Find Bugs',    icon: <BugReportOutlinedIcon fontSize="small" /> },
-  { key: 'reports',    label: 'Reports',      icon: <AssessmentOutlinedIcon fontSize="small" /> },
-  { key: 'diag',       label: 'Diagnostics',  icon: <HealthAndSafetyOutlinedIcon fontSize="small" /> },
+  { key: 'ado',      label: 'Azure DevOps',  icon: <CloudOutlinedIcon fontSize="small" /> },
+  { key: 'llm',      label: 'LLM Providers', icon: <SmartToyOutlinedIcon fontSize="small" /> },
+  { key: 'tests',    label: 'Author Tests',  icon: <RuleOutlinedIcon fontSize="small" /> },
+  { key: 'findbugs', label: 'Find Bugs',     icon: <BugReportOutlinedIcon fontSize="small" /> },
+  { key: 'qaloop',   label: 'QA Loop',       icon: <ScienceOutlinedIcon fontSize="small" /> },
+  { key: 'reports',  label: 'Reports',       icon: <AssessmentOutlinedIcon fontSize="small" /> },
+  { key: 'diag',     label: 'Diagnostics',   icon: <HealthAndSafetyOutlinedIcon fontSize="small" /> },
 ] as const
 type TabKey = typeof TABS[number]['key']
 
@@ -244,7 +209,7 @@ export default function SettingsPage() {
   const theme = useTheme()
   const isNarrow = useMediaQuery(theme.breakpoints.down('md'))
 
-  const [tab, setTab] = useState<TabKey>('overview')
+  const [tab, setTab] = useState<TabKey>('ado')
 
   const [config, setConfig] = useState<Config>({})
   const [loading, setLoading] = useState(true)
@@ -269,6 +234,11 @@ export default function SettingsPage() {
   const [claudeCliModel, setClaudeCliModel] = useState('')
   const [claudeCliTimeout, setClaudeCliTimeout] = useState('180')
   const [claudeCliModels, setClaudeCliModels] = useState<string[]>([])
+  const [copilotCliPath, setCopilotCliPath] = useState('')
+  const [copilotCliModel, setCopilotCliModel] = useState('')
+  const [copilotCliContext, setCopilotCliContext] = useState('')
+  const [copilotCliTimeout, setCopilotCliTimeout] = useState('180')
+  const [copilotCliModels, setCopilotCliModels] = useState<string[]>([])
   const [defaultPlan, setDefaultPlan] = useState<number | ''>('')
   const [defaultSuite, setDefaultSuite] = useState<number | ''>('')
   const [schedEnabled, setSchedEnabled] = useState(true)
@@ -279,6 +249,20 @@ export default function SettingsPage() {
   const [verifyDetail, setVerifyDetail] = useState('step')
   const [verifyScope, setVerifyScope] = useState('fails_only')
   const [bugFromMode, setBugFromMode] = useState('instant')
+  const [teamsWebhook, setTeamsWebhook] = useState('')
+  const [teamsTemplate, setTeamsTemplate] = useState('developer')
+  const [pollInterval, setPollInterval] = useState('5')
+  const [reportProvider, setReportProvider] = useState('allure')
+  const [qaLoopActivity, setQaLoopActivity] = useState(true)
+  const [qaLoopDefaultRepo, setQaLoopDefaultRepo] = useState('')
+  const [qaLoopDefaultBranch, setQaLoopDefaultBranch] = useState('')
+  const [qaLoopDefaultPlanId, setQaLoopDefaultPlanId] = useState<number | ''>('')
+  const [qaLoopDefaultSuiteId, setQaLoopDefaultSuiteId] = useState<number | ''>('')
+  const [qaLoopDefaultRepos, setQaLoopDefaultRepos] = useState<string[]>([])
+  const [qaLoopDefaultBranches, setQaLoopDefaultBranches] = useState<string[]>([])
+  const [qaLoopDefaultBranchesLoading, setQaLoopDefaultBranchesLoading] = useState(false)
+  const [qaLoopDefaultPlans, setQaLoopDefaultPlans] = useState<TestPlan[]>([])
+  const [qaLoopDefaultSuites, setQaLoopDefaultSuites] = useState<TestSuite[]>([])
 
   const [plans, setPlans] = useState<TestPlan[]>([])
   const [suites, setSuites] = useState<TestSuite[]>([])
@@ -289,6 +273,8 @@ export default function SettingsPage() {
   const [areaPaths, setAreaPaths] = useState<string[]>([])
   const [areasLoading, setAreasLoading] = useState(false)
   const [boardsList, setBoardsList] = useState<string[]>([])
+  const [branches, setBranches] = useState<string[]>([])
+  const [branchesLoading, setBranchesLoading] = useState(false)
 
   // Diagnostics
   const [env, setEnv] = useState<EnvStatus | null>(null)
@@ -318,6 +304,10 @@ export default function SettingsPage() {
       setClaudeCliPath(String(data[K.CLAUDE_CLI_PATH] ?? 'claude'))
       setClaudeCliModel(String(data[K.CLAUDE_CLI_MODEL] ?? ''))
       setClaudeCliTimeout(String(data[K.CLAUDE_CLI_TIMEOUT] ?? '180'))
+      setCopilotCliPath(String(data[K.COPILOT_CLI_PATH] ?? ''))
+      setCopilotCliModel(String(data[K.COPILOT_CLI_MODEL] ?? ''))
+      setCopilotCliContext(String(data[K.COPILOT_CLI_CONTEXT] ?? ''))
+      setCopilotCliTimeout(String(data[K.COPILOT_CLI_TIMEOUT] ?? '180'))
       setDefaultPlan(data[K.DEFAULT_PLAN_ID] ? Number(data[K.DEFAULT_PLAN_ID]) : '')
       setDefaultSuite(data[K.DEFAULT_SUITE_ID] ? Number(data[K.DEFAULT_SUITE_ID]) : '')
       const savedBoards = String(data[K.DEFAULT_BOARDS] ?? '')
@@ -329,6 +319,28 @@ export default function SettingsPage() {
       setVerifyDetail(String(data[K.VERIFY_DETAIL] ?? 'step'))
       setVerifyScope(String(data[K.VERIFY_STEP_SCOPE] ?? 'fails_only'))
       setBugFromMode(String(data[K.BUG_FROM_CASE_MODE] ?? 'instant'))
+      setTeamsTemplate(String(data[K.TEAMS_TEMPLATE] ?? 'developer'))
+      setPollInterval(String(data[K.QALOOP_POLL] ?? '5'))
+      setReportProvider(String(data[K.QALOOP_REPORT] ?? 'allure'))
+      setQaLoopActivity(String(data[K.QALOOP_ACTIVITY] ?? 'true').toLowerCase() === 'true')
+      setQaLoopDefaultRepo(String(data[K.QALOOP_DEFAULT_REPO] ?? ''))
+      setQaLoopDefaultBranch(String(data[K.QALOOP_DEFAULT_BRANCH] ?? ''))
+      setQaLoopDefaultPlanId(data[K.QALOOP_DEFAULT_PLAN] ? Number(data[K.QALOOP_DEFAULT_PLAN]) : '')
+      setQaLoopDefaultSuiteId(data[K.QALOOP_DEFAULT_SUITE] ? Number(data[K.QALOOP_DEFAULT_SUITE]) : '')
+
+      // Eagerly pre-load option lists so saved values render correctly without opening dropdowns.
+      const savedRepo = String(data[K.QALOOP_DEFAULT_REPO] ?? '')
+      const savedPlanId = data[K.QALOOP_DEFAULT_PLAN] ? Number(data[K.QALOOP_DEFAULT_PLAN]) : null
+      const savedSuiteId = data[K.QALOOP_DEFAULT_SUITE] ? Number(data[K.QALOOP_DEFAULT_SUITE]) : null
+      if (savedRepo) {
+        getAdoBranches(savedRepo).then(setQaLoopDefaultBranches).catch(() => {})
+      }
+      if (savedPlanId) {
+        getPlans().then(ps => {
+          setQaLoopDefaultPlans(ps)
+          if (savedSuiteId) getSuites(savedPlanId).then(setQaLoopDefaultSuites).catch(() => {})
+        }).catch(() => {})
+      }
     } catch (e) { setError(axiosMessage(e)) }
     finally { setLoading(false) }
   }, [])
@@ -339,7 +351,11 @@ export default function SettingsPage() {
     getClaudeCliModels().then(setClaudeCliModels).catch(() => setClaudeCliModels([]))
   }, [])
 
-  // Auto-fetch env so the status strip + overview cards render without clicking "Check".
+  useEffect(() => {
+    getCopilotCliModels().then(setCopilotCliModels).catch(() => setCopilotCliModels([]))
+  }, [])
+
+  // Auto-fetch env so the status strip renders without clicking "Re-check".
   useEffect(() => {
     getEnvStatus().then(setEnv).catch(() => {})
   }, [config[`${K.ADO_PAT}.set`], config[`${K.ANTHROPIC_KEY}.set`]])
@@ -366,6 +382,16 @@ export default function SettingsPage() {
       .finally(() => setAreasLoading(false))
   }, [adoOrg, adoProject, config[`${K.ADO_PAT}.set`]])
 
+  // Branches for the configured repo (drives the Default branch dropdown). Reloads when the saved
+  // repository or PAT changes.
+  useEffect(() => {
+    setBranchesLoading(true)
+    getAdoBranches()
+      .then(setBranches)
+      .catch(() => setBranches([]))
+      .finally(() => setBranchesLoading(false))
+  }, [config[K.ADO_REPO], config[`${K.ADO_PAT}.set`]])
+
   useEffect(() => {
     getPlans().then(setPlans).catch(() => setPlans([]))
   }, [config[`${K.ADO_PAT}.set`]])
@@ -385,6 +411,7 @@ export default function SettingsPage() {
         [K.ANTHROPIC_KEY, setAnthropicKey],
         [K.AZURE_KEY, setAzureKey],
         [K.OPENAI_KEY, setOpenaiKey],
+        [K.TEAMS_WEBHOOK, setTeamsWebhook],
       ] as const).forEach(([k, setter]) => { if (values[k]) setter('') })
     } catch (e) { setError(axiosMessage(e)) }
   }
@@ -422,18 +449,16 @@ export default function SettingsPage() {
 
   const activeProvider = env?.activeProvider ?? ''
 
-  // ── Page header with status pills ────────────────────────────────────────
+  // ── Page header with status strip ────────────────────────────────────────
   const Header = (
     <PageHeader
       title="Settings"
-      subtitle="Connections, providers, defaults, and live checks for the QA Automation workspace."
+      subtitle="Connections, providers, and defaults."
       actions={
         <Stack direction="row" spacing={3} sx={{ alignItems: 'center' }}>
-          <StatusPill ok={!!activeProvider} label="Active LLM" value={activeProvider || 'unset'} />
-          <StatusPill ok={!!env?.adoPatPresent} label="ADO PAT" />
-          <StatusPill ok={!!env?.claudeCliAvailable}
-            label="Claude CLI" value={env?.claudeCliVersion ?? (env?.claudeCliAvailable ? 'ok' : 'missing')} />
-          <Tooltip title="Refresh diagnostics">
+          <StatusPill ok={!!activeProvider} label="LLM" value={activeProvider || 'unset'} />
+          <StatusPill ok={!!env?.adoPatPresent} label="ADO" value={env?.adoPatPresent ? 'OK' : 'Missing'} />
+          <Tooltip title="Refresh status">
             <IconButton onClick={checkEnv} disabled={envLoading} size="small">
               {envLoading ? <CircularProgress size={16} /> : <RefreshIcon fontSize="small" />}
             </IconButton>
@@ -451,7 +476,7 @@ export default function SettingsPage() {
       value={tab}
       onChange={(_, v: TabKey) => setTab(v)}
       sx={{
-        minWidth: isNarrow ? '100%' : 224,
+        minWidth: isNarrow ? '100%' : 200,
         borderRight: isNarrow ? 0 : 1,
         borderBottom: isNarrow ? 1 : 0,
         borderColor: 'divider',
@@ -475,130 +500,56 @@ export default function SettingsPage() {
     <Box sx={{ pb: 6 }}>
       {Header}
 
-      <Stack direction={isNarrow ? 'column' : 'row'} spacing={isNarrow ? 0 : 4}
-        sx={{ alignItems: 'stretch' }}>
+      <Stack direction={isNarrow ? 'column' : 'row'} spacing={isNarrow ? 0 : 4} sx={{ alignItems: 'stretch' }}>
         {TabBar}
 
         <Box sx={{ flex: 1, minWidth: 0, pt: isNarrow ? 3 : 0, pl: isNarrow ? 0 : 1 }}>
           <AnimatePresence mode="wait">
             <FadeIn key={tab} y={10}>
 
-              {/* ── OVERVIEW ────────────────────────────────────────────────── */}
-              {tab === 'overview' && (
-                <Box>
-                  <SectionHeader eyebrow="01 · Overview" title="System at a glance"
-                    subtitle="A snapshot of what's configured. Use the tabs to drill in." />
-                  <Stagger>
-                    <Box sx={{
-                      display: 'grid',
-                      gridTemplateColumns: { xs: '1fr', md: 'repeat(2, 1fr)' },
-                      gap: 2,
-                    }}>
-                      <StaggerItem>
-                        <Panel title="Azure DevOps"
-                          hint={config[`${K.ADO_PAT}.set`]
-                            ? `Connected · ${adoOrg || '—'} / ${adoProject || '—'}`
-                            : 'PAT not configured.'}>
-                          <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
-                            <StatusPill ok={!!env?.adoPatPresent} label="PAT" />
-                            <Button size="small" onClick={() => setTab('ado')}>Configure</Button>
-                          </Stack>
-                        </Panel>
-                      </StaggerItem>
-
-                      <StaggerItem>
-                        <Panel title="LLM Providers"
-                          hint={activeProvider ? `Active: ${activeProvider}` : 'No provider selected.'}>
-                          <Stack direction="row" spacing={2} sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
-                            <Chip size="small" variant={env?.anthropicKeyPresent ? 'filled' : 'outlined'}
-                              label="Anthropic" color={env?.anthropicKeyPresent ? 'primary' : 'default'} />
-                            <Chip size="small" variant={env?.azureOpenAiConfigured ? 'filled' : 'outlined'}
-                              label="Azure OpenAI" color={env?.azureOpenAiConfigured ? 'primary' : 'default'} />
-                            <Chip size="small" variant={config[`${K.OPENAI_KEY}.set`] ? 'filled' : 'outlined'}
-                              label="OpenAI-compat" color={config[`${K.OPENAI_KEY}.set`] ? 'primary' : 'default'} />
-                            <Chip size="small" variant={env?.claudeCliAvailable ? 'filled' : 'outlined'}
-                              label="Claude CLI" color={env?.claudeCliAvailable ? 'primary' : 'default'} />
-                          </Stack>
-                          <Button size="small" sx={{ mt: 1.5 }} onClick={() => setTab('llm')}>Manage providers</Button>
-                        </Panel>
-                      </StaggerItem>
-
-                      <StaggerItem>
-                        <Panel title="Author Tests" hint="Default Test Plan + Suite used on push.">
-                          <Typography variant="body2" sx={{ fontFamily: MONO_FONT, fontSize: 12 }}>
-                            plan: {defaultPlan || '—'}<br />suite: {defaultSuite || '—'}
-                          </Typography>
-                          <Button size="small" sx={{ mt: 1 }} onClick={() => setTab('tests')}>Set defaults</Button>
-                        </Panel>
-                      </StaggerItem>
-
-                      <StaggerItem>
-                        <Panel title="Reports" hint="Schedule + default range + boards filter.">
-                          <Typography variant="body2" sx={{ fontFamily: MONO_FONT, fontSize: 12 }}>
-                            schedule: {schedEnabled ? 'on (Thu 11:00)' : 'off'}<br />
-                            range: {defaultRange} days · boards: {boardsList.length || 'all'}
-                          </Typography>
-                          <Button size="small" sx={{ mt: 1 }} onClick={() => setTab('reports')}>Configure</Button>
-                        </Panel>
-                      </StaggerItem>
-                    </Box>
-                  </Stagger>
-                </Box>
-              )}
-
-              {/* ── AZURE DEVOPS ────────────────────────────────────────────── */}
+              {/* ── AZURE DEVOPS ──────────────────────────────────────────── */}
               {tab === 'ado' && (
                 <Box>
-                  <SectionHeader eyebrow="02 · Azure DevOps" title="Azure DevOps connection"
-                    subtitle="Paste the PAT first — once it's saved, organization and project drop-downs populate from ADO." />
+                  <TabTitle title="Azure DevOps" hint="Save the PAT first — the organization and project lists load once it's stored." />
                   <Panel>
                     <Stack spacing={2.5}>
                       <SecretField label="Personal Access Token" value={adoPat} set={setAdoPat}
-                        isSet={Boolean(config[`${K.ADO_PAT}.set`])}
-                        keyName={K.ADO_PAT} />
+                        isSet={Boolean(config[`${K.ADO_PAT}.set`])} />
                       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                        <Box sx={{ flex: 1 }}>
-                          <FieldKey k={K.ADO_ORG} />
-                          <Autocomplete
-                            freeSolo options={orgs} value={adoOrg}
-                            onChange={(_, v) => { setAdoOrg(v || ''); setAdoProject('') }}
-                            onInputChange={(_, v) => setAdoOrg(v)}
-                            renderInput={p => (
-                              <TextField {...p} label="Organization" size="small"
-                                helperText={orgs.length > 0
-                                  ? `${orgs.length} discoverable from PAT — or type any`
-                                  : 'PAT cannot list orgs via vssps — type the org name manually'} />
-                            )}
-                          />
-                        </Box>
-                        <Box sx={{ flex: 1 }}>
-                          <FieldKey k={K.ADO_PROJECT} />
-                          <Autocomplete
-                            options={projects.map(p => p.name)} value={adoProject}
-                            onChange={(_, v) => setAdoProject(v || '')}
-                            loading={projectsLoading}
-                            disabled={!adoOrg}
-                            renderInput={p => (
-                              <TextField {...p} label="Project" size="small"
-                                helperText={!adoOrg ? 'Set organization first.'
-                                  : projectsLoading ? 'Loading projects…'
-                                  : `${projects.length} project(s) in ${adoOrg}`} />
-                            )}
-                          />
-                        </Box>
+                        <Autocomplete
+                          sx={{ flex: 1 }}
+                          freeSolo options={orgs} value={adoOrg}
+                          onChange={(_, v) => { setAdoOrg(v || ''); setAdoProject('') }}
+                          onInputChange={(_, v) => setAdoOrg(v)}
+                          renderInput={p => <TextField {...p} label="Organization" size="small" />}
+                        />
+                        <Autocomplete
+                          sx={{ flex: 1 }}
+                          options={projects.map(p => p.name)} value={adoProject}
+                          onChange={(_, v) => setAdoProject(v || '')}
+                          loading={projectsLoading}
+                          disabled={!adoOrg}
+                          renderInput={p => (
+                            <TextField {...p} label="Project" size="small"
+                              helperText={!adoOrg ? 'Pick an organization first.' : undefined} />
+                          )}
+                        />
                       </Stack>
                       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                        <Box sx={{ flex: 1 }}>
-                          <FieldKey k={K.ADO_REPO} />
-                          <TextField label="Git repository" size="small" fullWidth value={adoRepo}
-                            onChange={e => setAdoRepo(e.target.value)} placeholder="Your Repo"
-                            helperText="Repo the code-analysis (verify-against-code) phase reads." />
-                        </Box>
-                        <Box sx={{ flex: 1 }}>
-                          <FieldKey k={K.ADO_BRANCH} />
-                          <TextField label="Default branch" size="small" fullWidth value={adoBranch}
-                            onChange={e => setAdoBranch(e.target.value)} placeholder="main" />
-                        </Box>
+                        <TextField label="Git repository" size="small" sx={{ flex: 1 }} value={adoRepo}
+                          onChange={e => setAdoRepo(e.target.value)} placeholder="Your Repo" />
+                        <Autocomplete
+                          sx={{ flex: 1 }}
+                          freeSolo options={branches} value={adoBranch}
+                          onChange={(_, v) => setAdoBranch(v || '')}
+                          onInputChange={(_, v) => setAdoBranch(v)}
+                          loading={branchesLoading}
+                          renderInput={p => (
+                            <TextField {...p} label="Default branch" size="small" placeholder="main"
+                              helperText={branchesLoading ? 'Loading branches…'
+                                : branches.length ? `${branches.length} branch(es) — or type any` : undefined} />
+                          )}
+                        />
                       </Stack>
                     </Stack>
                     <SaveBar onClick={() => save({
@@ -612,136 +563,114 @@ export default function SettingsPage() {
                 </Box>
               )}
 
-              {/* ── LLM PROVIDERS ───────────────────────────────────────────── */}
+              {/* ── LLM PROVIDERS ─────────────────────────────────────────── */}
               {tab === 'llm' && (
                 <Box>
-                  <SectionHeader eyebrow="03 · LLM Providers"
-                    title="Language model providers"
-                    subtitle="Each agent run uses the active provider — switch any time from the AppBar dropdown. Keys are write-only; the backend never sends them back to the UI." />
-
+                  <TabTitle title="LLM providers" hint="Switch the active provider from the top bar. Keys are saved write-only." />
                   <Stagger>
-                    <Box sx={{
-                      display: 'grid',
-                      gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' },
-                      gap: 2,
-                    }}>
+                    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
                       <StaggerItem>
-                        <ProviderCard
-                          name="Anthropic"
-                          blurb="claude.ai API. Fastest direct path."
-                          active={activeProvider === 'Anthropic'}
-                          ready={!!env?.anthropicKeyPresent}>
+                        <ProviderCard name="Anthropic" blurb="Claude API — fastest direct path."
+                          active={activeProvider === 'Anthropic'} ready={!!env?.anthropicKeyPresent}>
                           <SecretField label="API key" value={anthropicKey} set={setAnthropicKey}
-                            isSet={Boolean(config[`${K.ANTHROPIC_KEY}.set`])} keyName={K.ANTHROPIC_KEY} />
-                          <Box>
-                            <FieldKey k={K.ANTHROPIC_MODEL} />
-                            <TextField label="Model" size="small" fullWidth value={anthropicModel}
-                              onChange={e => setAnthropicModel(e.target.value)}
-                              placeholder="claude-sonnet-4-6" />
-                          </Box>
+                            isSet={Boolean(config[`${K.ANTHROPIC_KEY}.set`])} />
+                          <TextField label="Model" size="small" fullWidth value={anthropicModel}
+                            onChange={e => setAnthropicModel(e.target.value)} placeholder="claude-sonnet-4-6" />
                           <Button size="small" variant="text" sx={{ alignSelf: 'flex-end' }}
-                            onClick={() => save({
-                              [K.ANTHROPIC_KEY]: anthropicKey,
-                              [K.ANTHROPIC_MODEL]: anthropicModel,
-                            })}>Save Anthropic</Button>
+                            onClick={() => save({ [K.ANTHROPIC_KEY]: anthropicKey, [K.ANTHROPIC_MODEL]: anthropicModel })}>
+                            Save
+                          </Button>
                         </ProviderCard>
                       </StaggerItem>
 
                       <StaggerItem>
-                        <ProviderCard
-                          name="Azure OpenAI"
-                          blurb="Azure-native AI for procurement-restricted shops."
-                          active={activeProvider === 'AzureOpenAI'}
-                          ready={!!env?.azureOpenAiConfigured}>
-                          <Box>
-                            <FieldKey k={K.AZURE_ENDPOINT} />
-                            <TextField label="Endpoint" size="small" fullWidth value={azureEndpoint}
-                              onChange={e => setAzureEndpoint(e.target.value)}
-                              placeholder="https://your-resource.openai.azure.com" />
-                          </Box>
+                        <ProviderCard name="Azure OpenAI" blurb="Azure-native AI for restricted shops."
+                          active={activeProvider === 'AzureOpenAI'} ready={!!env?.azureOpenAiConfigured}>
+                          <TextField label="Endpoint" size="small" fullWidth value={azureEndpoint}
+                            onChange={e => setAzureEndpoint(e.target.value)}
+                            placeholder="https://your-resource.openai.azure.com" />
                           <SecretField label="API key" value={azureKey} set={setAzureKey}
-                            isSet={Boolean(config[`${K.AZURE_KEY}.set`])} keyName={K.AZURE_KEY} />
-                          <Box>
-                            <FieldKey k={K.AZURE_DEPLOY} />
-                            <TextField label="Deployment" size="small" fullWidth value={azureDeploy}
-                              onChange={e => setAzureDeploy(e.target.value)} />
-                          </Box>
+                            isSet={Boolean(config[`${K.AZURE_KEY}.set`])} />
+                          <TextField label="Deployment" size="small" fullWidth value={azureDeploy}
+                            onChange={e => setAzureDeploy(e.target.value)} placeholder="gpt-4o-mini" />
                           <Button size="small" variant="text" sx={{ alignSelf: 'flex-end' }}
                             onClick={() => save({
-                              [K.AZURE_ENDPOINT]: azureEndpoint,
-                              [K.AZURE_KEY]: azureKey,
-                              [K.AZURE_DEPLOY]: azureDeploy,
-                            })}>Save Azure</Button>
+                              [K.AZURE_ENDPOINT]: azureEndpoint, [K.AZURE_KEY]: azureKey, [K.AZURE_DEPLOY]: azureDeploy,
+                            })}>Save</Button>
                         </ProviderCard>
                       </StaggerItem>
 
                       <StaggerItem>
-                        <ProviderCard
-                          name="OpenAI-compatible"
-                          blurb="GitHub Models (free) · Groq · OpenAI · Ollama."
-                          active={activeProvider === 'OpenAICompatible'}
-                          ready={!!config[`${K.OPENAI_KEY}.set`]}>
-                          <Box>
-                            <FieldKey k={K.OPENAI_BASE_URL} />
-                            <TextField label="Base URL" size="small" fullWidth value={openaiBase}
-                              onChange={e => setOpenaiBase(e.target.value)}
-                              placeholder="https://models.inference.ai.azure.com" />
-                          </Box>
+                        <ProviderCard name="OpenAI-compatible" blurb="GitHub Models (free) · Groq · OpenAI · Ollama."
+                          active={activeProvider === 'OpenAICompatible'} ready={!!config[`${K.OPENAI_KEY}.set`]}>
+                          <TextField label="Base URL" size="small" fullWidth value={openaiBase}
+                            onChange={e => setOpenaiBase(e.target.value)}
+                            placeholder="https://models.inference.ai.azure.com" />
                           <SecretField label="API key" value={openaiKey} set={setOpenaiKey}
-                            isSet={Boolean(config[`${K.OPENAI_KEY}.set`])} keyName={K.OPENAI_KEY} />
-                          <Box>
-                            <FieldKey k={K.OPENAI_MODEL} />
-                            <TextField label="Model" size="small" fullWidth value={openaiModel}
-                              onChange={e => setOpenaiModel(e.target.value)}
-                              placeholder="gpt-4o-mini" />
-                          </Box>
+                            isSet={Boolean(config[`${K.OPENAI_KEY}.set`])} />
+                          <TextField label="Model" size="small" fullWidth value={openaiModel}
+                            onChange={e => setOpenaiModel(e.target.value)} placeholder="gpt-4o-mini" />
                           <Button size="small" variant="text" sx={{ alignSelf: 'flex-end' }}
                             onClick={() => save({
-                              [K.OPENAI_BASE_URL]: openaiBase,
-                              [K.OPENAI_KEY]: openaiKey,
-                              [K.OPENAI_MODEL]: openaiModel,
-                            })}>Save OpenAI-compat</Button>
+                              [K.OPENAI_BASE_URL]: openaiBase, [K.OPENAI_KEY]: openaiKey, [K.OPENAI_MODEL]: openaiModel,
+                            })}>Save</Button>
                         </ProviderCard>
                       </StaggerItem>
 
                       <StaggerItem>
-                        <ProviderCard
-                          name="Claude CLI"
+                        <ProviderCard name="Claude CLI"
                           blurb={env?.claudeCliAvailable
-                            ? `Local CLI · ${env.claudeCliVersion}. Uses your Pro/Max login.`
+                            ? `Local CLI ${env.claudeCliVersion} — uses your Pro/Max login, no key.`
                             : 'Local `claude` CLI not detected — install Claude Code and log in.'}
-                          active={activeProvider === 'ClaudeCli'}
-                          ready={!!env?.claudeCliAvailable}>
-                          <Box>
-                            <FieldKey k={K.CLAUDE_CLI_PATH} />
-                            <TextField label="CLI path" size="small" fullWidth value={claudeCliPath}
-                              onChange={e => setClaudeCliPath(e.target.value)}
-                              placeholder="claude" />
-                          </Box>
-                          <Box>
-                            <FieldKey k={K.CLAUDE_CLI_MODEL} />
-                            <Autocomplete
-                              freeSolo options={claudeCliModels} value={claudeCliModel}
-                              onChange={(_, v) => setClaudeCliModel(v || '')}
-                              onInputChange={(_, v) => setClaudeCliModel(v)}
-                              renderInput={p => (
-                                <TextField {...p} label="Model" size="small"
-                                  placeholder="(blank = CLI default)" />
-                              )}
-                            />
-                          </Box>
-                          <Box>
-                            <FieldKey k={K.CLAUDE_CLI_TIMEOUT} />
-                            <TextField label="Timeout (seconds)" size="small" type="number"
-                              fullWidth value={claudeCliTimeout}
-                              onChange={e => setClaudeCliTimeout(e.target.value)} />
-                          </Box>
+                          active={activeProvider === 'ClaudeCli'} ready={!!env?.claudeCliAvailable}>
+                          <TextField label="CLI path" size="small" fullWidth value={claudeCliPath}
+                            onChange={e => setClaudeCliPath(e.target.value)} placeholder="claude" />
+                          <Autocomplete
+                            freeSolo options={claudeCliModels} value={claudeCliModel}
+                            onChange={(_, v) => setClaudeCliModel(v || '')}
+                            onInputChange={(_, v) => setClaudeCliModel(v)}
+                            renderInput={p => <TextField {...p} label="Model" size="small" placeholder="(blank = CLI default)" />}
+                          />
+                          <TextField label="Timeout (seconds)" size="small" type="number" fullWidth
+                            value={claudeCliTimeout} onChange={e => setClaudeCliTimeout(e.target.value)} />
                           <Button size="small" variant="text" sx={{ alignSelf: 'flex-end' }}
                             onClick={() => save({
-                              [K.CLAUDE_CLI_PATH]: claudeCliPath,
-                              [K.CLAUDE_CLI_MODEL]: claudeCliModel,
+                              [K.CLAUDE_CLI_PATH]: claudeCliPath, [K.CLAUDE_CLI_MODEL]: claudeCliModel,
                               [K.CLAUDE_CLI_TIMEOUT]: claudeCliTimeout,
-                            })}>Save Claude CLI</Button>
+                            })}>Save</Button>
+                        </ProviderCard>
+                      </StaggerItem>
+
+                      <StaggerItem>
+                        <ProviderCard name="Copilot CLI"
+                          blurb={env?.copilotCliAvailable
+                            ? `Local CLI ${env.copilotCliVersion} — uses your GitHub Copilot login, no key.`
+                            : 'Local `copilot` CLI not detected — install GitHub Copilot CLI and run `copilot auth login`.'}
+                          active={activeProvider === 'CopilotCli'} ready={!!env?.copilotCliAvailable}>
+                          <TextField label="CLI path (blank = auto-detect)" size="small" fullWidth value={copilotCliPath}
+                            onChange={e => setCopilotCliPath(e.target.value)} placeholder="copilot"
+                            helperText="Leave blank to auto-find copilot / github-copilot-cli / gh-copilot on PATH, in %APPDATA%\npm, pnpm, Volta, or npm's global prefix." />
+                          <Autocomplete
+                            freeSolo options={copilotCliModels} value={copilotCliModel}
+                            onChange={(_, v) => setCopilotCliModel(v || '')}
+                            onInputChange={(_, v) => setCopilotCliModel(v)}
+                            renderInput={p => <TextField {...p} label="Model" size="small" placeholder="(blank = CLI default)" />}
+                          />
+                          <FormControl size="small" fullWidth>
+                            <InputLabel>Context window</InputLabel>
+                            <Select label="Context window" value={copilotCliContext}
+                              onChange={e => setCopilotCliContext(e.target.value)}>
+                              <MenuItem value="">Default (CLI decides)</MenuItem>
+                              <MenuItem value="long_context">long_context — maximum context window</MenuItem>
+                            </Select>
+                          </FormControl>
+                          <TextField label="Timeout (seconds)" size="small" type="number" fullWidth
+                            value={copilotCliTimeout} onChange={e => setCopilotCliTimeout(e.target.value)} />
+                          <Button size="small" variant="text" sx={{ alignSelf: 'flex-end' }}
+                            onClick={() => save({
+                              [K.COPILOT_CLI_PATH]: copilotCliPath, [K.COPILOT_CLI_MODEL]: copilotCliModel,
+                              [K.COPILOT_CLI_CONTEXT]: copilotCliContext, [K.COPILOT_CLI_TIMEOUT]: copilotCliTimeout,
+                            })}>Save</Button>
                         </ProviderCard>
                       </StaggerItem>
                     </Box>
@@ -749,50 +678,38 @@ export default function SettingsPage() {
                 </Box>
               )}
 
-              {/* ── AUTHOR TESTS ────────────────────────────────────────────── */}
+              {/* ── AUTHOR TESTS ──────────────────────────────────────────── */}
               {tab === 'tests' && (
                 <Box>
-                  <SectionHeader eyebrow="04 · Author Tests"
-                    title="Author-tests defaults"
-                    subtitle="The Test Plan + Suite picked here are pre-selected on the Author Tests push step." />
+                  <TabTitle title="Author Tests defaults" hint="Pre-selected on the Author Tests push step." />
                   <Panel>
                     <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-                      <Box sx={{ flex: 1 }}>
-                        <FieldKey k={K.DEFAULT_PLAN_ID} />
-                        <FormControl size="small" fullWidth>
-                          <InputLabel>Default Test Plan</InputLabel>
-                          <Select label="Default Test Plan" value={defaultPlan}
-                            onChange={e => { setDefaultPlan(e.target.value as number); setDefaultSuite('') }}>
-                            <MenuItem value="">(none)</MenuItem>
-                            {plans.map(p => (
-                              <MenuItem key={p.id} value={p.id}>
-                                {p.name}
-                                <Box component="span" sx={{
-                                  ml: 1, fontFamily: MONO_FONT, fontSize: 11, color: 'text.secondary',
-                                }}>#{p.id}</Box>
-                              </MenuItem>
-                            ))}
-                          </Select>
-                        </FormControl>
-                      </Box>
-                      <Box sx={{ flex: 1 }}>
-                        <FieldKey k={K.DEFAULT_SUITE_ID} />
-                        <FormControl size="small" fullWidth disabled={!defaultPlan}>
-                          <InputLabel>Default Test Suite</InputLabel>
-                          <Select label="Default Test Suite" value={defaultSuite}
-                            onChange={e => setDefaultSuite(e.target.value as number)}>
-                            <MenuItem value="">(none)</MenuItem>
-                            {suites.map(s => (
-                              <MenuItem key={s.id} value={s.id}>
-                                {s.name}
-                                <Box component="span" sx={{
-                                  ml: 1, fontFamily: MONO_FONT, fontSize: 11, color: 'text.secondary',
-                                }}>#{s.id}</Box>
-                              </MenuItem>
-                            ))}
-                          </Select>
-                        </FormControl>
-                      </Box>
+                      <FormControl size="small" sx={{ flex: 1 }}>
+                        <InputLabel>Default Test Plan</InputLabel>
+                        <Select label="Default Test Plan" value={defaultPlan}
+                          onChange={e => { setDefaultPlan(e.target.value as number); setDefaultSuite('') }}>
+                          <MenuItem value="">(none)</MenuItem>
+                          {plans.map(p => (
+                            <MenuItem key={p.id} value={p.id}>
+                              {p.name}
+                              <Box component="span" sx={{ ml: 1, fontFamily: MONO_FONT, fontSize: 11, color: 'text.secondary' }}>#{p.id}</Box>
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                      <FormControl size="small" sx={{ flex: 1 }} disabled={!defaultPlan}>
+                        <InputLabel>Default Test Suite</InputLabel>
+                        <Select label="Default Test Suite" value={defaultSuite}
+                          onChange={e => setDefaultSuite(e.target.value as number)}>
+                          <MenuItem value="">(none)</MenuItem>
+                          {suites.map(s => (
+                            <MenuItem key={s.id} value={s.id}>
+                              {s.name}
+                              <Box component="span" sx={{ ml: 1, fontFamily: MONO_FONT, fontSize: 11, color: 'text.secondary' }}>#{s.id}</Box>
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
                     </Stack>
                     <SaveBar onClick={() => save({
                       [K.DEFAULT_PLAN_ID]: defaultPlan === '' ? '' : String(defaultPlan),
@@ -802,57 +719,37 @@ export default function SettingsPage() {
                 </Box>
               )}
 
-              {/* ── FIND BUGS ───────────────────────────────────────────────── */}
+              {/* ── FIND BUGS ─────────────────────────────────────────────── */}
               {tab === 'findbugs' && (
                 <Box>
-                  <SectionHeader eyebrow="05 · Find Bugs"
-                    title="Code verification report"
-                    subtitle="How deeply the Find Bugs code-verification analyzes each test case, and how the “Create bug” action on a failed case builds its draft." />
+                  <TabTitle title="Find Bugs" hint="How deeply code-verification checks each case, and how a failed case becomes a bug." />
                   <Panel>
-                    <Stack spacing={3}>
-                      <Box>
-                        <FieldKey k={K.VERIFY_DETAIL} />
-                        <FormControl size="small" sx={{ minWidth: 340 }}>
-                          <InputLabel>Step detail</InputLabel>
-                          <Select label="Step detail" value={verifyDetail}
-                            onChange={e => setVerifyDetail(e.target.value)}>
-                            <MenuItem value="case">Case-level only — one verdict per test case (fastest)</MenuItem>
-                            <MenuItem value="step">Per-step pass / fail (recommended)</MenuItem>
-                            <MenuItem value="step_full">Per-step + what the code does at each step (most detail)</MenuItem>
-                          </Select>
-                        </FormControl>
-                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                          Step detail shows a green tick / red ✗ on each step and pinpoints the failing step — at the cost of more LLM tokens.
-                        </Typography>
-                      </Box>
-                      <Box>
-                        <FieldKey k={K.VERIFY_STEP_SCOPE} />
-                        <FormControl size="small" sx={{ minWidth: 340 }}>
-                          <InputLabel>Per-step coverage</InputLabel>
-                          <Select label="Per-step coverage" value={verifyScope}
-                            onChange={e => setVerifyScope(e.target.value)}>
-                            <MenuItem value="fails_only">Failing &amp; inconclusive cases only (recommended)</MenuItem>
-                            <MenuItem value="all">Every test case</MenuItem>
-                          </Select>
-                        </FormControl>
-                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                          Which cases get the per-step drill-down. Applies only when step detail is on.
-                        </Typography>
-                      </Box>
-                      <Box>
-                        <FieldKey k={K.BUG_FROM_CASE_MODE} />
-                        <FormControl size="small" sx={{ minWidth: 340 }}>
-                          <InputLabel>Create bug from a failed case</InputLabel>
-                          <Select label="Create bug from a failed case" value={bugFromMode}
-                            onChange={e => setBugFromMode(e.target.value)}>
-                            <MenuItem value="instant">Instant pre-fill — no LLM (recommended)</MenuItem>
-                            <MenuItem value="agent">Run Bug Writer on that case — polished, slower</MenuItem>
-                          </Select>
-                        </FormControl>
-                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                          How the “Create bug” button on a failed test case builds the bug draft.
-                        </Typography>
-                      </Box>
+                    <Stack spacing={2.5}>
+                      <FormControl size="small" sx={{ maxWidth: 420 }}>
+                        <InputLabel>Verification detail</InputLabel>
+                        <Select label="Verification detail" value={verifyDetail}
+                          onChange={e => setVerifyDetail(e.target.value)}>
+                          <MenuItem value="case">Case only — one verdict per case</MenuItem>
+                          <MenuItem value="step">Per step (recommended)</MenuItem>
+                          <MenuItem value="step_full">Per step + code detail</MenuItem>
+                        </Select>
+                      </FormControl>
+                      <FormControl size="small" sx={{ maxWidth: 420 }}>
+                        <InputLabel>Per-step coverage</InputLabel>
+                        <Select label="Per-step coverage" value={verifyScope}
+                          onChange={e => setVerifyScope(e.target.value)}>
+                          <MenuItem value="fails_only">Failing &amp; inconclusive only (recommended)</MenuItem>
+                          <MenuItem value="all">Every case</MenuItem>
+                        </Select>
+                      </FormControl>
+                      <FormControl size="small" sx={{ maxWidth: 420 }}>
+                        <InputLabel>Create bug from a failed case</InputLabel>
+                        <Select label="Create bug from a failed case" value={bugFromMode}
+                          onChange={e => setBugFromMode(e.target.value)}>
+                          <MenuItem value="instant">Instant pre-fill (recommended)</MenuItem>
+                          <MenuItem value="agent">Run Bug Writer — slower</MenuItem>
+                        </Select>
+                      </FormControl>
                     </Stack>
                     <SaveBar onClick={() => save({
                       [K.VERIFY_DETAIL]: verifyDetail,
@@ -863,14 +760,144 @@ export default function SettingsPage() {
                 </Box>
               )}
 
-              {/* ── REPORTS ─────────────────────────────────────────────────── */}
+              {/* ── QA LOOP ───────────────────────────────────────────────── */}
+              {tab === 'qaloop' && (
+                <Box>
+                  <TabTitle title="QA Loop" hint="Pipeline watcher, Teams notifications, report format, and activity toggle." />
+
+                  <Panel title="New Scan defaults">
+                    <Stack spacing={2}>
+                      <Typography variant="body2" color="text.secondary">
+                        Pre-fill the New Scan dialog — users can still override each field.
+                      </Typography>
+                      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                        <Autocomplete
+                          sx={{ flex: 1 }}
+                          freeSolo options={qaLoopDefaultRepos} value={qaLoopDefaultRepo}
+                          onOpen={() => { if (!qaLoopDefaultRepos.length) getAdoRepositories().then(setQaLoopDefaultRepos).catch(() => setQaLoopDefaultRepos([])) }}
+                          onChange={(_, v) => {
+                            setQaLoopDefaultRepo(v || '')
+                            setQaLoopDefaultBranch('')
+                            setQaLoopDefaultBranches([])
+                            if (v) {
+                              setQaLoopDefaultBranchesLoading(true)
+                              getAdoBranches(v).then(bs => { setQaLoopDefaultBranches(bs) }).catch(() => {}).finally(() => setQaLoopDefaultBranchesLoading(false))
+                            }
+                          }}
+                          onInputChange={(_, v) => setQaLoopDefaultRepo(v)}
+                          renderInput={p => <TextField {...p} label="Default repository" size="small" placeholder="(none)" />}
+                        />
+                        <Autocomplete
+                          sx={{ flex: 1 }}
+                          freeSolo options={qaLoopDefaultBranches} value={qaLoopDefaultBranch}
+                          disabled={!qaLoopDefaultRepo}
+                          loading={qaLoopDefaultBranchesLoading}
+                          onOpen={() => {
+                            if (qaLoopDefaultRepo && !qaLoopDefaultBranches.length) {
+                              setQaLoopDefaultBranchesLoading(true)
+                              getAdoBranches(qaLoopDefaultRepo).then(setQaLoopDefaultBranches).catch(() => {}).finally(() => setQaLoopDefaultBranchesLoading(false))
+                            }
+                          }}
+                          onChange={(_, v) => setQaLoopDefaultBranch(v || '')}
+                          onInputChange={(_, v) => setQaLoopDefaultBranch(v)}
+                          renderInput={p => <TextField {...p} label="Default branch" size="small" placeholder="(none)"
+                            helperText={!qaLoopDefaultRepo ? 'Pick a repository first' : undefined} />}
+                        />
+                      </Stack>
+                      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                        <FormControl size="small" sx={{ flex: 1 }}>
+                          <InputLabel>Default Test Plan</InputLabel>
+                          <Select label="Default Test Plan" value={qaLoopDefaultPlanId}
+                            onOpen={() => { getPlans().then(setQaLoopDefaultPlans).catch(() => {}) }}
+                            onChange={e => {
+                              const pid = e.target.value as number
+                              setQaLoopDefaultPlanId(pid)
+                              setQaLoopDefaultSuiteId('')
+                              setQaLoopDefaultSuites([])
+                              if (pid) getSuites(pid).then(setQaLoopDefaultSuites).catch(() => {})
+                            }}>
+                            <MenuItem value="">(none)</MenuItem>
+                            {qaLoopDefaultPlans.map(p => (
+                              <MenuItem key={p.id} value={p.id}>
+                                {p.name}
+                                <Box component="span" sx={{ ml: 1, fontFamily: MONO_FONT, fontSize: 11, color: 'text.secondary' }}>#{p.id}</Box>
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                        <FormControl size="small" sx={{ flex: 1 }} disabled={!qaLoopDefaultPlanId}>
+                          <InputLabel>Default Test Suite</InputLabel>
+                          <Select label="Default Test Suite" value={qaLoopDefaultSuiteId}
+                            onOpen={() => {
+                              if (qaLoopDefaultPlanId && !qaLoopDefaultSuites.length)
+                                getSuites(qaLoopDefaultPlanId as number).then(setQaLoopDefaultSuites).catch(() => {})
+                            }}
+                            onChange={e => setQaLoopDefaultSuiteId(e.target.value as number)}>
+                            <MenuItem value="">(none)</MenuItem>
+                            {qaLoopDefaultSuites.map(s => (
+                              <MenuItem key={s.id} value={s.id}>
+                                {s.name}
+                                <Box component="span" sx={{ ml: 1, fontFamily: MONO_FONT, fontSize: 11, color: 'text.secondary' }}>#{s.id}</Box>
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                      </Stack>
+                    </Stack>
+                    <SaveBar label="Save scan defaults" onClick={() => save({
+                      [K.QALOOP_DEFAULT_REPO]: qaLoopDefaultRepo,
+                      [K.QALOOP_DEFAULT_BRANCH]: qaLoopDefaultBranch,
+                      [K.QALOOP_DEFAULT_PLAN]: qaLoopDefaultPlanId === '' ? '' : String(qaLoopDefaultPlanId),
+                      [K.QALOOP_DEFAULT_SUITE]: qaLoopDefaultSuiteId === '' ? '' : String(qaLoopDefaultSuiteId),
+                    })} />
+                  </Panel>
+
+                  <Panel>
+                    <Stack spacing={2.5}>
+                      <SecretField label="Teams webhook URL" value={teamsWebhook} set={setTeamsWebhook}
+                        isSet={Boolean(config[`${K.TEAMS_WEBHOOK}.set`])} />
+                      <FormControl size="small" sx={{ maxWidth: 320 }}>
+                        <InputLabel>Teams card template</InputLabel>
+                        <Select label="Teams card template" value={teamsTemplate}
+                          onChange={e => setTeamsTemplate(e.target.value)}>
+                          <MenuItem value="developer">Developer</MenuItem>
+                          <MenuItem value="compact">Compact</MenuItem>
+                          <MenuItem value="scheduled">Scheduled</MenuItem>
+                        </Select>
+                      </FormControl>
+                      <TextField label="Pipeline poll interval (minutes)" size="small" type="number"
+                        sx={{ width: 260 }} value={pollInterval}
+                        onChange={e => setPollInterval(e.target.value)} />
+                      <FormControl size="small" sx={{ maxWidth: 320 }}>
+                        <InputLabel>Report format</InputLabel>
+                        <Select label="Report format" value={reportProvider}
+                          onChange={e => setReportProvider(e.target.value)}>
+                          <MenuItem value="allure">Allure (default)</MenuItem>
+                          <MenuItem value="playwright">Playwright HTML</MenuItem>
+                          <MenuItem value="both">Both</MenuItem>
+                        </Select>
+                      </FormControl>
+                      <FormControlLabel
+                        control={<Switch checked={qaLoopActivity} onChange={(_, v) => setQaLoopActivity(v)} />}
+                        label="Stream agent activity (disabling saves bandwidth and storage)" />
+                    </Stack>
+                    <SaveBar onClick={() => save({
+                      [K.TEAMS_WEBHOOK]: teamsWebhook,
+                      [K.TEAMS_TEMPLATE]: teamsTemplate,
+                      [K.QALOOP_POLL]: pollInterval,
+                      [K.QALOOP_REPORT]: reportProvider,
+                      [K.QALOOP_ACTIVITY]: qaLoopActivity ? 'true' : 'false',
+                    })} />
+                  </Panel>
+                </Box>
+              )}
+
+              {/* ── REPORTS ───────────────────────────────────────────────── */}
               {tab === 'reports' && (
                 <Box>
-                  <SectionHeader eyebrow="06 · Reports"
-                    title="Weekly report configuration"
-                    subtitle="Schedule, default date range, and which boards / area paths to include by default. The Thursday auto-run only fires while the app is running." />
+                  <TabTitle title="Reports" hint="The weekly auto-run fires Thursday 11:00, only while the app is running." />
                   <Panel>
-                    <Stack spacing={3}>
+                    <Stack spacing={2.5}>
                       <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap' }}>
                         <FormControl size="small" sx={{ minWidth: 170 }}>
                           <InputLabel>Preview theme</InputLabel>
@@ -885,66 +912,39 @@ export default function SettingsPage() {
                           onClick={() => window.open(apiUrl(
                             `/api/reports/preview?theme=${encodeURIComponent(previewTheme)}`
                             + `&team=${encodeURIComponent(teamName)}`), '_blank')}>
-                          Preview report format
+                          Preview format
                         </Button>
-                        <Typography variant="caption" color="text.secondary">
-                          Opens a sample report (mock data) in a new tab — no generation needed.
-                        </Typography>
                       </Box>
 
-                      <Box>
-                        <FieldKey k={K.REPORT_TEAM_NAME} />
-                        <TextField label="Team name" size="small"
-                          sx={{ width: 320 }} value={teamName}
-                          onChange={e => setTeamName(e.target.value)}
-                          helperText="Shown on the report cover, e.g. 'Engineering'." />
-                      </Box>
+                      <TextField label="Team name" size="small" sx={{ width: 320 }} value={teamName}
+                        onChange={e => setTeamName(e.target.value)} placeholder="Shown on the report cover" />
 
                       <FormControlLabel
-                        control={<Switch checked={schedEnabled}
-                          onChange={(_, v) => setSchedEnabled(v)} />}
-                        label="Schedule weekly report (Thursday 11:00, local TZ)" />
+                        control={<Switch checked={schedEnabled} onChange={(_, v) => setSchedEnabled(v)} />}
+                        label="Schedule weekly report (Thursday 11:00)" />
 
-                      <Box>
-                        <FieldKey k={K.DEFAULT_RANGE} />
-                        <TextField label="Default range (days)" size="small" type="number"
-                          sx={{ width: 220 }} value={defaultRange}
-                          onChange={e => setDefaultRange(e.target.value)}
-                          helperText="Used by both the auto-run and the Reports page default." />
-                      </Box>
+                      <TextField label="Default range (days)" size="small" type="number" sx={{ width: 220 }}
+                        value={defaultRange} onChange={e => setDefaultRange(e.target.value)} />
 
-                      <Box>
-                        <FieldKey k={K.REPORT_TYPES} />
-                        <Autocomplete<string, true, false, true>
-                          multiple freeSolo
-                          options={REPORT_TYPE_OPTIONS} value={typesList}
-                          onChange={(_, v) => setTypesList(v as string[])}
-                          renderInput={p => (
-                            <TextField {...p} label="Ticket types" size="small"
-                              helperText="Work-item types included across the whole report (themes, boards, spotlights). Empty = default set." />
-                          )}
-                        />
-                      </Box>
+                      <Autocomplete<string, true, false, true>
+                        multiple freeSolo options={REPORT_TYPE_OPTIONS} value={typesList}
+                        onChange={(_, v) => setTypesList(v as string[])}
+                        renderInput={p => (
+                          <TextField {...p} label="Ticket types" size="small"
+                            helperText="Empty = default set." />
+                        )}
+                      />
 
-                      <Box>
-                        <FieldKey k={K.DEFAULT_BOARDS} />
-                        <Autocomplete<string, true, false, true>
-                          multiple freeSolo
-                          options={areaPaths} value={boardsList}
-                          onChange={(_, v) => setBoardsList(v as string[])}
-                          loading={areasLoading}
-                          disabled={!adoOrg || !adoProject}
-                          renderInput={p => (
-                            <TextField {...p} label="Boards / area paths" size="small"
-                              helperText={
-                                !adoOrg || !adoProject ? 'Set organization + project first.'
-                                : areasLoading ? 'Loading area paths…'
-                                : `Pick from ${areaPaths.length} discovered path(s). Empty = whole project.`
-                              }
-                            />
-                          )}
-                        />
-                      </Box>
+                      <Autocomplete<string, true, false, true>
+                        multiple freeSolo options={areaPaths} value={boardsList}
+                        onChange={(_, v) => setBoardsList(v as string[])}
+                        loading={areasLoading}
+                        disabled={!adoOrg || !adoProject}
+                        renderInput={p => (
+                          <TextField {...p} label="Boards / area paths" size="small"
+                            helperText={!adoOrg || !adoProject ? 'Set organization + project first.' : 'Empty = whole project.'} />
+                        )}
+                      />
                     </Stack>
                     <SaveBar onClick={() => save({
                       [K.REPORT_TEAM_NAME]: teamName,
@@ -957,48 +957,39 @@ export default function SettingsPage() {
                 </Box>
               )}
 
-              {/* ── DIAGNOSTICS ─────────────────────────────────────────────── */}
+              {/* ── DIAGNOSTICS ───────────────────────────────────────────── */}
               {tab === 'diag' && (
                 <Box>
-                  <SectionHeader eyebrow="07 · Diagnostics"
-                    title="Live checks"
-                    subtitle="Verify ADO + the active LLM are working end-to-end. Useful right after changing credentials or switching providers." />
-
+                  <TabTitle title="Diagnostics" hint="Quick end-to-end checks for ADO and the active LLM." />
                   <Stagger>
-                    <Box sx={{
-                      display: 'grid',
-                      gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' },
-                      gap: 2,
-                    }}>
+                    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 2 }}>
                       <StaggerItem>
                         <Panel title="Environment" action={
-                          <Button variant="outlined" size="small" startIcon={envLoading ? <CircularProgress size={14} /> : <RefreshIcon />}
-                            onClick={checkEnv} disabled={envLoading}>
-                            Re-check
-                          </Button>
+                          <Button variant="outlined" size="small"
+                            startIcon={envLoading ? <CircularProgress size={14} /> : <RefreshIcon />}
+                            onClick={checkEnv} disabled={envLoading}>Re-check</Button>
                         }>
                           {env ? (
                             <Stack direction="row" spacing={3} sx={{ flexWrap: 'wrap', gap: 2 }}>
-                              <StatusPill ok={!!activeProvider} label="Active LLM"
-                                value={activeProvider || 'unset'} />
+                              <StatusPill ok={!!activeProvider} label="Active LLM" value={activeProvider || 'unset'} />
                               <StatusPill ok={env.adoPatPresent} label="ADO PAT" />
                               <StatusPill ok={env.anthropicKeyPresent} label="Anthropic key" />
                               <StatusPill ok={env.azureOpenAiConfigured} label="Azure OpenAI" />
                               <StatusPill ok={env.claudeCliAvailable} label="Claude CLI"
                                 value={env.claudeCliVersion ?? (env.claudeCliAvailable ? 'ok' : 'missing')} />
+                              <StatusPill ok={env.copilotCliAvailable} label="Copilot CLI"
+                                value={env.copilotCliVersion ?? (env.copilotCliAvailable ? 'ok' : 'missing')} />
                             </Stack>
                           ) : <CircularProgress size={20} />}
                         </Panel>
                       </StaggerItem>
 
                       <StaggerItem>
-                        <Panel title="Azure DevOps — read work item">
+                        <Panel title="Read a work item">
                           <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                             <TextField label="Work item ID" size="small" type="number"
-                              value={wiId} onChange={e => setWiId(e.target.value)}
-                              sx={{ width: 180 }} />
-                            <Button variant="outlined"
-                              onClick={readWorkItem} disabled={wiLoading || !wiId}>
+                              value={wiId} onChange={e => setWiId(e.target.value)} sx={{ width: 180 }} />
+                            <Button variant="outlined" onClick={readWorkItem} disabled={wiLoading || !wiId}>
                               {wiLoading ? <CircularProgress size={18} /> : 'Read'}
                             </Button>
                           </Stack>
@@ -1018,16 +1009,15 @@ export default function SettingsPage() {
                       </StaggerItem>
 
                       <StaggerItem>
-                        <Panel title="LLM ping" hint="Pings whichever provider is currently active.">
+                        <Panel title="LLM ping">
                           <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                             <Button variant="outlined" onClick={runLlmPing} disabled={llmLoading}>
                               {llmLoading ? <CircularProgress size={18} /> : 'Ping'}
                             </Button>
                             {llmReply && (
-                              <Typography sx={{
-                                fontFamily: MONO_FONT, fontSize: 13,
-                                color: 'success.main', flex: 1,
-                              }}>{llmReply}</Typography>
+                              <Typography sx={{ fontFamily: MONO_FONT, fontSize: 13, color: 'success.main', flex: 1 }}>
+                                {llmReply}
+                              </Typography>
                             )}
                           </Stack>
                           {llmError && <Alert severity="error" sx={{ mt: 1.5 }}>{llmError}</Alert>}

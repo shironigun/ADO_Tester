@@ -1,3 +1,5 @@
+using QaAutomation.Core.Models;
+
 namespace QaAutomation.Core.Abstractions;
 
 /// <summary>
@@ -28,6 +30,16 @@ public interface IAgentOrchestrator
     /// </summary>
     Task PushToAdoAsync(
         int sessionId,
+        int testPlanId,
+        int testSuiteId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Pushes a SINGLE draft to ADO synchronously (create Test Case, add to plan/suite, link to the
+    /// story), marks it Pushed with its new Test Case id, and returns it. Backs the per-row push button.
+    /// </summary>
+    Task<TestCaseDraft> PushDraftAsync(
+        int draftId,
         int testPlanId,
         int testSuiteId,
         CancellationToken cancellationToken = default);

@@ -93,6 +93,46 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         return Task.CompletedTask;
     }
 
+    /// <summary>Push one draft synchronously (per-row push). Unlike <see cref="PushToAdoAsync"/> this is
+    /// awaited by the caller — a single test case is just three quick ADO calls, so the row gets an
+    /// immediate result instead of an SSE-tracked background run. Idempotent if already Pushed.</summary>
+    public async Task<TestCaseDraft> PushDraftAsync(
+        int draftId, int testPlanId, int testSuiteId, CancellationToken cancellationToken = default)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+
+        var draft = await db.TestCaseDrafts.FirstOrDefaultAsync(d => d.Id == draftId, cancellationToken)
+            ?? throw new InvalidOperationException($"Draft {draftId} not found.");
+        if (draft.Status == DraftStatus.Pushed && draft.AdoTestCaseId is not null)
+            return draft; // already in ADO — no duplicate Test Case
+
+        var session = await db.TestSessions.FindAsync([draft.SessionId], cancellationToken)
+            ?? throw new InvalidOperationException($"Session {draft.SessionId} not found.");
+
+        var steps = ParseSteps(draft.StepsJson);
+        var tcId = await _ado.CreateTestCaseAsync(draft.Title, draft.Preconditions, steps, cancellationToken);
+        await _ado.AddTestCaseToSuiteAsync(testPlanId, testSuiteId, tcId, cancellationToken);
+        await _ado.LinkTestedByAsync(session.WorkItemId, tcId, cancellationToken);
+
+        draft.AdoTestCaseId = tcId;
+        draft.Status = DraftStatus.Pushed;
+
+        // Mirror the bulk push: once nothing is left to push (no Draft/Approved drafts remain), the
+        // session reads as Done — so a session fully pushed row-by-row isn't stuck mid-flight.
+        var remaining = await db.TestCaseDrafts.CountAsync(
+            d => d.SessionId == session.Id && d.Id != draft.Id
+                 && (d.Status == DraftStatus.Draft || d.Status == DraftStatus.Approved), cancellationToken);
+        if (remaining == 0)
+        {
+            session.Status = SessionStatus.Done;
+            session.CurrentActivity = "All test cases pushed to ADO";
+        }
+        session.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+        return draft;
+    }
+
     /// <summary>Register a cancellation token for the session and run <paramref name="body"/> on a
     /// background task, clearing the registry entry when it finishes.</summary>
     private void Launch(int sessionId, Func<CancellationToken, Task> body)

@@ -40,9 +40,10 @@ import { useAdoWorkItemUrl } from '../../common/adoLinks'
 import { PROJECT_ID } from '../../config/env'
 import {
   getPlans, getSuites, searchWorkItems, startSession, listSessionsPage, getSessionDetail,
-  patchDraft, approveAllDrafts, runTester as apiRunTester, cancelSession, pushSession, saveAnalysis,
+  patchDraft, approveAllDrafts, runTester as apiRunTester, cancelSession, pushSession, pushDraft, saveAnalysis,
   sessionStreamUrl, type TestPlan, type TestSuite,
 } from '../../api/authorTests'
+import { getConfig } from '../../api/settings'
 
 // ADO work-item deep-links are built from the configured org/project via useAdoWorkItemUrl().
 
@@ -83,13 +84,15 @@ function activeStepIndex(status: string, activity: string | null): number {
 }
 
 // ── Draft card: compact row + detail/edit dialog ─────────────────────────────
-function TestDraftCard({ draft, onApprove, onReject, onSave }: {
-  draft: Draft; onApprove: () => void; onReject: () => void
+function TestDraftCard({ draft, onApprove, onReject, onPush, onSave, canPush }: {
+  draft: Draft; onApprove: () => void; onReject: () => void; onPush: () => Promise<void>; canPush: boolean
   onSave: (patch: DraftPatch) => Promise<void> | void
 }) {
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [pushing, setPushing] = useState(false)
+  const doPush = async () => { setPushing(true); try { await onPush() } finally { setPushing(false) } }
   const initialSteps = (): Step[] => { try { return JSON.parse(draft.stepsJson) } catch { return [] } }
   const [title, setTitle] = useState(draft.title)
   const [steps, setSteps] = useState<Step[]>(initialSteps())
@@ -133,8 +136,19 @@ function TestDraftCard({ draft, onApprove, onReject, onSave }: {
             {draft.adoTestCaseId && <Chip size="small" color="success" variant="outlined" label={`TC #${draft.adoTestCaseId}`} />}
             {isEditable && (
               <>
-                <Tooltip title="Approve"><IconButton size="small" color="success" onClick={onApprove}><CheckIcon fontSize="small" /></IconButton></Tooltip>
-                <Tooltip title="Reject"><IconButton size="small" color="error" onClick={onReject}><CloseIcon fontSize="small" /></IconButton></Tooltip>
+                {draft.status === 'Approved' ? (
+                  <Tooltip title={canPush ? 'Push this test case to ADO' : 'Choose a Test Plan + Suite below first'}>
+                    <span>
+                      <Button size="small" variant="outlined" color="success" disabled={!canPush || pushing}
+                        startIcon={pushing ? <CircularProgress size={14} /> : <PushPinIcon />} onClick={doPush}>
+                        Push
+                      </Button>
+                    </span>
+                  </Tooltip>
+                ) : (
+                  <Tooltip title="Approve"><IconButton size="small" color="success" onClick={onApprove}><CheckIcon fontSize="small" /></IconButton></Tooltip>
+                )}
+                <Tooltip title="Remove"><IconButton size="small" color="error" onClick={onReject}><CloseIcon fontSize="small" /></IconButton></Tooltip>
               </>
             )}
             <Button size="small" variant="outlined" startIcon={<VisibilityIcon />} onClick={openView}>View</Button>
@@ -195,8 +209,19 @@ function TestDraftCard({ draft, onApprove, onReject, onSave }: {
           ) : (
             <>
               {isEditable && <Button startIcon={<EditIcon />} onClick={openEdit}>Edit</Button>}
-              {isEditable && <Button color="error" startIcon={<CloseIcon />} onClick={() => { onReject(); setOpen(false) }}>Reject</Button>}
-              {isEditable && <Button color="success" variant="contained" startIcon={<CheckIcon />} onClick={() => { onApprove(); setOpen(false) }}>Approve</Button>}
+              {isEditable && <Button color="error" startIcon={<CloseIcon />} onClick={() => { onReject(); setOpen(false) }}>Remove</Button>}
+              {isEditable && (draft.status === 'Approved' ? (
+                <Tooltip title={canPush ? '' : 'Choose a Test Plan + Suite first'}>
+                  <span>
+                    <Button color="success" variant="contained" disabled={!canPush || pushing}
+                      startIcon={pushing ? <CircularProgress size={16} /> : <PushPinIcon />}
+                      onClick={async () => { await doPush(); setOpen(false) }}>Push to ADO</Button>
+                  </span>
+                </Tooltip>
+              ) : (
+                <Button color="success" variant="contained" startIcon={<CheckIcon />}
+                  onClick={() => { onApprove(); setOpen(false) }}>Approve</Button>
+              ))}
               <Button onClick={() => setOpen(false)}>Close</Button>
             </>
           )}
@@ -275,12 +300,42 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
     getSuites(selectedPlan).then(setSuites).catch(() => {})
   }, [selectedPlan])
 
+  // Seed the push Plan/Suite from the Settings defaults (defaults.test_plan_id / _suite_id) so they're
+  // pre-filled here. Fills only empty selectors — a manual choice is never overridden.
+  const [pendingDefaultSuite, setPendingDefaultSuite] = useState<number | ''>('')
+  useEffect(() => {
+    getConfig().then(cfg => {
+      const planId = Number(cfg['defaults.test_plan_id']) || ''
+      const suiteId = Number(cfg['defaults.test_suite_id']) || ''
+      if (planId) setSelectedPlan(prev => (prev === '' ? planId : prev))
+      if (suiteId) setPendingDefaultSuite(suiteId)
+    }).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  // Apply the default suite once its plan's suites have loaded (avoids an out-of-range Select value).
+  useEffect(() => {
+    if (pendingDefaultSuite !== '' && selectedSuite === '' && suites.some(s => s.id === pendingDefaultSuite)) {
+      setSelectedSuite(pendingDefaultSuite)
+      setPendingDefaultSuite('')
+    }
+  }, [suites, pendingDefaultSuite, selectedSuite])
+
   const inFlight = ['Analyzing', 'Drafting', 'Pushing'].includes(session.status)
   const approvedCount = drafts.filter(d => d.status === 'Approved').length
   const canPush = approvedCount > 0 && !!selectedPlan && !!selectedSuite
 
   const approveDraft = async (id: number) => { try { await patchDraft(id, { status: 'Approved' }); refetch() } catch (e) { onError(e, 'Approve failed') } }
   const rejectDraft = async (id: number) => { try { await patchDraft(id, { status: 'Rejected' }); refetch() } catch (e) { onError(e, 'Reject failed') } }
+  const pushDraftRow = async (id: number) => {
+    if (!selectedPlan || !selectedSuite) return
+    setPushError('')
+    try {
+      await pushDraft(id, { testPlanId: selectedPlan, testSuiteId: selectedSuite })
+      const plan = plans.find(p => p.id === selectedPlan); const suite = suites.find(s => s.id === selectedSuite)
+      if (plan && suite) setPushedContext({ plan, suite })
+      refetch()
+    } catch (e) { setPushError(axiosMessage(e)) }
+  }
   const approveAll = async () => { try { await approveAllDrafts(session.id); refetch() } catch (e) { onError(e, 'Approve all failed') } }
   const saveDraft = async (id: number, patch: DraftPatch) => {
     const body: { title?: string; stepsJson?: string } = {}
@@ -380,7 +435,7 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
             <Chip size="small" label={`#${session.workItemId}`} />
             {wiType && <Chip size="small" variant="outlined" label={wiType} />}
             <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }}>{session.workItemTitle}</Typography>
-            <Link href={wiUrl(session.workItemId)} target="_blank" rel="noreferrer" variant="body2">Open in Azure DevOps</Link>
+            <Link href={wiUrl(session.workItemId as number)} target="_blank" rel="noreferrer" variant="body2">Open in Azure DevOps</Link>
           </Stack>
         </CardContent></Card>
       )}
@@ -449,7 +504,8 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
               <Stack spacing={1.5}>
                 {visible.map(d => (
                   <TestDraftCard key={d.id} draft={d}
-                    onApprove={() => approveDraft(d.id)} onReject={() => rejectDraft(d.id)} onSave={p => saveDraft(d.id, p)} />
+                    onApprove={() => approveDraft(d.id)} onReject={() => rejectDraft(d.id)} onPush={() => pushDraftRow(d.id)} onSave={p => saveDraft(d.id, p)}
+                    canPush={!!selectedPlan && !!selectedSuite} />
                 ))}
                 {visible.length === 0 && (
                   <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: 'center' }}>
