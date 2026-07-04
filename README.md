@@ -40,13 +40,13 @@ You open just **one URL** in the browser: <http://localhost:5173>. The Vite dev 
 
 Install these once. Confirm each with the version command.
 
-| Tool | Version | Confirm with | Where to get it |
-|---|---|---|---|
-| .NET SDK | 8.0+ | `dotnet --version` | <https://dotnet.microsoft.com/download/dotnet/8.0> |
-| Node.js | 18+ | `node --version` | <https://nodejs.org/> |
-| Git | any | `git --version` | <https://git-scm.com/> |
-| Claude CLI *(recommended — the default LLM provider)* | any | `claude --version` | <https://docs.anthropic.com/en/docs/claude-code/setup> |
-| Python *(optional — only for the migration helper scripts)* | 3.12+ | `py -3.12 --version` | <https://www.python.org/downloads/> |
+| Tool                                                        | Version | Confirm with         | Where to get it                                        |
+| ----------------------------------------------------------- | ------- | -------------------- | ------------------------------------------------------ |
+| .NET SDK                                                    | 8.0+    | `dotnet --version`   | <https://dotnet.microsoft.com/download/dotnet/8.0>     |
+| Node.js                                                     | 18+     | `node --version`     | <https://nodejs.org/>                                  |
+| Git                                                         | any     | `git --version`      | <https://git-scm.com/>                                 |
+| Claude CLI *(recommended — the default LLM provider)*       | any     | `claude --version`   | <https://docs.anthropic.com/en/docs/claude-code/setup> |
+| Python *(optional — only for the migration helper scripts)* | 3.12+   | `py -3.12 --version` | <https://www.python.org/downloads/>                    |
 
 You also need at least one of these credentials:
 
@@ -181,12 +181,12 @@ If all three pass, you're good. (Quick backend-only smoke test: `GET http://loca
 
 ## 5 — Picking / switching the LLM provider
 
-| Provider | Needs | Notes |
-|---|---|---|
+| Provider           | Needs                        | Notes                                                                                 |
+| ------------------ | ---------------------------- | ------------------------------------------------------------------------------------- |
 | `ClaudeCli`        | local `claude` CLI logged in | **Default.** Uses your Pro/Max sub, no API key, no per-run cost. Slower (~2–5s/call). |
-| `Anthropic`        | `ANTHROPIC_API_KEY` (paid) | Most stable for large generations; ~$0.15–$0.60/ticket. |
-| `AzureOpenAI`      | endpoint + key + deployment | Use if procurement requires Azure-native AI. |
-| `OpenAICompatible` | base URL + key + model | **GitHub Models = free**, also Groq / OpenAI / Ollama. |
+| `Anthropic`        | `ANTHROPIC_API_KEY` (paid)   | Most stable for large generations; ~$0.15–$0.60/ticket.                               |
+| `AzureOpenAI`      | endpoint + key + deployment  | Use if procurement requires Azure-native AI.                                          |
+| `OpenAICompatible` | base URL + key + model       | **GitHub Models = free**, also Groq / OpenAI / Ollama.                                |
 
 Switch any time from the **AppBar dropdown** (`Llm`). The choice persists in SQLite — survives
 restart.
@@ -260,17 +260,17 @@ dotnet build QaAutomation.sln
 The app is one React SPA with **nine pages** in the left sidebar, all backed by the flat `/api` .NET
 backend. This section covers every feature and the mechanism behind it.
 
-| # | Page (sidebar) | Route | What it does |
-|---|---|---|---|
-| 1 | **Dashboard**     | `/projects`      | Live snapshot of the workspace — KPI tiles, an outcome donut, a recent-activity feed, quick-launch tiles |
-| 2 | **Knowledgebase** | `/knowledgebase` | Upload `.md` files/folders; chunked + indexed into SQLite FTS5; BM25 search to verify retrieval |
-| 3 | **QA Loop**       | `/qa-loop`       | Scan an API module → 3-level coverage matrix → generate Playwright specs + ADO Test Cases |
-| 4 | **QA Runs**       | `/qa-runs`       | Execute specs against a DMS profile → ADO Test Run + AI failure triage → draft bugs + Allure report |
-| 5 | **QA Pipelines**  | `/qa-pipelines`  | Watch an ADO pipeline; each build an AI impact analyzer picks the affected tests and fires a run |
-| 6 | **Author Tests**  | `/author-tests`  | Pick a story → Analyst → Tester → review/edit → push to a Test Plan/Suite |
-| 7 | **Find Bugs**     | `/find-bugs`     | Pick a story → Analyst → paste actual behavior → Bug Writer → review/edit → push Bug work items |
-| 8 | **Reports**       | `/reports`       | Date-range HTML board-activity report; auto-fires Thursday 11:00 while the app is running |
-| 9 | **Settings**      | `/settings`      | ADO connection, LLM providers (live switch), Author-Tests / Reports / QA-Loop defaults, diagnostics |
+| #   | Page (sidebar)    | Route            | What it does                                                                                             |
+| --- | ----------------- | ---------------- | -------------------------------------------------------------------------------------------------------- |
+| 1   | **Dashboard**     | `/projects`      | Live snapshot of the workspace — KPI tiles, an outcome donut, a recent-activity feed, quick-launch tiles |
+| 2   | **Knowledgebase** | `/knowledgebase` | Upload `.md` files/folders; chunked + indexed into SQLite FTS5; BM25 search to verify retrieval          |
+| 3   | **QA Loop**       | `/qa-loop`       | Scan an API module → 3-level coverage matrix → generate Playwright specs + ADO Test Cases                |
+| 4   | **QA Runs**       | `/qa-runs`       | Execute specs against a DMS profile → ADO Test Run + AI failure triage → draft bugs + Allure report      |
+| 5   | **QA Pipelines**  | `/qa-pipelines`  | Watch an ADO pipeline; each build an AI impact analyzer picks the affected tests and fires a run         |
+| 6   | **Author Tests**  | `/author-tests`  | Pick a story → Analyst → Tester → review/edit → push to a Test Plan/Suite                                |
+| 7   | **Find Bugs**     | `/find-bugs`     | Pick a story → Analyst → paste actual behavior → Bug Writer → review/edit → push Bug work items          |
+| 8   | **Reports**       | `/reports`       | Date-range HTML board-activity report; auto-fires Thursday 11:00 while the app is running                |
+| 9   | **Settings**      | `/settings`      | ADO connection, LLM providers (live switch), Author-Tests / Reports / QA-Loop defaults, diagnostics      |
 
 > Two surfaces have **no sidebar entry**: **Batch (Epic) runs** — launched from Author Tests / Find
 > Bugs to fan a pipeline across every child of an epic (`/api/batches`) — and **Diagnostics**, folded
@@ -425,19 +425,19 @@ whenever the app is running — there is no catch-up for a missed slot.
 
 ## 8 — Troubleshooting
 
-| Symptom | Fix |
-|---|---|
-| `dotnet : command not found` | Install the .NET 8 SDK (see Prerequisites) and reopen the terminal. |
-| Backend exits immediately / `No connection could be made` from the frontend | Backend isn't running. Check Terminal 1 — `dotnet run` must be live and listening on `:5250`. |
-| Frontend shows "Network Error" everywhere | Same as above — the backend on `:5250` is down. |
-| CORS errors in the browser console | The frontend must run on `:5173` or `:5174` (the only allowed dev origins). |
-| `SQLite Error ... no such table: ...` | The DB didn't initialize. Stop the backend, delete `backend\data`, restart — it rebuilds. |
-| `ADO 401` | PAT expired or wrong scopes. Re-issue with **Work Items R/W + Test Management R/W + Code Read**, paste new value into Settings → Azure DevOps. |
-| `x-api-key header is required` / Anthropic 401 | You selected Anthropic in the dropdown but `ANTHROPIC_API_KEY` is empty. Either fill it, or switch to a different provider (e.g. Claude CLI) in the AppBar. |
-| `Claude CLI '...' not found on PATH` | Either install Claude Code and log in (`claude --version` should work in a fresh terminal), or set an absolute path in Settings → LLM Providers → Claude CLI. |
-| LLM ping times out | Increase **Timeout** in Settings, or switch provider. CLI calls take 2–5s by nature. |
-| Thursday auto-report didn't fire | The backend must be running at 11:00 Asia/Karachi on Thursday. If the machine was asleep, just hit **Generate** on the Reports page for the past 7 days. |
-| Port 5250 / 5173 already in use | `Get-NetTCPConnection -LocalPort 5250 -State Listen \| Select-Object -ExpandProperty OwningProcess \| Stop-Process -Force` |
+| Symptom                                                                     | Fix                                                                                                                                                           |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dotnet : command not found`                                                | Install the .NET 8 SDK (see Prerequisites) and reopen the terminal.                                                                                           |
+| Backend exits immediately / `No connection could be made` from the frontend | Backend isn't running. Check Terminal 1 — `dotnet run` must be live and listening on `:5250`.                                                                 |
+| Frontend shows "Network Error" everywhere                                   | Same as above — the backend on `:5250` is down.                                                                                                               |
+| CORS errors in the browser console                                          | The frontend must run on `:5173` or `:5174` (the only allowed dev origins).                                                                                   |
+| `SQLite Error ... no such table: ...`                                       | The DB didn't initialize. Stop the backend, delete `backend\data`, restart — it rebuilds.                                                                     |
+| `ADO 401`                                                                   | PAT expired or wrong scopes. Re-issue with **Work Items R/W + Test Management R/W + Code Read**, paste new value into Settings → Azure DevOps.                |
+| `x-api-key header is required` / Anthropic 401                              | You selected Anthropic in the dropdown but `ANTHROPIC_API_KEY` is empty. Either fill it, or switch to a different provider (e.g. Claude CLI) in the AppBar.   |
+| `Claude CLI '...' not found on PATH`                                        | Either install Claude Code and log in (`claude --version` should work in a fresh terminal), or set an absolute path in Settings → LLM Providers → Claude CLI. |
+| LLM ping times out                                                          | Increase **Timeout** in Settings, or switch provider. CLI calls take 2–5s by nature.                                                                          |
+| Thursday auto-report didn't fire                                            | The backend must be running at 11:00 Asia/Karachi on Thursday. If the machine was asleep, just hit **Generate** on the Reports page for the past 7 days.      |
+| Port 5250 / 5173 already in use                                             | `Get-NetTCPConnection -LocalPort 5250 -State Listen \| Select-Object -ExpandProperty OwningProcess \| Stop-Process -Force`                                    |
 
 ---
 
