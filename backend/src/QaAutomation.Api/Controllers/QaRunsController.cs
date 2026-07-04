@@ -25,13 +25,19 @@ public sealed class QaRunsController : ControllerBase
     private readonly QaDbContext _db;
     private readonly IOptions<QaLoopOptions> _opts;
     private readonly IOptions<AzureDevOpsOptions> _adoOpts;
+    private readonly ITeamsNotifier _teams;
+    private readonly RunExecutionService _runExec;
+    private readonly IPlaywrightRunner _runner;
     private readonly ILogger<QaRunsController> _log;
 
     public QaRunsController(
         IServiceScopeFactory scopeFactory, IEventBus bus, IAzureDevOpsClient ado, ILlmClientFactory llmFactory,
         IResultsIngestService ingest, QaDbContext db, IOptions<QaLoopOptions> opts,
-        IOptions<AzureDevOpsOptions> adoOpts, ILogger<QaRunsController> log)
+        IOptions<AzureDevOpsOptions> adoOpts, ITeamsNotifier teams, RunExecutionService runExec,
+        IPlaywrightRunner runner, ILogger<QaRunsController> log)
     {
+        _runExec = runExec;
+        _runner = runner;
         _scopeFactory = scopeFactory;
         _bus = bus;
         _ado = ado;
@@ -40,6 +46,7 @@ public sealed class QaRunsController : ControllerBase
         _db = db;
         _opts = opts;
         _adoOpts = adoOpts;
+        _teams = teams;
         _log = log;
     }
 
@@ -146,6 +153,107 @@ public sealed class QaRunsController : ControllerBase
             if (run is null) return StatusCode(404, new { detail = "Run not found." });
             var failures = await _db.TestFailures.Where(f => f.RunId == runId).ToListAsync(ct);
             return Ok(TestRunDetail.From(run, failures));
+        }
+        catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
+    }
+
+    /// <summary>Re-posts the run-complete Teams card for a run. ?template=compact|developer|scheduled
+    /// posts that one; omit to post all three (template preview/compare).</summary>
+    [HttpPost("{runId:int}/notify")]
+    public async Task<IActionResult> Notify(int runId, [FromQuery] string? template, CancellationToken ct)
+    {
+        var run = await _db.TestRuns.FindAsync([runId], ct);
+        if (run is null) return StatusCode(404, new { detail = "Run not found." });
+
+        // Backfill for runs that finished before per-level stats were persisted.
+        if (string.IsNullOrEmpty(run.LevelBreakdownJson))
+        {
+            run.LevelBreakdownJson = await _runExec.ComputeLevelBreakdownAsync(run, ct);
+            await _db.SaveChangesAsync(ct);
+        }
+
+        var templates = template is null
+            ? new[] { "compact", "developer", "scheduled" }
+            : new[] { template };
+        foreach (var t in templates)
+            await _teams.NotifyRunCompleteAsync(run, t, ct);
+        return Ok(new { posted = templates });
+    }
+
+    /// <summary>Resolved impact analysis for the Impact tab: reasoning/confidence plus the
+    /// impacted draft ids resolved to test titles and levels (raw ids are useless to a reader).</summary>
+    [HttpGet("{runId:int}/impact")]
+    public async Task<IActionResult> Impact(int runId, CancellationToken ct)
+    {
+        try
+        {
+            var run = await _db.TestRuns.FindAsync([runId], ct);
+            if (run is null) return StatusCode(404, new { detail = "Run not found." });
+
+            ImpactAnalysis? impact = null;
+            if (!string.IsNullOrEmpty(run.ImpactAnalysisJson))
+                try { impact = System.Text.Json.JsonSerializer.Deserialize<ImpactAnalysis>(run.ImpactAnalysisJson); }
+                catch { /* malformed → treat as no impact */ }
+            if (impact is null) return Ok(new { hasImpact = false });
+
+            var ids = impact.ImpactedDraftIds;
+            var tests = await _db.ApiTestDrafts
+                .Where(d => ids.Contains(d.Id))
+                .OrderBy(d => d.Level).ThenBy(d => d.Title)
+                .Select(d => new { d.Id, d.Title, Level = d.Level.ToString(), d.AdoTestCaseId })
+                .ToListAsync(ct);
+
+            return Ok(new
+            {
+                hasImpact = true,
+                confidence = impact.Confidence,
+                reasoning = impact.Reasoning,
+                fallback = impact.Fallback,
+                skippedReason = impact.SkippedReason,
+                impactedCount = ids.Count,
+                trigger = new
+                {
+                    source = run.TriggerSource.ToWire(),
+                    buildId = run.TriggerBuildId,
+                    commitSha = run.TriggerCommitSha,
+                    pipelineId = run.TriggerPipelineId,
+                },
+                tests,
+            });
+        }
+        catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
+    }
+
+    /// <summary>Re-enrich + regenerate the Allure report for a past run (level grouping, failure
+    /// categories, AI failure-analysis attachments). No Playwright execution, no ADO writes.</summary>
+    [HttpPost("{runId:int}/report/rebuild")]
+    public async Task<IActionResult> RebuildReport(int runId, CancellationToken ct)
+    {
+        var run = await _db.TestRuns.FindAsync([runId], ct);
+        if (run is null) return StatusCode(404, new { detail = "Run not found." });
+
+        try
+        {
+            var spec = new PlaywrightRunSpec
+            {
+                RunId = runId,
+                Module = run.Module ?? "",
+                Profile = run.Profile.ToWire(),
+                LevelFilter = run.LevelFilter,
+                TriggerSourceWire = run.TriggerSource.ToWire(),
+                TriggerPipelineId = run.TriggerPipelineId,
+                TriggerBuildId = run.TriggerBuildId,
+                TriggerCommitSha = run.TriggerCommitSha,
+                AdoTestRunId = run.AdoTestRunId,
+                ImpactAnalysisJson = run.ImpactAnalysisJson,
+                ActivityEnabled = run.ActivityEnabled,
+            };
+            var path = await _runner.RebuildReportAsync(spec, $"run:{runId}", ct);
+            if (path is null) return StatusCode(404, new { detail = "No allure-results preserved for this run." });
+
+            run.ReportPath = path;
+            await _db.SaveChangesAsync(ct);
+            return Ok(new { reportPath = path, reportUrl = $"/api/qaloop/runs/{runId}/report/" });
         }
         catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
     }

@@ -21,16 +21,18 @@ public sealed class RunExecutionService
     private readonly IAzureDevOpsClient _ado;
     private readonly IPlaywrightRunner _runner;
     private readonly IEventBus _bus;
+    private readonly ITeamsNotifier _teams;
     private readonly ILogger<RunExecutionService> _log;
 
     public RunExecutionService(
         QaDbContext db, IAzureDevOpsClient ado, IPlaywrightRunner runner,
-        IEventBus bus, ILogger<RunExecutionService> log)
+        IEventBus bus, ITeamsNotifier teams, ILogger<RunExecutionService> log)
     {
         _db = db;
         _ado = ado;
         _runner = runner;
         _bus = bus;
+        _teams = teams;
         _log = log;
     }
 
@@ -124,6 +126,7 @@ public sealed class RunExecutionService
                 TriggerBuildId     = run.TriggerBuildId,
                 TriggerCommitSha  = run.TriggerCommitSha,
                 AdoTestRunId      = adoTestRunId,
+                ImpactAnalysisJson = run.ImpactAnalysisJson,
                 ActivityEnabled   = run.ActivityEnabled,
             };
             var result = await _runner.RunAsync(spec, eventKey, ct);
@@ -147,6 +150,7 @@ public sealed class RunExecutionService
             }
 
             // 5 — Persist run counts + paths
+            run.LevelBreakdownJson = BuildLevelBreakdownJson(drafts, failedTcIds);
             run.Passed     = result.Passed;
             run.Failed     = result.Failed;
             run.Skipped    = result.Skipped;
@@ -156,7 +160,8 @@ public sealed class RunExecutionService
             run.FinishedAt = DateTime.UtcNow;
             run.Status     = result.Failed > 0 ? TestRunStatus.Failed : TestRunStatus.Passed;
 
-            // 6 — Persist failure records (triage classification deferred to QAL-035)
+            // 6 — Persist failure records with a deterministic bug draft each (no LLM), so every run
+            // yields ready-to-file Draft Bugs. The manual "AI Triage" can later enrich/reclassify.
             foreach (var (failure, tcId) in failureTcById)
             {
                 _db.TestFailures.Add(new TestFailure
@@ -167,6 +172,7 @@ public sealed class RunExecutionService
                     Classification   = FailureClassification.TestIssue,
                     Confidence       = "low",
                     Reason           = failure.ErrorMessage ?? "",
+                    BugDraftJson     = BuildBugDraftJson(run.Module, failure.TestTitle, tcId, failure.ErrorMessage),
                 });
             }
 
@@ -178,6 +184,9 @@ public sealed class RunExecutionService
                 new() { ["terminal"] = true, ["status"] = run.Status.ToString() });
             run.EventLogJson = SerializeNarrative(eventKey);
             await _db.SaveChangesAsync(ct);
+
+            // Teams card for every completed run (notifier is non-blocking + skips Cancelled/no-webhook).
+            await _teams.NotifyRunCompleteAsync(run, ct: CancellationToken.None);
         }
         catch (OperationCanceledException)
         {
@@ -195,10 +204,40 @@ public sealed class RunExecutionService
             run.FinishedAt = DateTime.UtcNow;
             run.EventLogJson = SerializeNarrative(eventKey);
             await SafeCommitAsync();
+            await _teams.NotifyRunCompleteAsync(run, ct: CancellationToken.None);
         }
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
+
+    /// <summary>Recompute the per-level breakdown for an existing run (backfill for runs that
+    /// finished before LevelBreakdownJson existed — used by the Teams notify endpoint).</summary>
+    public async Task<string> ComputeLevelBreakdownAsync(TestRun run, CancellationToken ct = default)
+    {
+        var drafts = await ResolveDraftsAsync(run, ct);
+        var failedTcIds = (await _db.TestFailures
+            .Where(f => f.RunId == run.Id && f.AdoTestCaseId != null)
+            .Select(f => f.AdoTestCaseId!.Value)
+            .ToListAsync(ct)).ToHashSet();
+        return BuildLevelBreakdownJson(drafts, failedTcIds);
+    }
+
+    /// <summary>Per-level Executed/Passed/Failed from the run's draft set. Failures that never
+    /// resolved to a test case id aren't attributed to a level, so per-level failed can undercount
+    /// relative to the run total.</summary>
+    private static string BuildLevelBreakdownJson(IReadOnlyList<ApiTestDraft> drafts, IReadOnlySet<int> failedTcIds)
+    {
+        var stats = drafts
+            .GroupBy(d => d.Level)
+            .OrderBy(g => g.Key)
+            .Select(g =>
+            {
+                var failed = g.Count(d => d.AdoTestCaseId is int id && failedTcIds.Contains(id));
+                return new LevelStat(g.Key.ToString(), g.Count(), Math.Max(0, g.Count() - failed), failed);
+            })
+            .ToList();
+        return JsonSerializer.Serialize(stats);
+    }
 
     private async Task<List<ApiTestDraft>> ResolveDraftsAsync(TestRun run, CancellationToken ct)
     {
@@ -331,6 +370,120 @@ public sealed class RunExecutionService
     /// <summary>Match key for a spec file: the file name only (lowercased). The draft stores an
     /// absolute path while the JUnit reporter emits a relative one, so we compare basenames.</summary>
     private static string SpecKey(string p) => Path.GetFileName(NormPath(p)).ToLowerInvariant();
+
+    /// <summary>Build a deterministic Bug draft (same JSON shape TriageAsync produces + a little extra
+    /// provenance) from a failed test so every run yields house-style, ready-to-file Draft Bugs without
+    /// an LLM call. FileBugsAsync consumes Title/Severity/Preconditions/ReproSteps/Expected/Observations
+    /// verbatim; the extra fields enrich the Draft Bugs card only. Mirrors the reference bug format
+    /// (descriptive title · Preconditions · numbered Steps · Expected Result · Actual Result).</summary>
+    private static string BuildBugDraftJson(string? module, string testTitle, int? tcId, string? errorMessage)
+    {
+        var mod = string.IsNullOrWhiteSpace(module) ? "QA" : module.Trim();
+        var reason = FirstLine(errorMessage);
+        var (method, route, caseDesc) = ParseTitle(testTitle);
+        var (expectedCode, actualCode) = ParseStatusCodes(reason);
+        var severity = InferSeverity(reason, actualCode);
+
+        // Descriptive, problem-focused title (not "test X failed").
+        string title;
+        if (method is not null && route is not null && expectedCode is not null && actualCode is not null)
+            title = $"{method} {route} returns HTTP {actualCode} instead of {expectedCode}";
+        else if (method is not null && route is not null)
+            title = $"{method} {route} — {caseDesc}";
+        else
+            title = caseDesc;
+
+        var steps = new List<string> { "Authenticate against the QA environment and obtain a valid bearer token." };
+        if (method is not null && route is not null)
+            steps.Add($"Send a {method} request to {route} with the bearer token in the Authorization header.");
+        else
+            steps.Add($"Execute the automated API test: {caseDesc}.");
+        steps.Add("Inspect the HTTP response status code and body.");
+
+        var expected = expectedCode is not null
+            ? $"The endpoint returns HTTP {expectedCode} with a response body that matches its contract."
+            : "The endpoint behaves per its contract (correct status code and response shape).";
+
+        var observations = new List<string>();
+        if (actualCode is not null)
+            observations.Add($"The endpoint returned HTTP {actualCode}.");
+        observations.Add(string.IsNullOrWhiteSpace(reason) ? "The automated assertion failed." : reason);
+
+        var draft = new
+        {
+            Title = title,
+            Severity = severity,
+            Preconditions = $"Logged in to the QA environment with access to the {mod} module; a valid bearer token is available.",
+            ReproSteps = steps,
+            Expected = expected,
+            Observations = observations,
+            // Card-only provenance (ignored by FileBugsAsync):
+            FoundBy = "Filed from a failed QA Loop Playwright run.",
+            AutomatedTest = caseDesc,
+            AdoTestCaseId = tcId,
+        };
+        return JsonSerializer.Serialize(draft);
+    }
+
+    /// <summary>Pull "{METHOD} {route}" (from the "Endpoint:/Contract:/Workflow:" describe segment) and
+    /// the human case description (last "›" segment) out of a Playwright test title.</summary>
+    private static (string? Method, string? Route, string CaseDesc) ParseTitle(string title)
+    {
+        var segs = title.Split('\u203a').Select(s => s.Trim()).Where(s => s.Length > 0).ToList();
+        var subject = segs.FirstOrDefault(s =>
+            s.StartsWith("Endpoint:", StringComparison.OrdinalIgnoreCase)
+            || s.StartsWith("Contract:", StringComparison.OrdinalIgnoreCase)
+            || s.StartsWith("Workflow:", StringComparison.OrdinalIgnoreCase)) ?? "";
+        var caseDesc = CleanTestTitle(title);
+        string? method = null, route = null;
+        if (subject.Contains(':'))
+        {
+            var body = subject[(subject.IndexOf(':') + 1)..].Trim();
+            var m = MethodRouteRegex.Match(body);
+            if (m.Success) { method = m.Groups[1].Value.ToUpperInvariant(); route = "/" + m.Groups[2].Value.TrimStart('/'); }
+        }
+        return (method, route, caseDesc);
+    }
+
+    private static (int? Expected, int? Actual) ParseStatusCodes(string reason)
+    {
+        int? exp = null, act = null;
+        var e = Regex.Match(reason, @"Expected:\s*(\d{3})");
+        if (e.Success) exp = int.Parse(e.Groups[1].Value);
+        var r = Regex.Match(reason, @"Received:\s*(\d{3})");
+        if (r.Success) act = int.Parse(r.Groups[1].Value);
+        return (exp, act);
+    }
+
+    /// <summary>Strip the "[chromium] › file:line › describe › " scaffolding and the [&lt;tcId-pending&gt;]
+    /// placeholder, leaving the human-readable test title.</summary>
+    private static string CleanTestTitle(string title)
+    {
+        if (string.IsNullOrWhiteSpace(title)) return "Automated test";
+        var parts = title.Split('\u203a');                       // '›'
+        var last = parts.Length > 0 ? parts[^1].Trim() : title.Trim();
+        last = TcPendingRegex.Replace(last, "").Trim();          // drop [<tcId-pending[:N]>]
+        last = TcIdRegex.Replace(last, "").Trim();               // drop a leading [12345]
+        return last.Length == 0 ? title.Trim() : last;
+    }
+
+    private static string FirstLine(string? s) =>
+        string.IsNullOrEmpty(s) ? "" : s.Split('\n').FirstOrDefault()?.Trim() ?? "";
+
+    private static string InferSeverity(string reason, int? actualCode)
+    {
+        // Return the plain words CreateBugAsync maps to ADO severities ("High" → "2 - High", etc.).
+        if (actualCode is >= 500 and < 600) return "High";
+        if (reason.Contains("timeout", StringComparison.OrdinalIgnoreCase)
+            || reason.Contains("ECONNREFUSED", StringComparison.OrdinalIgnoreCase))
+            return "High";
+        return "Medium";
+    }
+
+    private static readonly Regex TcPendingRegex =
+        new(@"\[<tcId-pending(?::\d+)?>\]", RegexOptions.Compiled);
+    private static readonly Regex MethodRouteRegex =
+        new(@"^(GET|POST|PUT|DELETE|PATCH)\s+(\S+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     /// <summary>Simple word-overlap score used to pick the best-matching draft when multiple
     /// endpoint cases share one spec file. Higher = more words in common.</summary>

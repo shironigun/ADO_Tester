@@ -80,7 +80,7 @@ public sealed class ContractGeneratorAgent
             specCode = JsonUtils.StrOr(so, "spec");
             schemaJson = JsonUtils.StrOr(so, "schema");
         }
-        specCode = TitleTag.EnsureInSpec(specCode, $"Contract: {route.Method} {route.Route}");
+        specCode = SpecNormalizer.Normalize(TitleTag.EnsureInSpec(specCode, $"Contract: {route.Method} {route.Route}"));
 
         // Pass 2: ADO Test Case
         var tcData = await JsonUtils.CompleteJsonAsync(

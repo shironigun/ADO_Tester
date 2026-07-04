@@ -1,7 +1,10 @@
 # QA Automation — YourProduct / Your Project
 
-Locally-hosted web app for Mahmood (BA, YourOrg) that turns Azure DevOps stories into
-test cases and bug reports in his QA style, plus a weekly HTML report of board activity.
+Locally-hosted web app for Mahmood (BA, YourOrg). It turns Azure DevOps stories into
+test cases and bug reports in his QA style, runs a 3-level **API-test automation loop** (scan a
+module → generate Playwright specs + ADO Test Cases → execute impact-selected runs off a watched
+pipeline → triage failures into draft bugs → post to Teams), and produces a weekly HTML report of
+board activity. Every page — and how it works under the hood — is documented in **[§7 — Features](#7--features-what-the-app-does-and-how-it-works)**.
 
 Stack: **.NET 8 (ASP.NET Core) backend** + **EF Core 8 + SQLite** (FTS5 for knowledgebase
 retrieval) + **React 19 + Vite + MUI** frontend (Redux Toolkit + React Query).
@@ -252,16 +255,171 @@ dotnet build QaAutomation.sln
 
 ---
 
-## 7 — Where the features live
+## 7 — Features (what the app does and how it works)
 
-| Page | Path | What it does |
-|---|---|---|
-| Settings        | `/`               | Configure ADO, all 4 LLM providers, Author Tests defaults, Reports config + diagnostics |
-| Knowledgebase   | `/knowledgebase`  | Upload `.md` files or whole folders; BM25 search to verify retrieval |
-| Author Tests    | `/author-tests`   | Pick story → Analyst → Tester → review/edit → push to Test Plan/Suite |
-| Find Bugs       | `/find-bugs`      | Pick story → Analyst → paste actual behavior → Bug Writer → review/edit → push Bug WIs |
-| Reports         | `/reports`        | Date-range HTML report; Thursday 11:00 auto-fire while app is running |
-| Diagnostics     | `/diagnostics`    | Same checks as Settings page diagnostics card, standalone |
+The app is one React SPA with **nine pages** in the left sidebar, all backed by the flat `/api` .NET
+backend. This section covers every feature and the mechanism behind it.
+
+| # | Page (sidebar) | Route | What it does |
+|---|---|---|---|
+| 1 | **Dashboard**     | `/projects`      | Live snapshot of the workspace — KPI tiles, an outcome donut, a recent-activity feed, quick-launch tiles |
+| 2 | **Knowledgebase** | `/knowledgebase` | Upload `.md` files/folders; chunked + indexed into SQLite FTS5; BM25 search to verify retrieval |
+| 3 | **QA Loop**       | `/qa-loop`       | Scan an API module → 3-level coverage matrix → generate Playwright specs + ADO Test Cases |
+| 4 | **QA Runs**       | `/qa-runs`       | Execute specs against a DMS profile → ADO Test Run + AI failure triage → draft bugs + Allure report |
+| 5 | **QA Pipelines**  | `/qa-pipelines`  | Watch an ADO pipeline; each build an AI impact analyzer picks the affected tests and fires a run |
+| 6 | **Author Tests**  | `/author-tests`  | Pick a story → Analyst → Tester → review/edit → push to a Test Plan/Suite |
+| 7 | **Find Bugs**     | `/find-bugs`     | Pick a story → Analyst → paste actual behavior → Bug Writer → review/edit → push Bug work items |
+| 8 | **Reports**       | `/reports`       | Date-range HTML board-activity report; auto-fires Thursday 11:00 while the app is running |
+| 9 | **Settings**      | `/settings`      | ADO connection, LLM providers (live switch), Author-Tests / Reports / QA-Loop defaults, diagnostics |
+
+> Two surfaces have **no sidebar entry**: **Batch (Epic) runs** — launched from Author Tests / Find
+> Bugs to fan a pipeline across every child of an epic (`/api/batches`) — and **Diagnostics**, folded
+> into the Settings page rather than living on its own route.
+
+### 7.0 — How the pipelines work (shared plumbing)
+
+Six of the nine pages drive a long-running LLM pipeline, and they all share the same machinery:
+
+- **ADO integration** — one cached `AzureDevOpsClient` (PAT Basic auth) reads work items, test
+  plans/suites, comments/updates, Git diffs/commits/code-search, and pipeline builds, and **writes**
+  Test Cases, Bugs, suite membership, Tested-By / Related links, and full ADO Test Run results. Write
+  bodies are byte-for-byte frozen so ADO artifacts look identical to the hand-authored originals.
+- **LLM agents** — each agent (`Analyst`, `Tester`, `BugWriter`, `CodeVerifier`, `ModuleAnalyzer`,
+  the three `*Generator`s, `ImpactAnalyzer`, `FailureTriage`) wraps a runtime-switchable `ILlmClient`
+  and streams output. System prompts are embedded resources (byte-exact from the retired Python app).
+- **Background + SSE pattern** — an HTTP call seeds a session row **synchronously**, returns its id,
+  then runs the pipeline on a background `Task` with its **own DI scope**. Live progress is published
+  to an in-memory event bus and streamed to the browser over **Server-Sent Events**; the durable
+  narrative is persisted to the session's event log, so a page refresh replays it. Cancellation flows
+  through a registry and a global concurrency cap protects the machine.
+- **Knowledgebase retrieval** — agents pull relevant `.md` chunks by BM25 to ground their output.
+- **Runtime-switchable providers** — the active LLM provider is persisted in SQLite and swapped live
+  from the AppBar dropdown; every call builds a fresh client (see §5).
+
+### 7.1 — Dashboard (`/projects`)
+
+**What:** the landing snapshot of the workspace. **How:** it loads recent Author-Tests and Find-Bugs
+sessions, reports, and KB documents, then renders KPI tiles (test / bug sessions, reports, KB docs),
+a donut of test-session outcomes (Done / Failed / Running), a merged **recent-activity feed** (latest
+seven items across all three), and quick-launch tiles. Read-only — a jumping-off point, not a pipeline.
+
+### 7.2 — Knowledgebase (`/knowledgebase`)
+
+**What:** a per-project markdown knowledge base that grounds the agents in domain context. **How:**
+upload individual `.md` files or a whole folder → each document is stored under
+`backend/data/kb/<projectId>/` and split into ~1000-character chunks that are indexed into the SQLite
+**FTS5** `doc_chunks` virtual table. The search box runs a **BM25** `MATCH` and returns ranked
+snippets — the exact same lexical retrieval the Analyst calls automatically before analysing a story
+(no embeddings, no API calls, fully local). Deleting a document removes its chunks and the file.
+
+### 7.3 — Author Tests (`/author-tests`)
+
+**What:** turn one ADO story into house-style Test Cases and push them to a Test Plan/Suite.
+**How (the flow):**
+
+1. Search for and pick a story.
+2. **Analyst** reads the title/description/acceptance criteria (plus KB context) → a structured
+   analysis (module, feature, happy path, edge & negative cases, business rules, permissions).
+3. **Tester** turns that analysis into Test Case drafts (title, preconditions, numbered steps) —
+   automatically (auto-handoff) or when you click **Run Tester**.
+4. Review and edit drafts inline; editing the analysis can regenerate the tests.
+5. **Approve** → choose a Test Plan/Suite → **Push**: each Test Case is created, added to the suite,
+   and linked **Tested-By** back to the story.
+
+Progress streams live via SSE. Orchestrated by `AgentOrchestrator`.
+
+### 7.4 — Find Bugs (`/find-bugs`)
+
+**What:** contrast a story's expected behavior against what actually happened and file bugs.
+**How (the flow):**
+
+1. Pick a story → **Analyst** produces the expected-behavior analysis.
+2. You paste the **actual behavior** and, optionally, code context — commit/PR ids the backend
+   resolves into real Git diffs.
+3. **CodeVerifier** inspects the linked code, then **BugWriter** contrasts expected vs. actual vs.
+   code evidence → prioritized bug drafts (severity, repro steps, expected / actual / suggested fix).
+4. Review/edit → **Approve** → **Push**: each Bug work item is created (frozen ReproSteps / AC /
+   SystemInfo HTML) and linked **Related** to the story.
+
+Also supports "bug from a failed test verdict" (instant, or agent-reviewed). Orchestrated by `BugOrchestrator`.
+
+### 7.5 — QA Loop: module scan & author (`/qa-loop`)
+
+**What:** the API-testing brain. Scan a backend module and author a full **3-level** suite —
+**Contract**, **Endpoint**, **Workflow** — as Playwright specs *and* ADO Test Cases in the house style.
+**How (the flow):**
+
+1. **Scan** — supply a module, repo/branch, a target Plan/Suite, and optionally a story + source
+   directories. `ModuleAnalyzerAgent` reads the source over the ADO Git API and emits an **inventory**
+   (routes, DTOs, workflows) plus a **coverage matrix** reconciled against the story's existing Test
+   Cases — every row is marked *gap* or *covered*.
+2. **Review** — tick the surfaces to author and save edits to the matrix (auto-handoff skips this).
+3. **Generate** — three agents run **in parallel** over the selected rows:
+   - **Contract** → a Zod schema + a `.spec.ts` asserting response shape/types.
+   - **Endpoint** → one spec with `200` / `401` (no bearer) / `400` (invalid body) cases.
+   - **Workflow** → a chained multi-step spec with idempotent cleanup.
+
+   Specs are written to disk under `backend/data/.../scripts/<module>/…`, instrumented for Allure, and
+   each carries a `[<tcId-pending>]` title tag.
+4. **Push** — creates the ADO Test Cases, rewrites the pending tag to the real id (in both title and
+   spec), adds them to the suite, and links Tested-By. Re-pushing is idempotent. Orchestrated by
+   `QaLoopOrchestrator`.
+
+### 7.6 — QA Runs: execute, triage, file bugs (`/qa-runs`)
+
+**What:** run the generated specs and turn failures into bugs. **How (the flow):**
+
+1. **Start** — pick a module (optionally filtered by level/tag) and a **DMS profile** (*Infinity* is
+   the credentialed MVP target; Ideal/Aspen/Quantum are reserved). Runs can also be fired for you by a
+   pipeline watcher (§7.7).
+2. **Execute** — `PlaywrightRunner` provisions a Node runtime once, then runs the selected specs
+   against the profile's base URL + bearer token; results are parsed from JUnit XML into
+   pass/fail/skipped counts.
+3. **ADO Test Run** — a fresh ADO Test Run is created, each Test Case is marked Pass/Fail, and the run
+   is completed (visible in ADO's Test hub).
+4. **Triage** — `FailureTriageAgent` classifies each failure as **real_bug / flaky / test_issue /
+   stale_test** with a confidence and reasoning; real bugs get a pre-built bug draft (no second LLM call).
+5. **File bugs** — select failures → ADO Bugs are created and linked to the Test Case + story.
+6. **Report + notify** — a single-file **Allure** HTML report (with per-`(module, pipeline)` trend
+   history) is generated and served in-app, and a **Microsoft Teams** card posts the summary.
+
+Orchestrated by `RunExecutionService` + `ResultsIngestService`, with `TeamsNotifier` for the cards.
+
+### 7.7 — QA Pipelines: watch & impact-analyze (`/qa-pipelines`)
+
+**What:** keep tests running automatically as the product changes. **How:**
+
+- Add a **watch**: an ADO pipeline id + display name + the module whose tests it maps to.
+- A background hosted service **polls** every few minutes (configurable). On the first poll it
+  fast-forwards to the newest build; afterwards it processes new builds oldest-first, backing off on error.
+- Per build it collects the **changed files**, projects the module's pushed drafts to a token-cheap
+  inventory (no spec code), and asks `ImpactAnalyzerAgent` which tests are affected (impacted ids +
+  reasoning + confidence). If analysis fails repeatedly it **falls back** to running the whole module.
+- It then fires a QA Run (trigger = *PipelineWatcher*, tagged with the build/commit) down the same
+  execution path as a manual run. **Run latest** and **Skip to latest** give manual control; the
+  enable switch pauses a watch.
+
+### 7.8 — Reports (`/reports`)
+
+**What:** a self-contained, themed HTML slide-deck of a week's board activity. **How:** choose a date
+range + boards + theme → the backend pulls the tickets, an LLM summarizer groups them into
+themes / wins / risks, and `ReportHtmlBuilder` renders a fully self-contained `.html` file (Executive /
+Standup / Branded themes) saved under `backend/data/reports/` and viewable or downloadable in-app. A
+hosted scheduler auto-fires it **Thursday 11:00 Asia/Karachi** (toggle + defaults live in Settings)
+whenever the app is running — there is no catch-up for a missed slot.
+
+### 7.9 — Settings & Diagnostics (`/settings`)
+
+**What:** everything configurable, plus one-click health checks. **How:**
+
+- **ADO** — org / project / PAT, with pickers that auto-discover orgs, projects, area paths, repos and branches.
+- **LLM providers** — configure all four and switch the active one **live** from the AppBar (the choice persists in SQLite; see §5).
+- **Defaults** — Author-Tests plan/suite, Reports boards/schedule/theme, and a **QA Loop** tab (Teams
+  webhook + template, watcher poll interval, Allure report provider, verbose-activity toggle).
+- **Two-layer settings** — `.env` seeds strongly-typed options; a DB-persisted overlay edited here
+  **wins over** `.env` (applied at startup and on save).
+- **Diagnostics** — one-click probes: required secrets present, an ADO read of a work item, and an LLM
+  ping to the active provider (the same checks used in §4).
 
 ---
 

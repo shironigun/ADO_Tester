@@ -26,7 +26,7 @@ public sealed class WorkflowGeneratorAgent
 
         var specCode = "";
         if (specData is JsonObject so)
-            specCode = TitleTag.EnsureInSpec(JsonUtils.StrOr(so, "spec"), $"Workflow: {workflow.Name}");
+            specCode = SpecNormalizer.Normalize(TitleTag.EnsureInSpec(JsonUtils.StrOr(so, "spec"), $"Workflow: {workflow.Name}"));
 
         // Pass 2: ADO Test Case
         var tcData = await JsonUtils.CompleteJsonAsync(

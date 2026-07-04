@@ -9,8 +9,8 @@ public sealed class QaLoopOptions
 
     public string TeamsWebhookUrl { get; set; } = "";
 
-    /// <summary>Active Teams card template: developer (default) | compact | scheduled.</summary>
-    public string TeamsTemplate { get; set; } = "developer";
+    /// <summary>Active Teams card template: scheduled (default) | compact | developer.</summary>
+    public string TeamsTemplate { get; set; } = "scheduled";
 
     /// <summary>Subfolder under DataDirectory where generated Playwright specs are written.</summary>
     public string ScriptsFolderName { get; set; } = "scripts";

@@ -40,7 +40,8 @@ public sealed class EndpointGeneratorAgent
         // QAL-067: tag each case's test( block with its own [<tcId-pending:N>] placeholder (in source
         // order) BEFORE splitting into per-case GeneratedSpecs — the file is shared, so this must happen
         // once against the whole spec, not per-case against an already-scattered copy.
-        var specCode = TitleTag.EnsureIndexedInSpec(rawSpecCode, cases.Count);
+        // SpecNormalizer guarantees the auth/base-URL wiring is correct even if the LLM drifts.
+        var specCode = SpecNormalizer.Normalize(TitleTag.EnsureIndexedInSpec(rawSpecCode, cases.Count));
 
         // Pass 2: ADO Test Cases for each case
         var tcData = await JsonUtils.CompleteJsonAsync(

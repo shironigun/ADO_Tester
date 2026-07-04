@@ -123,4 +123,32 @@ export async function previewImpact(
   return data
 }
 
+export interface RunImpactTest {
+  id: number
+  title: string
+  level: string
+  adoTestCaseId: number | null
+}
+
+export interface RunImpact {
+  hasImpact: boolean
+  confidence?: string
+  reasoning?: string
+  fallback?: boolean
+  skippedReason?: string | null
+  impactedCount?: number
+  trigger?: {
+    source: string
+    buildId: number | null
+    commitSha: string | null
+    pipelineId: number | null
+  }
+  tests?: RunImpactTest[]
+}
+
+export async function getRunImpact(runId: number): Promise<RunImpact> {
+  const { data } = await api.get<RunImpact>(`/api/qaloop/runs/${runId}/impact`)
+  return data
+}
+
 export const runStreamUrl = (id: number) => apiUrl(`/api/qaloop/runs/${id}/stream`)

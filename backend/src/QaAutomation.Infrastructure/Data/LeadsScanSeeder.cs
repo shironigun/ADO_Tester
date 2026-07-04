@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using QaAutomation.Core.Configuration;
 using QaAutomation.Core.Models;
+using QaAutomation.Infrastructure.Agents;
 
 namespace QaAutomation.Infrastructure.Data;
 
@@ -447,7 +448,7 @@ public sealed class LeadsScanSeeder
                     "    expect([400, 422]).toContain(res.status());\n  });\n");
         }
         sb.Append("});\n");
-        return sb.ToString();
+        return SpecNormalizer.Normalize(sb.ToString());
     }
 
     private static string WorkflowSpec(Wf w)
@@ -470,7 +471,7 @@ public sealed class LeadsScanSeeder
                 "  expect(step" + (i + 1) + ".ok()).toBeTruthy();\n\n");
         }
         sb.Append("});\n");
-        return sb.ToString();
+        return SpecNormalizer.Normalize(sb.ToString());
     }
 
     // ── Spec file writer (mirrors PersistDraft's slug + level-dir rules) ───────

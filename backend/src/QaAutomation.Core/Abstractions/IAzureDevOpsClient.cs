@@ -57,6 +57,10 @@ public interface IAzureDevOpsClient
         string foundWith = "Manual Test", CancellationToken ct = default);
     Task LinkRelatedAsync(int fromId, int toId, CancellationToken ct = default);
 
+    /// <summary>Sets <paramref name="parentId"/> as the parent of <paramref name="childId"/>
+    /// (Hierarchy-Reverse) — the child appears nested under the parent in ADO.</summary>
+    Task LinkParentAsync(int childId, int parentId, CancellationToken ct = default);
+
     /// <summary>Upload a binary as an ADO attachment; returns the attachment reference URL to link onto a WI.</summary>
     Task<string> UploadAttachmentAsync(string fileName, byte[] content, CancellationToken ct = default);
 

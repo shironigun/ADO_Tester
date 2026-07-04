@@ -118,8 +118,19 @@ public sealed class PipelineWatcherHostedService : BackgroundService
         }
     }
 
-    private async Task<int?> ProcessBuildAsync(PipelineWatch watch, AdoBuild build, QaDbContext db, CancellationToken ct)
+    private async Task<int?> ProcessBuildAsync(
+        PipelineWatch watch, AdoBuild build, QaDbContext db, CancellationToken ct, bool force = false)
     {
+        // Idempotency guard: a build that already produced a TestRun (any status) is never
+        // re-processed by the poller — only the explicit "Run latest" button (force) may re-run.
+        if (!force && await db.TestRuns.AnyAsync(
+                r => r.TriggerPipelineId == watch.AdoPipelineId && r.TriggerBuildId == build.Id, ct))
+        {
+            _log.LogInformation(
+                "PipelineWatch {Id}: build {BuildId} already has a run — skipping", watch.Id, build.Id);
+            return null;
+        }
+
         // Collect changed files from all commits in this build
         var buildChanges = await _ado.GetBuildChangesAsync(build.Id, ct);
         var allFiles = new List<string>();
@@ -150,9 +161,19 @@ public sealed class PipelineWatcherHostedService : BackgroundService
             return null;
         }
 
-        // Analyze impact with retry + fallback
+        // Empty change set (manually re-queued build, no new commits since the previous one):
+        // the impact analyzer has nothing to reason over and would cancel with "no impacted
+        // tests" — but a re-deployed build is exactly when a full regression is wanted. Skip the
+        // LLM and run the whole module.
         var commitMessages = buildChanges.Select(c => c.Message).ToList();
-        var impact = await AnalyzeImpactWithFallbackAsync(allFiles, commitMessages, inventory, ct);
+        var impact = allFiles.Count == 0 && commitMessages.Count == 0
+            ? new ImpactAnalysis
+            {
+                ImpactedDraftIds = inventory.Select(d => d.Id).ToList(),
+                Reasoning = "No changed files detected for this build (manual re-queue or empty change set) — running the full module regression.",
+                Confidence = "high",
+            }
+            : await AnalyzeImpactWithFallbackAsync(allFiles, commitMessages, inventory, ct);
 
         if (impact.ImpactedDraftIds.Count == 0)
         {
@@ -273,7 +294,7 @@ public sealed class PipelineWatcherHostedService : BackgroundService
         var latest = builds.MaxBy(b => b.Id);
         if (latest is null) return null;
 
-        var runId = await ProcessBuildAsync(watch, latest, db, ct);
+        var runId = await ProcessBuildAsync(watch, latest, db, ct, force: true);
         watch.LastSeenBuildId = Math.Max(watch.LastSeenBuildId ?? 0, latest.Id);
         watch.LastPollAt = DateTime.UtcNow;
         watch.LastPollError = null;

@@ -808,6 +808,9 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("JunitPath");
 
+                    b.Property<string>("LevelBreakdownJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("LevelFilter")
                         .HasColumnType("TEXT")
                         .HasColumnName("LevelFilter");
