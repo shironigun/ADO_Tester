@@ -104,6 +104,9 @@ export const components: Components<Theme> = {
               transform: 'translateY(-1px)',
               boxShadow: `0 10px 26px -8px ${alpha(pal.main, 0.7)}`,
             },
+            // MUI's disabled state only clears background-color, not the gradient image — reset it
+            // so disabled contained buttons read as disabled instead of a faded blue.
+            '&.Mui-disabled': { backgroundImage: 'none', boxShadow: 'none' },
           }),
         }
       },

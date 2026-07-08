@@ -545,14 +545,14 @@ export default function QaRunsPage() {
 
   return (
     <Box>
-      <PageHeader title="QA Runs" subtitle="Launch and review Playwright test runs" />
+      <PageHeader title="QA Runs" />
       <Box sx={{ px: 3 }}>
         {/* Launcher */}
         <Card variant="outlined" sx={{ mb: 3 }}>
           <CardContent>
             <Typography variant="subtitle2" sx={{ mb: 2 }}>New Run</Typography>
             {launchError && <Alert severity="error" sx={{ mb: 2 }}>{launchError}</Alert>}
-            <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap' }}>
+            <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap', alignItems: 'flex-start' }}>
               <TextField select label="Module" size="small" value={module}
                 onChange={e => setModule(e.target.value)} sx={{ minWidth: 200 }}
                 disabled={facetsQ.isLoading}
@@ -577,7 +577,7 @@ export default function QaRunsPage() {
                   <MenuItem key={p} value={p} sx={{ textTransform: 'capitalize' }}>{p}</MenuItem>)}
               </TextField>
               <Button variant="contained" startIcon={launching ? <CircularProgress size={16} /> : <PlayArrowIcon />}
-                disabled={launching || !module} onClick={doLaunch}>Run</Button>
+                disabled={launching || !module} onClick={doLaunch} sx={{ height: 40, px: 3 }}>Run</Button>
             </Stack>
           </CardContent>
         </Card>

@@ -117,10 +117,7 @@ export default function ReportsPage() {
 
   return (
     <Box>
-      <PageHeader
-        title="Reports"
-        subtitle="Generate a self-contained HTML report for a date range and boards — view full-screen or download."
-      />
+      <PageHeader title="Reports" />
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={3} sx={{ alignItems: 'flex-start' }}>
 
         {/* Generate panel */}

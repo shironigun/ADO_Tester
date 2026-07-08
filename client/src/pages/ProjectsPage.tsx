@@ -80,10 +80,7 @@ export default function ProjectsPage() {
 
   return (
     <Box sx={{ pb: 4 }}>
-      <PageHeader
-        title="Dashboard"
-        subtitle="Live snapshot of the Your Project workspace — sessions, bugs, reports, and recent activity."
-      />
+      <PageHeader title="Dashboard" />
 
       {/* KPI tiles */}
       <Stagger>

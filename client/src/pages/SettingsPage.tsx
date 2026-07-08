@@ -27,7 +27,9 @@ import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined'
 import HealthAndSafetyOutlinedIcon from '@mui/icons-material/HealthAndSafetyOutlined'
 import RadioButtonCheckedIcon from '@mui/icons-material/RadioButtonChecked'
 import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined'
+import StorageOutlinedIcon from '@mui/icons-material/StorageOutlined'
 import PageHeader from '../components/PageHeader'
+import DatabaseSettings from '../components/DatabaseSettings'
 import Section from '../components/Section'
 import { FadeIn, Stagger, StaggerItem } from '../motion/primitives'
 import { MONO_FONT } from '../theme/tokens'
@@ -196,6 +198,7 @@ function ProviderCard({
 
 const TABS = [
   { key: 'ado',      label: 'Azure DevOps',  icon: <CloudOutlinedIcon fontSize="small" /> },
+  { key: 'database', label: 'Database',      icon: <StorageOutlinedIcon fontSize="small" /> },
   { key: 'llm',      label: 'LLM Providers', icon: <SmartToyOutlinedIcon fontSize="small" /> },
   { key: 'tests',    label: 'Author Tests',  icon: <RuleOutlinedIcon fontSize="small" /> },
   { key: 'findbugs', label: 'Find Bugs',     icon: <BugReportOutlinedIcon fontSize="small" /> },
@@ -453,7 +456,6 @@ export default function SettingsPage() {
   const Header = (
     <PageHeader
       title="Settings"
-      subtitle="Connections, providers, and defaults."
       actions={
         <Stack direction="row" spacing={3} sx={{ alignItems: 'center' }}>
           <StatusPill ok={!!activeProvider} label="LLM" value={activeProvider || 'unset'} />
@@ -562,6 +564,9 @@ export default function SettingsPage() {
                   </Panel>
                 </Box>
               )}
+
+              {/* ── DATABASE ──────────────────────────────────────────────── */}
+              {tab === 'database' && <DatabaseSettings />}
 
               {/* ── LLM PROVIDERS ─────────────────────────────────────────── */}
               {tab === 'llm' && (

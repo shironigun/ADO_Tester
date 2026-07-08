@@ -39,6 +39,8 @@ public static class DependencyInjection
             .AddInterceptors(SqliteBusyTimeoutInterceptor.Instance));
         services.AddScoped<DatabaseInitializer>();
         services.AddScoped<LeadsScanSeeder>();
+        services.AddScoped<SchemaExplorer.SchemaScanService>();   // DB Schema Explorer repo scanner (read-only)
+        services.AddScoped<SchemaExplorer.SchemaTraceService>();  // DB Schema Explorer live entity trace (SELECT-only)
         services.AddDbLogging();
         services.AddAzureDevOps(config);
         services.AddLlm(config);
