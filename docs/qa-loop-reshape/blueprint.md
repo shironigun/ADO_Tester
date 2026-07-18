@@ -4490,7 +4490,7 @@ The templates are JSON with `{{token}}` placeholders that `TeamsNotifier` fills 
       "actions": [
         { "type": "Action.OpenUrl", "title": "ADO Test Run", "url": "{{adoTestRunUrl}}" },
         { "type": "Action.OpenUrl", "title": "Email QA Lead",
-          "url": "mailto:Mahmood Ahmad?subject=QA%20Run%20{{status}}%20-%20{{module}}" }
+          "url": "mailto:{{qa_lead_email}}?subject=QA%20Run%20{{status}}%20-%20{{module}}" }
       ]
     }
   }]

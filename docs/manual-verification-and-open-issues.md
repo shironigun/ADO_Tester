@@ -187,7 +187,7 @@ ever reaches the bug-writer LLM. Two are fixed; one remains:
 - **Default test ticket: 171740** (User Story, "Customer Import via CSV / Excel File…").
 - **Local project id in the UI/API is `1`** (frontend `PROJECT_ID = 1`).
 - **Configured LLM:** provider `ClaudeCli`, model `claude-sonnet-4-6`, idle timeout 180s, absolute cap
-  1800s. CLI at `C:\Users\temp\.local\bin\claude.exe`.
+  1800s. CLI at `%USERPROFILE%\.local\bin\claude.exe`.
 
 ---
 

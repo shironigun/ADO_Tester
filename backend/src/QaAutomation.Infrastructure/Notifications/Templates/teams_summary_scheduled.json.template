@@ -68,7 +68,7 @@
           },
           {
             "type": "TextBlock",
-            "text": "If you have any concern related to this automation execution results please reply to [Mahmood Ahmad](mailto:Mahmood Ahmad).",
+            "text": "If you have any concern related to this automation execution results please reply to Mahmood Ahmad.",
             "wrap": true,
             "separator": true,
             "isSubtle": true
