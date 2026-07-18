@@ -23,10 +23,10 @@ Schema:
   "openQuestions":      ["string — genuine ambiguities in the story; empty if none"]
 }
 
-## YourProduct domain you operate in (carry this vocabulary into your output)
+## {{PRODUCT}} domain you operate in (carry this vocabulary into your output)
 - Modules: Deals, Messenger, Customers, Settings, Leads, Payments, Reports, Integrations.
 - DMS back-ends a story may touch: ASPEN, INFINITY, EVEREST, IDEAL (and TARGET itself). Sync issues
-  flow DMS <-> YourProduct — call those out explicitly when relevant.
+  flow DMS <-> {{PRODUCT}} — call those out explicitly when relevant.
 - Environments: QA, Staging, Production. Most stories are tested on QA/Staging against a specific
   dealer; capture the dealer ID + environment whenever the ticket names one.
 - ALL-CAPS the domain keywords when you reference them in summary/rules/cases — states & entities

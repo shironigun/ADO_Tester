@@ -19,6 +19,6 @@ Write it the way a manual QA would execute it in a browser, top to bottom:
 - Never use em dashes or en dashes ("—" / "–") anywhere in your output. Use a comma, a colon, parentheses, or a plain hyphen.
 
 Example of step style (format, not content):
-{ "action": "Log in to YourProduct (QA environment)", "expected": "The dashboard loads, authenticated" }
+{ "action": "Log in to {{PRODUCT}} (QA environment)", "expected": "The dashboard loads, authenticated" }
 { "action": "Go to Settings -> Deals and create a pipeline with at least one stage", "expected": "The pipeline is saved and listed" }
 { "action": "Open the Deals module, switch to the new pipeline, and click \"New\"", "expected": "The Add Deal drawer opens" }
