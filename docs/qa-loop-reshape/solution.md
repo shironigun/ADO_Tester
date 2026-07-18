@@ -38,7 +38,7 @@ The existing **QA Loop** page inside ADO_Tester (`/qa-loop`) is a four-step pipe
 module → Extract KB → Generate one Playwright spec → Ingest JUnit + triage), scoped to the Deals
 module and to a single UI-level scenario per session. In a separate prototype effort, a
 Playwright framework was built **inside the Your Repo** at
-`web-app/src/target-crm/automation` that introduced three API-test levels (Contract / Endpoint /
+`web-app/src/your-product/automation` that introduced three API-test levels (Contract / Endpoint /
 Workflow) with Zod schemas, DMS execution profiles, owned execution, and impact-based selection
 — none of which exist in the current QA Loop.
 

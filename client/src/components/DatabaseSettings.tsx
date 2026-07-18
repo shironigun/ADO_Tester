@@ -118,7 +118,7 @@ export default function DatabaseSettings() {
               <TextField label="Server" size="small" sx={{ flex: 1 }} value={server}
                 onChange={e => setServer(e.target.value)} placeholder="host,1433" />
               <TextField label="Database" size="small" sx={{ flex: 1 }} value={database}
-                onChange={e => setDatabase(e.target.value)} placeholder="YourProduct" />
+                onChange={e => setDatabase(e.target.value)} placeholder="MyProduct" />
             </Stack>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
               <TextField label="User" size="small" sx={{ flex: 1 }} value={user}

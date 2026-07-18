@@ -1,11 +1,11 @@
-# QA Automation — Migration Plan: Python → .NET backend + target-crm-aligned frontend
+# QA Automation — Migration Plan: Python → .NET backend + your-product-aligned frontend
 
 > **Status — migration executed (as of 2026-06-22).** This plan has been carried out: the .NET backend scaffolded under `dotnet/` now lives in **`backend/`** and is the sole backend; the Python FastAPI app was **retired 2026-06-21** (recover from git history for a parity reference). The frontend re-architecture (F0–F5) is done. References below to "the live Python wins / source of truth" are now historical — the contract is preserved by the golden-file tests and ported frozen literals. The execution spec [`dotnet-migration-spec.md`](dotnet-migration-spec.md) supersedes this plan; runtime status + open issues are in [`manual-verification-and-open-issues.md`](manual-verification-and-open-issues.md).
 
 **Goal.** Re-platform the QA Automation app (`ADO_Tester`) so it conforms to the YourOrg / *Your Project* org stack and can be hosted as its **own Azure DevOps project**:
 
 - **Backend:** rewrite the Python FastAPI/agent backend in **.NET**, following the CRM monorepo's .NET conventions.
-- **Frontend:** keep the existing React client's newer versions, but adopt **target-crm's architecture** (Redux Toolkit + React Query + feature-module folders + centralized axios client + config layer). *Architecture only* — no tooling/i18n/Formik/multi-env parity.
+- **Frontend:** keep the existing React client's newer versions, but adopt **your-product's architecture** (Redux Toolkit + React Query + feature-module folders + centralized axios client + config layer). *Architecture only* — no tooling/i18n/Formik/multi-env parity.
 - **Constraint:** preserve all user-facing behavior and the frozen contracts (endpoints, camelCase JSON, enum spellings, table/column names, ADO REST JSON literals, agent prompts). This is the inverse of `docs/python-migration-plan.md`.
 
 This document is the companion/inverse of `docs/python-migration-plan.md`. Read that for the full behavior contract; this plan focuses on the .NET target shape and sequencing.
@@ -33,7 +33,7 @@ This document is the companion/inverse of `docs/python-migration-plan.md`. Read 
 | Config | pydantic-settings (.env) + Settings table | Options pattern (`IOptions<T>`) + `appsettings.{Env}.json` + Settings table |
 
 ### Frontend
-| | Current (`client/`) | Target architecture (target-crm) |
+| | Current (`client/`) | Target architecture (your-product) |
 |---|---|---|
 | Build / lang | Vite 8, TS 6, React 19 | **keep** (target uses Vite 6/TS 5.9 — do not downgrade) |
 | UI | MUI 9 + Emotion + Framer Motion | **keep** MUI 9 (target is MUI 7 — do not downgrade) |
@@ -145,7 +145,7 @@ The original `QaAutomation.*` tree was deleted at the Python cutover; **recover 
 
 ## 5. Frontend migration — architecture alignment (architecture only)
 
-Keep MUI 9 / Vite 8 / TS 6 / React 19 / Framer Motion. Restructure to target-crm's layering and introduce RTK + React Query. The current `session/` config-driven engine maps cleanly onto a feature module.
+Keep MUI 9 / Vite 8 / TS 6 / React 19 / Framer Motion. Restructure to your-product's layering and introduce RTK + React Query. The current `session/` config-driven engine maps cleanly onto a feature module.
 
 **Target `client/src` shape:**
 ```
@@ -166,19 +166,19 @@ src/
     layouts/       { Layout (AppBar + Drawer) }
 ```
 
-**Mapping rules (from target-crm conventions):**
+**Mapping rules (from your-product conventions):**
 - **API layer = pure, typed, no UI.** Each `components/<feature>/api/<feature>-api.ts` exports a named object of `async` methods that call `{ get, post, put, patch, del }` from `api/`, build the URL from `config.get('api.qa')`, and return typed data. No auth handling in feature APIs (interceptors do it). No data transforms in components.
 - **React Query owns server state.** Replace `useSessionsLive`/`useSessionDetail` (`setInterval` polling) with `useQuery` + `refetchInterval` (gated while a session is in-flight) + `useMutation` + `queryClient.invalidateQueries`. Array query keys scoped by id (e.g. `['author-tests','sessions',projectId]`).
 - **Redux owns global UI state** (selection, dialogs, color mode, cross-feature flags). Never store server data that React Query can own. Keep the config-driven `SessionModuleConfig` idea but feed it RTK/RQ instead of bespoke hooks.
 - **SSE stays custom** (`common/hooks/useEventStream.ts`) — no React Query equivalent; optionally push frames into `queryClient.setQueryData`.
-- **Provider shell** in `app/` mirrors target-crm: `ErrorBoundary > QueryClientProvider > Redux Provider > ThemeProvider > BrowserRouter > Routes`.
+- **Provider shell** in `app/` mirrors your-product: `ErrorBoundary > QueryClientProvider > Redux Provider > ThemeProvider > BrowserRouter > Routes`.
 - **Base URL via config.** Introduce `VITE_QA_API` so the client can address the new App Service backend per environment (replaces the hardcoded relative `/api` + dev proxy; keep the Vite proxy for local dev only).
 
 ### Frontend phases
 - **F0** — add deps (`@reduxjs/toolkit`, `react-redux`, `@tanstack/react-query`), scaffold `app/`, `api/`, `config/`, `common/`, `routes/`; mount providers in `main.tsx`.
 - **F1** — centralized `axios-client` + `config`; migrate all inline `axios('/api/...')` calls into per-feature `api/*` modules (behavior-preserving).
 - **F2** — introduce React Query; replace polling hooks feature-by-feature (Author Tests first, then Find Bugs, Batches, Reports, KB, Settings); keep `useEventStream`.
-- **F3** — introduce Redux slices for cross-cutting UI state; move `ColorMode` into the store or keep as context (allowed by target-crm).
+- **F3** — introduce Redux slices for cross-cutting UI state; move `ColorMode` into the store or keep as context (allowed by your-product).
 - **F4** — relocate `pages/` + `session/` into `components/<feature>/` modules with barrels; central `routes/Routes.tsx`.
 - **F5** — point `config` at the new backend; verify against the .NET API.
 
@@ -211,7 +211,7 @@ The Python app is the authoritative contract. The .NET rewrite must reproduce **
 3. **Enum string spellings** (`SessionStatus`, `BugSessionStatus` incl. `AwaitingActual`/`Verifying`, `DraftStatus`, **`BugDraftStatus`** (distinct type), `BugSeverity`, `ReportStatus`/`Theme`, `LlmProvider` incl. `ClaudeCli`, `BatchModule`=`author-tests`/`find-bugs`, `BatchMode`=`auto`/`manual`). **[audit] Serialize via `JsonStringEnumConverter` as the exact NAME — NOT int and NOT camelCased; use `[JsonStringEnumMemberName]` for the kebab/lowercase values. Verdict statuses `pass|fail|inconclusive` are also frozen.**
 4. **Table/column names** (PascalCase EF defaults = original schema).
 5. **ADO REST JSON literals** — Steps XML (byte-identical), json-patch op bodies, testplan `workItem` wrapper, rel names (`Microsoft.VSTS.Common.TestedBy-Reverse`, `System.LinkTypes.Related`), severity map, standing bug fields, bug ReproSteps HTML (incl. `OBSERVATION` block), WIQL **date-only** on `[System.ChangedDate]`, `System.ClosedDate` **omitted** (TF51535).
-6. **Agent system prompts** — character-for-character (house style; mirrors the `targetcrm-bug-suite` gold reference).
+6. **Agent system prompts** — character-for-character (house style; mirrors the `yourproduct-bug-suite` gold reference).
 7. **`CurrentActivity` strings + SSE frame shape** (UI keys off them).
 8. Scheduler at **Thu 11:00 Asia/Karachi**; **UTC** datetime columns throughout; background tasks open their **own** DB scope; ports backend `5250` / client `5173`.
 

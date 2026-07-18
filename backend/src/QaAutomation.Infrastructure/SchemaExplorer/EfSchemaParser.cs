@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 namespace QaAutomation.Infrastructure.SchemaExplorer;
 
 /// <summary>
-/// Deterministic (regex) parser for the EF Core patterns YourProduct actually uses (Phase B):
+/// Deterministic (regex) parser for the EF Core patterns the product actually uses (Phase B):
 /// <c>DbSet&lt;T&gt;</c> declarations, <c>[Table(nameof(X)|"lit", Schema = Schemas.Y|"lit")]</c>,
 /// <c>[Key]</c>, <c>[ForeignKey(nameof(col))]</c> navigation properties, and the
 /// <c>OnModelCreating</c> calls <c>.HasNoKey()</c> / <c>.HasKey(x =&gt; new { ... })</c>.

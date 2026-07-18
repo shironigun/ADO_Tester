@@ -191,7 +191,7 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
                 IssueDescription = desc, Fix = closed ? "Resolved in build 2026.05.3." : null,
                 ClosedAt = closed ? "2026-05-22T10:00:00Z" : null,
                 CreatedBy = "Sample User", CreatedDate = "2026-05-19T09:00:00Z",
-                Description = desc, RootCause = rca, AreaPath = "Your Project\\" + board,
+                Description = desc, RootCause = rca, AreaPath = "Sample Area\\" + board,
                 Comments = comments ?? [], Timeline = timeline ?? [],
             };
         }
@@ -212,12 +212,12 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
 
         var tickets = new List<ReportTicket>
         {
-            // Your Team — Sample User (spotlight)
-            T(101, "CSV import rejects valid XLSX files", "Bug", "Resolved", "Sample User", "Your Team", comments: cmts, timeline: tl),
-            T(102, "Duplicate customers created on re-import", "Defect", "Closed", "Sample User", "Your Team"),
-            T(103, "Add column-mapping step to import wizard", "User Story", "Active", "Sample User", "Your Team"),
-            T(104, "Import preview shows wrong row count", "Bug", "New", "Sample User", "Your Team"),
-            T(105, "Document import size limits", "Task", "Closed", "Sample User", "Your Team", rca: "Parser missing extension validation."),
+            // Sample Board — Sample User (spotlight)
+            T(101, "CSV import rejects valid XLSX files", "Bug", "Resolved", "Sample User", "Sample Board", comments: cmts, timeline: tl),
+            T(102, "Duplicate customers created on re-import", "Defect", "Closed", "Sample User", "Sample Board"),
+            T(103, "Add column-mapping step to import wizard", "User Story", "Active", "Sample User", "Sample Board"),
+            T(104, "Import preview shows wrong row count", "Bug", "New", "Sample User", "Sample Board"),
+            T(105, "Document import size limits", "Task", "Closed", "Sample User", "Sample Board", rca: "Parser missing extension validation."),
             // Backend — Marcus Lee (spotlight)
             T(201, "Permission API 500 when user has no password", "Defect", "Closed", "Marcus Lee", "Backend"),
             T(202, "Harden order-import auth check", "User Story", "Closed", "Marcus Lee", "Backend", rca: "Null user not handled in validation."),
@@ -250,7 +250,7 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
             ],
         };
         return Build("Weekly Report — 2026-05-19 to 2026-05-23", new DateTime(2026, 5, 19), new DateTime(2026, 5, 23),
-            "Boards: Your Team, Backend, Payments, Mobile", tickets, theme, summary, teamName, []);
+            "Boards: Sample Board, Backend, Payments, Mobile", tickets, theme, summary, teamName, []);
     }
 
     // ════════════════════════════════════════════════════════════════════════════
@@ -1422,7 +1422,7 @@ body[data-theme="standup"] .ticket .html, body[data-theme="standup"] .md-html { 
 body[data-theme="standup"] .filters select,
 body[data-theme="standup"] .filters input { background:#141c2e; color:#e6edf6; }
 
-/* ── Branded · YourOrg corporate ── */
+/* ── Branded · corporate ── */
 body[data-theme="branded"] {
   --font-display: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
   --font-body: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
@@ -1447,7 +1447,7 @@ body[data-theme="branded"] .hdr .meta { color:#cfd8e3; }
 body[data-theme="branded"] .toggle button { background:rgba(255,255,255,.12); color:#fff; border-color:rgba(255,255,255,.3); }
 body[data-theme="branded"] .toggle button.active { background:#fff; color:#0b2f57; border-color:#fff; }
 body[data-theme="branded"] .slide-cover::before {
-  content:"CONSTELLATIONDEALER";
+  content:"QA ACTIVITY REPORT";
   position:absolute; top:1.5rem; left:0; right:0;
   letter-spacing:.45em; font-size:.7rem; color:var(--accent);
   font-weight:700; text-align:center;

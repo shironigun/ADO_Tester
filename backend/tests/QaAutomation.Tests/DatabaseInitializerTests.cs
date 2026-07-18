@@ -85,9 +85,9 @@ public sealed class DatabaseInitializerTests
             {
                 var project = Assert.Single(ctx.Projects);
                 Assert.Equal(1, project.Id);
-                Assert.Equal("Your Project", project.Name);
-                Assert.Equal("YourOrg", project.AdoOrganization);
-                Assert.Equal("Your Project", project.AdoProject);
+                Assert.Equal("Default Project", project.Name);
+                Assert.Equal("", project.AdoOrganization);
+                Assert.Equal("", project.AdoProject);
                 Assert.Equal(0, ctx.TestSessions.Count());
             }
 

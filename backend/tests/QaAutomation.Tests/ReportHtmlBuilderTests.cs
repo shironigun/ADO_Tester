@@ -8,10 +8,10 @@ namespace QaAutomation.Tests;
 public sealed class ReportHtmlBuilderTests
 {
     [Theory]
-    [InlineData("Your Project\\Your Team", "Your Team")]   // 2nd segment
-    [InlineData("Your Project/Your Team", "Your Team")]    // forward slash normalized to backslash
-    [InlineData("Your Project\\Your Team\\Sub", "Your Team")] // still the 2nd segment
-    [InlineData("Your Project", "Your Project")]          // single segment → fallback to first
+    [InlineData("Area One\\Board Two", "Board Two")]   // 2nd segment
+    [InlineData("Area One/Board Two", "Board Two")]    // forward slash normalized to backslash
+    [InlineData("Area One\\Board Two\\Sub", "Board Two")] // still the 2nd segment
+    [InlineData("Area One", "Area One")]          // single segment → fallback to first
     [InlineData("", "Other")]                            // empty → Other
     [InlineData(null, "Other")]                          // null → Other
     public void BoardLabel_uses_second_area_path_segment(string? areaPath, string expected)
@@ -31,7 +31,7 @@ public sealed class ReportHtmlBuilderTests
             WorkItemType = "Bug",
             State = "Active",
             AssignedTo = "QA",
-            AreaPath = "Your Project\\Your Team",
+            AreaPath = "Area One\\Board Two",
         };
 
         var html = new ReportHtmlBuilder().Build(

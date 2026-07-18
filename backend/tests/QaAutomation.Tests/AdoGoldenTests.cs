@@ -29,8 +29,8 @@ public sealed class AdoGoldenTests : IDisposable
 
         var opts = new AzureDevOpsOptions
         {
-            Organization = "YourOrg",
-            Project = "Your Project",
+            Organization = "TestOrg",
+            Project = "Test Project",
             ApiVersion = "7.1",
             PersonalAccessToken = "dummy",
             BugAreaPath = _root.GetProperty("areaPath").GetString()!,

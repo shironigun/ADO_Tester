@@ -539,7 +539,7 @@ export default function SettingsPage() {
                       </Stack>
                       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
                         <TextField label="Git repository" size="small" sx={{ flex: 1 }} value={adoRepo}
-                          onChange={e => setAdoRepo(e.target.value)} placeholder="Your Repo" />
+                          onChange={e => setAdoRepo(e.target.value)} placeholder="my-repo" />
                         <Autocomplete
                           sx={{ flex: 1 }}
                           freeSolo options={branches} value={adoBranch}

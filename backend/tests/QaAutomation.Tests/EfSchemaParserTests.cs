@@ -2,12 +2,12 @@ using QaAutomation.Infrastructure.SchemaExplorer;
 
 namespace QaAutomation.Tests;
 
-/// <summary>Self-check for the Phase-B EF parser against the real YourProduct patterns
+/// <summary>Self-check for the Phase-B EF parser against the real product patterns
 /// ([Table(nameof/Schema)], [Key], [ForeignKey] navs, DbSet&lt;T&gt;, HasNoKey, composite HasKey).</summary>
 public sealed class EfSchemaParserTests
 {
     private const string Entity = """
-        namespace YourProduct.Customers.Services.Models.Data
+        namespace MyApp.Customers.Services.Models.Data
         {
             [Table(nameof(Customer ), Schema = Schemas.Customers)]
             public class Customer

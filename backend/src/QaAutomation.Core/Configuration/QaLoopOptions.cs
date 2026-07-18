@@ -25,12 +25,15 @@ public sealed class QaLoopOptions
     public bool ActivityEnabled { get; set; } = true;
 
     // ── Frontend-module-driven scan (QA Loop) ────────────────────────────────
-    /// <summary>Repo holding the product SPA; the New Scan module dropdown parses its route file.</summary>
-    public string FrontendRepo { get; set; } = "Your Repo";
+    /// <summary>Repo holding the product SPA; the New Scan module dropdown parses its route file.
+    /// Set via QALOOP_FRONTEND_REPO / qaloop.frontend_repo.</summary>
+    public string FrontendRepo { get; set; } = "";
 
-    /// <summary>Repo-relative SPA source root (holds routes/ and components/).</summary>
-    public string FrontendRoot { get; set; } = "web-app/src/target-crm/src";
+    /// <summary>Repo-relative SPA source root (holds routes/ and components/).
+    /// Set via QALOOP_FRONTEND_ROOT / qaloop.frontend_root.</summary>
+    public string FrontendRoot { get; set; } = "";
 
-    /// <summary>Deployed base URL; each module's reference URL is FrontendBaseUrl + its route path.</summary>
-    public string FrontendBaseUrl { get; set; } = "https://your-frontend-qa.example.net";
+    /// <summary>Deployed base URL; each module's reference URL is FrontendBaseUrl + its route path.
+    /// Set via QALOOP_FRONTEND_BASE_URL / qaloop.frontend_base_url.</summary>
+    public string FrontendBaseUrl { get; set; } = "";
 }

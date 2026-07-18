@@ -39,7 +39,7 @@ const THEME_ACCENT: Record<Theme, 'info' | 'secondary' | 'primary'> = {
 const THEME_BLURB: Record<Theme, string> = {
   Executive: 'Light, minimal, serif headlines. Stakeholder reviews.',
   Standup:   'Dark slate, neon accents, dense. Team meetings + projectors.',
-  Branded:   'YourOrg corporate palette + logo lockup.',
+  Branded:   'Corporate palette + logo lockup.',
 }
 
 function isoLocalDate(d: Date): string {

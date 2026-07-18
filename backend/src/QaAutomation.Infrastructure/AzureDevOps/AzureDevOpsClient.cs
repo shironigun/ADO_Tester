@@ -34,7 +34,7 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
         "System.AssignedTo", "System.State", "Microsoft.VSTS.Common.AcceptanceCriteria",
     ];
 
-    // System.ClosedDate is omitted (TF51535 on Your Project); the sort tolerates closedAt=null.
+    // System.ClosedDate is omitted (TF51535 on some ADO projects); the sort tolerates closedAt=null.
     private static readonly string[] ReportFields =
     [
         "System.Id", "System.Title", "System.WorkItemType", "System.AssignedTo",

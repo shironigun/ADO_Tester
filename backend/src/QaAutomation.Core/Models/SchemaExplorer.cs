@@ -13,9 +13,9 @@ public sealed class SchemaProduct
 {
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;
-    /// <summary>ADO project the source repo lives in (e.g. "Your Project").</summary>
+    /// <summary>ADO project the source repo lives in (e.g. "My Project").</summary>
     public string AdoProject { get; set; } = string.Empty;
-    /// <summary>ADO Git repository to scan (e.g. "Your Repo"). Multi-repo products come later.</summary>
+    /// <summary>ADO Git repository to scan (e.g. "MyRepo"). Multi-repo products come later.</summary>
     public string AdoRepository { get; set; } = string.Empty;
     /// <summary>Branch scanned by default (e.g. "master"/"main").</summary>
     public string DefaultBranch { get; set; } = "main";
