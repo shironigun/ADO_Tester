@@ -199,7 +199,7 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
         List<TicketComment> cmts =
         [
             C("Sample User", "2026-05-20T11:00:00Z", "<div>Reproduced on staging — looks like the parser rejects non-CSV extensions.</div>"),
-            C("Marcus Lee", "2026-05-21T14:30:00Z", "<div>Fix deployed to QA, please re-verify the XLSX path.</div>"),
+            C("Sample User", "2026-05-21T14:30:00Z", "<div>Fix deployed to QA, please re-verify the XLSX path.</div>"),
         ];
         List<TimelineEvent> tl =
         [
@@ -207,7 +207,7 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
             new("2026-05-19T09:05:00Z", "Sample User", "state", "State New → Active"),
             new("2026-05-20T11:00:00Z", "Sample User", "assignment", "Assigned to Unassigned → Sample User"),
             new("2026-05-20T11:00:00Z", "Sample User", "comment", "Comment added"),
-            new("2026-05-22T10:00:00Z", "Marcus Lee", "state", "State Active → Resolved"),
+            new("2026-05-22T10:00:00Z", "Sample User", "state", "State Active → Resolved"),
         ];
 
         var tickets = new List<ReportTicket>
@@ -218,15 +218,15 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
             T(103, "Add column-mapping step to import wizard", "User Story", "Active", "Sample User", "Sample Board"),
             T(104, "Import preview shows wrong row count", "Bug", "New", "Sample User", "Sample Board"),
             T(105, "Document import size limits", "Task", "Closed", "Sample User", "Sample Board", rca: "Parser missing extension validation."),
-            // Backend — Marcus Lee (spotlight)
-            T(201, "Permission API 500 when user has no password", "Defect", "Closed", "Marcus Lee", "Backend"),
-            T(202, "Harden order-import auth check", "User Story", "Closed", "Marcus Lee", "Backend", rca: "Null user not handled in validation."),
-            T(203, "Token refresh race condition", "Bug", "Active", "Marcus Lee", "Backend"),
-            T(204, "Add audit log for permission changes", "Task", "New", "Marcus Lee", "Backend"),
-            // Payments — Priya Nair (spotlight)
-            T(301, "Webhook refund event not received", "Defect", "Resolved", "Priya Nair", "Payments"),
-            T(302, "Retry failed webhook deliveries", "User Story", "Active", "Priya Nair", "Payments"),
-            T(303, "Webhook signature validation missing", "Bug", "New", "Priya Nair", "Payments"),
+            // Backend — Sample User (spotlight)
+            T(201, "Permission API 500 when user has no password", "Defect", "Closed", "Sample User", "Backend"),
+            T(202, "Harden order-import auth check", "User Story", "Closed", "Sample User", "Backend", rca: "Null user not handled in validation."),
+            T(203, "Token refresh race condition", "Bug", "Active", "Sample User", "Backend"),
+            T(204, "Add audit log for permission changes", "Task", "New", "Sample User", "Backend"),
+            // Payments — Sample User (spotlight)
+            T(301, "Webhook refund event not received", "Defect", "Resolved", "Sample User", "Payments"),
+            T(302, "Retry failed webhook deliveries", "User Story", "Active", "Sample User", "Payments"),
+            T(303, "Webhook signature validation missing", "Bug", "New", "Sample User", "Payments"),
             // Mobile — Unassigned (rolls into Others)
             T(401, "Mobile grid zoom resets on rotate", "Bug", "Closed", "Unassigned", "Mobile"),
             T(402, "Offline cache sync drops edits", "User Story", "Active", "Unassigned", "Mobile"),
