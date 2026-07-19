@@ -1,6 +1,8 @@
 using System.Text;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using QaAutomation.Core.Abstractions;
+using QaAutomation.Core.Configuration;
 using QaAutomation.Core.Contracts;
 using QaAutomation.Core.Models;
 using QaAutomation.Infrastructure.Agents;
@@ -23,16 +25,18 @@ public sealed class ModuleAnalysisService : IModuleAnalysisService
     private readonly IKnowledgebaseService _kb;
     private readonly IAzureDevOpsClient _ado;
     private readonly IGenerationService _gen;
+    private readonly IOptionsMonitor<QaLoopOptions> _qaLoop;
     private readonly ILogger<ModuleAnalysisService> _log;
 
     public ModuleAnalysisService(
         ILlmClientFactory llmFactory, IKnowledgebaseService kb, IAzureDevOpsClient ado,
-        IGenerationService gen, ILogger<ModuleAnalysisService> log)
+        IGenerationService gen, IOptionsMonitor<QaLoopOptions> qaLoop, ILogger<ModuleAnalysisService> log)
     {
         _llmFactory = llmFactory;
         _kb = kb;
         _ado = ado;
         _gen = gen;
+        _qaLoop = qaLoop;
         _log = log;
     }
 
@@ -168,7 +172,7 @@ public sealed class ModuleAnalysisService : IModuleAnalysisService
         string module, string? repository, string? branch, string sourceRoot,
         int maxFileChars, int maxBundleChars, CancellationToken ct)
     {
-        var dirs = new[] { $"web-app/src/target-crm/src/components/{module}", $"web-app/src/target-crm/tests-e2e/{module}" };
+        var dirs = new[] { _qaLoop.CurrentValue.FrontendComponentsDir(module), _qaLoop.CurrentValue.FrontendTestsDir(module) };
         var exts = new[] { ".ts", ".tsx" };
 
         if (!string.IsNullOrWhiteSpace(sourceRoot))

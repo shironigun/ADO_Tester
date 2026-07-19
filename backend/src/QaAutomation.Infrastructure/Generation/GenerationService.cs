@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using QaAutomation.Core.Abstractions;
+using QaAutomation.Core.Configuration;
 using QaAutomation.Core.Contracts;
 using QaAutomation.Infrastructure.Agents;
 
@@ -13,19 +15,20 @@ namespace QaAutomation.Infrastructure.Generation;
 /// </summary>
 public sealed class GenerationService : IGenerationService
 {
-    private const string AutomationRelPath = "web-app/src/target-crm/automation";
-
     private readonly ILlmClientFactory _llmFactory;
     private readonly IKnowledgebaseService _kb;
     private readonly IAzureDevOpsClient _ado;
+    private readonly IOptionsMonitor<QaLoopOptions> _qaLoop;
     private readonly ILogger<GenerationService> _log;
 
     public GenerationService(
-        ILlmClientFactory llmFactory, IKnowledgebaseService kb, IAzureDevOpsClient ado, ILogger<GenerationService> log)
+        ILlmClientFactory llmFactory, IKnowledgebaseService kb, IAzureDevOpsClient ado,
+        IOptionsMonitor<QaLoopOptions> qaLoop, ILogger<GenerationService> log)
     {
         _llmFactory = llmFactory;
         _kb = kb;
         _ado = ado;
+        _qaLoop = qaLoop;
         _log = log;
     }
 
@@ -97,7 +100,7 @@ public sealed class GenerationService : IGenerationService
         var written = false;
         if (request.Write)
         {
-            var outputRoot = ResolveOutputRoot(request);
+            var outputRoot = ResolveOutputRoot(request, _qaLoop.CurrentValue.AutomationRoot);
             var dir = Path.Combine(outputRoot, "e2e", Slug(request.Module));
             Directory.CreateDirectory(dir);
             filePath = Path.Combine(dir, fileName);
@@ -132,13 +135,13 @@ public sealed class GenerationService : IGenerationService
 
     /// <summary>Resolve and GUARD the output folder — it must be an "automation" folder, enforcing the
     /// constitution's write-only-inside-/automation rule (prevents accidental writes into app code).</summary>
-    private static string ResolveOutputRoot(GenerateSpecRequest request)
+    private static string ResolveOutputRoot(GenerateSpecRequest request, string automationRoot)
     {
         string root;
         if (!string.IsNullOrWhiteSpace(request.OutputRoot))
             root = Path.GetFullPath(request.OutputRoot!);
         else if (!string.IsNullOrWhiteSpace(request.SourceRoot))
-            root = Path.GetFullPath(Path.Combine(request.SourceRoot!, AutomationRelPath));
+            root = Path.GetFullPath(Path.Combine(request.SourceRoot!, automationRoot));
         else
             throw new ArgumentException("Provide OutputRoot or SourceRoot.");
 

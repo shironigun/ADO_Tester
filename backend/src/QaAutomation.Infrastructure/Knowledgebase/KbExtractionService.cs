@@ -1,6 +1,8 @@
 using System.Text;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using QaAutomation.Core.Abstractions;
+using QaAutomation.Core.Configuration;
 using QaAutomation.Core.Contracts;
 using QaAutomation.Core.Models;
 using QaAutomation.Infrastructure.Agents;
@@ -23,14 +25,17 @@ public sealed class KbExtractionService : IKbExtractionService
     private readonly ILlmClientFactory _llmFactory;
     private readonly IKnowledgebaseService _kb;
     private readonly IAzureDevOpsClient _ado;
+    private readonly IOptionsMonitor<QaLoopOptions> _qaLoop;
     private readonly ILogger<KbExtractionService> _log;
 
     public KbExtractionService(
-        ILlmClientFactory llmFactory, IKnowledgebaseService kb, IAzureDevOpsClient ado, ILogger<KbExtractionService> log)
+        ILlmClientFactory llmFactory, IKnowledgebaseService kb, IAzureDevOpsClient ado,
+        IOptionsMonitor<QaLoopOptions> qaLoop, ILogger<KbExtractionService> log)
     {
         _llmFactory = llmFactory;
         _kb = kb;
         _ado = ado;
+        _qaLoop = qaLoop;
         _log = log;
     }
 
@@ -211,10 +216,10 @@ public sealed class KbExtractionService : IKbExtractionService
         => path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
             .Any(seg => SkipDirs.Contains(seg, StringComparer.OrdinalIgnoreCase));
 
-    private static List<string> DefaultDirs(string module) =>
+    private List<string> DefaultDirs(string module) =>
     [
-        $"web-app/src/target-crm/src/components/{module}",
-        $"web-app/src/target-crm/tests-e2e/{module}",
+        _qaLoop.CurrentValue.FrontendComponentsDir(module),
+        _qaLoop.CurrentValue.FrontendTestsDir(module),
     ];
 
     private static string LangFor(string file) => Path.GetExtension(file).ToLowerInvariant() switch
