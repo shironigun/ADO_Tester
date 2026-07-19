@@ -7,6 +7,7 @@ export const paths = {
   qaLoop: '/qa-loop',
   qaRuns: '/qa-runs',
   qaPipelines: '/qa-pipelines',
+  schemaExplorer: '/schema-explorer',
   authorTests: '/author-tests',
   findBugs: '/find-bugs',
   reports: '/reports',

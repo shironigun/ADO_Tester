@@ -39,7 +39,7 @@ const THEME_ACCENT: Record<Theme, 'info' | 'secondary' | 'primary'> = {
 const THEME_BLURB: Record<Theme, string> = {
   Executive: 'Light, minimal, serif headlines. Stakeholder reviews.',
   Standup:   'Dark slate, neon accents, dense. Team meetings + projectors.',
-  Branded:   'YourOrg corporate palette + logo lockup.',
+  Branded:   'Corporate palette + logo lockup.',
 }
 
 function isoLocalDate(d: Date): string {
@@ -117,10 +117,7 @@ export default function ReportsPage() {
 
   return (
     <Box>
-      <PageHeader
-        title="Reports"
-        subtitle="Generate a self-contained HTML report for a date range and boards — view full-screen or download."
-      />
+      <PageHeader title="Reports" />
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={3} sx={{ alignItems: 'flex-start' }}>
 
         {/* Generate panel */}

@@ -4,7 +4,7 @@ namespace QaAutomation.Api.Middlewares;
 
 /// <summary>
 /// Catches unhandled exceptions and writes an RFC 7807 ProblemDetails <c>500</c> (spec §5.1:
-/// unhandled → 500). Registered FIRST in the pipeline (mirrors <c>YourProduct.WebAPI</c>) so it
+/// unhandled → 500). Registered FIRST in the pipeline (mirrors a typical ASP.NET Core Web API host) so it
 /// wraps everything downstream.
 /// <para>
 /// B5 extends this to map the typed domain errors — <c>AdoApiError</c> (404 → 404, otherwise

@@ -33,6 +33,15 @@ public sealed class QaDbContext : DbContext
     public DbSet<TestFailure> TestFailures => Set<TestFailure>();
     public DbSet<PipelineWatch> PipelineWatches => Set<PipelineWatch>();
 
+    // ── DB Schema Explorer DbSets ─────────────────────────────────────────────
+    public DbSet<SchemaProduct> SchemaProducts => Set<SchemaProduct>();
+    public DbSet<SchemaScan> SchemaScans => Set<SchemaScan>();
+    public DbSet<SchemaService> SchemaServices => Set<SchemaService>();
+    public DbSet<SchemaTable> SchemaTables => Set<SchemaTable>();
+    public DbSet<SchemaRelation> SchemaRelations => Set<SchemaRelation>();
+    public DbSet<SchemaEntity> SchemaEntities => Set<SchemaEntity>();
+    public DbSet<SchemaConnection> SchemaConnections => Set<SchemaConnection>();
+
     protected override void OnModelCreating(ModelBuilder model)
     {
         // BatchModule/BatchMode store their kebab/lowercase wire value (NOT the C# member name).
@@ -343,6 +352,145 @@ public sealed class QaDbContext : DbContext
             e.Property(x => x.UpdatedAt).HasColumnName("UpdatedAt").IsRequired();
             e.HasIndex(x => new { x.ProjectId, x.AdoPipelineId }).IsUnique().HasDatabaseName("ix_PipelineWatches_ProjectId_AdoPipelineId");
             e.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── DB Schema Explorer tables (AddSchemaExplorer migration) ───────────
+        // All scan-scoped graph rows cascade from their owning scan; a scan cascades from its product,
+        // so deleting a product wipes its scans and the whole graph. Table ids inside SchemaRelations
+        // are loose indexed refs (no FK constraint) — they point at scan-scoped SchemaTables rows.
+
+        model.Entity<SchemaProduct>(e =>
+        {
+            e.ToTable("SchemaProducts");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("Id").ValueGeneratedOnAdd();
+            e.Property(x => x.Name).HasColumnName("Name").IsRequired();
+            e.Property(x => x.AdoProject).HasColumnName("AdoProject").IsRequired();
+            e.Property(x => x.AdoRepository).HasColumnName("AdoRepository").IsRequired();
+            e.Property(x => x.DefaultBranch).HasColumnName("DefaultBranch").IsRequired();
+            e.Property(x => x.Description).HasColumnName("Description");
+            e.Property(x => x.CreatedAt).HasColumnName("CreatedAt").IsRequired();
+            e.Property(x => x.UpdatedAt).HasColumnName("UpdatedAt").IsRequired();
+        });
+
+        model.Entity<SchemaScan>(e =>
+        {
+            e.ToTable("SchemaScans");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("Id").ValueGeneratedOnAdd();
+            e.Property(x => x.ProductId).HasColumnName("ProductId").IsRequired();
+            e.Property(x => x.Status).HasColumnName("Status").HasConversion<string>().IsRequired();
+            e.Property(x => x.Phase).HasColumnName("Phase");
+            e.Property(x => x.CommitId).HasColumnName("CommitId");
+            e.Property(x => x.Branch).HasColumnName("Branch");
+            e.Property(x => x.ServiceCount).HasColumnName("ServiceCount").IsRequired();
+            e.Property(x => x.TableCount).HasColumnName("TableCount").IsRequired();
+            e.Property(x => x.RelationCount).HasColumnName("RelationCount").IsRequired();
+            e.Property(x => x.EntityCount).HasColumnName("EntityCount").IsRequired();
+            e.Property(x => x.StatsJson).HasColumnName("StatsJson");
+            e.Property(x => x.ErrorMessage).HasColumnName("ErrorMessage");
+            e.Property(x => x.EventLogJson).HasColumnName("EventLogJson");
+            e.Property(x => x.StartedAt).HasColumnName("StartedAt");
+            e.Property(x => x.CompletedAt).HasColumnName("CompletedAt");
+            e.Property(x => x.CreatedAt).HasColumnName("CreatedAt").IsRequired();
+            e.HasIndex(x => new { x.ProductId, x.CreatedAt }).HasDatabaseName("ix_SchemaScans_ProductId_CreatedAt");
+            e.HasOne<SchemaProduct>().WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        model.Entity<SchemaService>(e =>
+        {
+            e.ToTable("SchemaServices");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("Id").ValueGeneratedOnAdd();
+            e.Property(x => x.ScanId).HasColumnName("ScanId").IsRequired();
+            e.Property(x => x.Name).HasColumnName("Name").IsRequired();
+            e.Property(x => x.DbContextClass).HasColumnName("DbContextClass");
+            e.Property(x => x.SourcePath).HasColumnName("SourcePath");
+            e.Property(x => x.SortOrder).HasColumnName("SortOrder").IsRequired();
+            e.HasIndex(x => x.ScanId).HasDatabaseName("ix_SchemaServices_ScanId");
+            e.HasOne<SchemaScan>().WithMany().HasForeignKey(x => x.ScanId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        model.Entity<SchemaTable>(e =>
+        {
+            e.ToTable("SchemaTables");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("Id").ValueGeneratedOnAdd();
+            e.Property(x => x.ScanId).HasColumnName("ScanId").IsRequired();
+            e.Property(x => x.ServiceId).HasColumnName("ServiceId");
+            e.Property(x => x.Name).HasColumnName("Name").IsRequired();
+            e.Property(x => x.SqlSchema).HasColumnName("SqlSchema");
+            e.Property(x => x.IsKeyless).HasColumnName("IsKeyless").IsRequired();
+            e.Property(x => x.IsExternalRef).HasColumnName("IsExternalRef").IsRequired();
+            e.Property(x => x.OwnerServiceName).HasColumnName("OwnerServiceName");
+            e.Property(x => x.SourceFile).HasColumnName("SourceFile");
+            e.Property(x => x.ColumnsJson).HasColumnName("ColumnsJson");
+            e.Property(x => x.CreatedAt).HasColumnName("CreatedAt").IsRequired();
+            e.HasIndex(x => x.ScanId).HasDatabaseName("ix_SchemaTables_ScanId");
+            // ServiceId is a loose indexed ref (no FK) — a table may be unowned/external.
+            e.HasIndex(x => x.ServiceId).HasDatabaseName("ix_SchemaTables_ServiceId");
+            e.HasOne<SchemaScan>().WithMany().HasForeignKey(x => x.ScanId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        model.Entity<SchemaRelation>(e =>
+        {
+            e.ToTable("SchemaRelations");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("Id").ValueGeneratedOnAdd();
+            e.Property(x => x.ScanId).HasColumnName("ScanId").IsRequired();
+            e.Property(x => x.SourceTableId).HasColumnName("SourceTableId").IsRequired();
+            e.Property(x => x.TargetTableId).HasColumnName("TargetTableId").IsRequired();
+            e.Property(x => x.SourceColumn).HasColumnName("SourceColumn");
+            e.Property(x => x.TargetColumn).HasColumnName("TargetColumn");
+            e.Property(x => x.Kind).HasColumnName("Kind").HasConversion<string>().IsRequired();
+            e.Property(x => x.Confidence).HasColumnName("Confidence");
+            e.Property(x => x.Evidence).HasColumnName("Evidence");
+            e.Property(x => x.CreatedAt).HasColumnName("CreatedAt").IsRequired();
+            e.HasIndex(x => x.ScanId).HasDatabaseName("ix_SchemaRelations_ScanId");
+            // SourceTableId/TargetTableId are plain indexed ints — loose refs to SchemaTables (spec §5.3 style).
+            e.HasIndex(x => x.SourceTableId).HasDatabaseName("ix_SchemaRelations_SourceTableId");
+            e.HasOne<SchemaScan>().WithMany().HasForeignKey(x => x.ScanId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        model.Entity<SchemaEntity>(e =>
+        {
+            e.ToTable("SchemaEntities");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("Id").ValueGeneratedOnAdd();
+            e.Property(x => x.ProductId).HasColumnName("ProductId").IsRequired();
+            e.Property(x => x.Key).HasColumnName("Key").IsRequired();
+            e.Property(x => x.DisplayName).HasColumnName("DisplayName").IsRequired();
+            e.Property(x => x.RootTableName).HasColumnName("RootTableName");
+            e.Property(x => x.IdColumn).HasColumnName("IdColumn");
+            e.Property(x => x.ScopeColumn).HasColumnName("ScopeColumn");
+            e.Property(x => x.DisplayColumnsJson).HasColumnName("DisplayColumnsJson");
+            e.Property(x => x.Confidence).HasColumnName("Confidence");
+            e.Property(x => x.Source).HasColumnName("Source").IsRequired();
+            e.Property(x => x.IsEnabled).HasColumnName("IsEnabled").IsRequired().HasDefaultValue(true);
+            e.Property(x => x.SortOrder).HasColumnName("SortOrder").IsRequired();
+            e.Property(x => x.CreatedAt).HasColumnName("CreatedAt").IsRequired();
+            e.Property(x => x.UpdatedAt).HasColumnName("UpdatedAt").IsRequired();
+            e.HasIndex(x => new { x.ProductId, x.Key }).IsUnique().HasDatabaseName("ix_SchemaEntities_ProductId_Key");
+            e.HasOne<SchemaProduct>().WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        model.Entity<SchemaConnection>(e =>
+        {
+            e.ToTable("SchemaConnections");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("Id").ValueGeneratedOnAdd();
+            e.Property(x => x.ProductId).HasColumnName("ProductId").IsRequired();
+            e.Property(x => x.Environment).HasColumnName("Environment").IsRequired().HasDefaultValue("Default");
+            e.Property(x => x.ServiceName).HasColumnName("ServiceName");
+            e.Property(x => x.Server).HasColumnName("Server");
+            e.Property(x => x.DbUser).HasColumnName("DbUser");
+            e.Property(x => x.DbDatabase).HasColumnName("DbDatabase");
+            e.Property(x => x.ConnectionString).HasColumnName("ConnectionString").IsRequired();
+            e.Property(x => x.IsDefault).HasColumnName("IsDefault").IsRequired();
+            e.Property(x => x.CreatedAt).HasColumnName("CreatedAt").IsRequired();
+            e.Property(x => x.UpdatedAt).HasColumnName("UpdatedAt").IsRequired();
+            e.HasIndex(x => x.ProductId).HasDatabaseName("ix_SchemaConnections_ProductId");
+            e.HasOne<SchemaProduct>().WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

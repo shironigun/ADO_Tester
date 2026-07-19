@@ -27,7 +27,7 @@ Set an absolute origin (no trailing slash) to point a build at a remote backend.
 (axios client, React Query, `EventSource` streams, the Reports iframe/download, the Settings preview
 window, the error logger) builds its URLs from this via `src/config/env.ts`.
 
-## Architecture (re-aligned to target-crm conventions, F0–F5)
+## Architecture (re-aligned to your-product conventions, F0–F5)
 
 - `src/api/` — one axios instance (`client.ts`) + per-feature modules (`knowledgebase`, `settings`,
   `diagnostics`, `reports`, `authorTests`, `findBugs`, `batches`); shared `common/errors.ts`.

@@ -18,6 +18,7 @@ import { PROJECT_ID } from '../config/env'
 import { listSessions as listAuthorSessions, type SessionSummary } from '../api/authorTests'
 import { listSessions as listBugSessions } from '../api/findBugs'
 import { listReports, type Report } from '../api/reports'
+import { getConfig } from '../api/settings'
 import { listDocs, type Doc } from '../api/knowledgebase'
 
 interface ActivityRow { key: string; when: number; kind: string; status: string; text: string; to: string }
@@ -28,12 +29,16 @@ export default function ProjectsPage() {
   const [bugSessions, setBugSessions] = useState<SessionSummary[]>([])
   const [reports, setReports] = useState<Report[]>([])
   const [docs, setDocs] = useState<Doc[]>([])
+  const [ado, setAdo] = useState<{ org: string; project: string }>({ org: '', project: '' })
 
   useEffect(() => {
     listAuthorSessions(PROJECT_ID, 50).then(setAuthorSessions).catch(() => {})
     listBugSessions(PROJECT_ID, 50).then(setBugSessions).catch(() => {})
     listReports(PROJECT_ID).then(setReports).catch(() => {})
     listDocs(PROJECT_ID).then(setDocs).catch(() => {})
+    getConfig()
+      .then(c => setAdo({ org: String(c?.['ado.organization'] ?? ''), project: String(c?.['ado.project'] ?? '') }))
+      .catch(() => {})
   }, [])
 
   // Test-session status breakdown for the donut.
@@ -80,10 +85,7 @@ export default function ProjectsPage() {
 
   return (
     <Box sx={{ pb: 4 }}>
-      <PageHeader
-        title="Dashboard"
-        subtitle="Live snapshot of the Your Project workspace — sessions, bugs, reports, and recent activity."
-      />
+      <PageHeader title="Dashboard" />
 
       {/* KPI tiles */}
       <Stagger>
@@ -174,7 +176,7 @@ export default function ProjectsPage() {
       <Section
         title={
           <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-            <span>Your Project</span>
+            <span>{ado.project || 'Project'}</span>
             <Chip size="small" label="Default" color="primary" />
           </Stack>
         }
@@ -182,10 +184,10 @@ export default function ProjectsPage() {
         sx={{ maxWidth: 760 }}
       >
         <Typography variant="body2" color="text.secondary">
-          ADO Organization: <strong>YourOrg</strong>
+          ADO Organization: <strong>{ado.org || '—'}</strong>
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          ADO Project: <strong>Your Project</strong>
+          ADO Project: <strong>{ado.project || '—'}</strong>
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
           PAT loaded from <code>.env</code> (<code>ADOACCESS_PAT</code>). Configure connection details

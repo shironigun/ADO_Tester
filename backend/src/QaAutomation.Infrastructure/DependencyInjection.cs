@@ -39,6 +39,8 @@ public static class DependencyInjection
             .AddInterceptors(SqliteBusyTimeoutInterceptor.Instance));
         services.AddScoped<DatabaseInitializer>();
         services.AddScoped<LeadsScanSeeder>();
+        services.AddScoped<SchemaExplorer.SchemaScanService>();   // DB Schema Explorer repo scanner (read-only)
+        services.AddScoped<SchemaExplorer.SchemaTraceService>();  // DB Schema Explorer live entity trace (SELECT-only)
         services.AddDbLogging();
         services.AddAzureDevOps(config);
         services.AddLlm(config);
@@ -73,6 +75,7 @@ public static class DependencyInjection
             o.PersonalAccessToken = rt.Get("ado.pat") ?? o.PersonalAccessToken;
             o.Repository = rt.Get("ado.repository") ?? o.Repository;
             o.DefaultBranch = rt.Get("ado.default_branch") ?? o.DefaultBranch;
+            o.BugAreaPath = rt.Get("ado.bug_area_path") ?? o.BugAreaPath;
         });
         services.AddOptions<AnthropicOptions>().PostConfigure<RuntimeSettings>((o, rt) =>
         {
@@ -218,6 +221,7 @@ public static class DependencyInjection
                 o.ApiVersion = Env("ADO_API_VERSION") ?? o.ApiVersion;
                 o.Repository = Env("ADO_REPOSITORY") ?? o.Repository;
                 o.DefaultBranch = Env("ADO_DEFAULT_BRANCH") ?? o.DefaultBranch;
+                o.BugAreaPath = Env("ADO_BUG_AREA_PATH") ?? o.BugAreaPath;
             });
 
         services.AddTransient<AdoAuthHandler>();

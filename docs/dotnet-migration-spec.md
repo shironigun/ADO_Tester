@@ -12,7 +12,7 @@
 
 **Mission.** Re-platform the QA Automation app (`ADO_Tester`) to the YourOrg / *Your Project* org stack and host it as its **own Azure DevOps project**:
 - **Backend:** rewrite the Python FastAPI/agent backend in **.NET** (recommended: **ASP.NET Core 8 Web API on Azure App Service**).
-- **Frontend:** keep the React client's *newer* versions; adopt **target-crm's architecture only** (Redux Toolkit + React Query + feature-module folders + centralized axios client + config layer). No tooling/i18n/Formik/multi-env/.github parity.
+- **Frontend:** keep the React client's *newer* versions; adopt **your-product's architecture only** (Redux Toolkit + React Query + feature-module folders + centralized axios client + config layer). No tooling/i18n/Formik/multi-env/.github parity.
 
 **Ground rules (read before writing any code):**
 1. **The live Python backend is the authoritative source of truth.** Where this spec and the Python code disagree, the Python code wins. The recovered .NET at git `7b16806` is *scaffolding only* — it predates today's house style and ~60% of features; **diff it against Python, never trust it**.
@@ -30,7 +30,7 @@
 | `docs/python-migration-plan.md` | The original .NET→Python port plan (referenced for provenance; may not be present in-repo). **Endpoint bindingness lives in §5.4 of THIS spec, not there.** |
 | Git commit `7b16806` (`git show 7b16806:src/...`) | Recoverable original .NET (net8 Clean Architecture, EF Core 8 + SQLite). Scaffold ~40% of the backend. |
 | `README.md`, `backend/README.md`, `.env.example` | Feature/page map, run/ops, secrets, Windows gotchas. |
-| Target-crm `…/web-app/src/target-crm` | Frontend architecture reference (RTK + React Query + feature modules + `src/api` axios client + `src/config`). |
+| Target-crm `…/web-app/src/your-product` | Frontend architecture reference (RTK + React Query + feature modules + `src/api` axios client + `src/config`). |
 | CRM monorepo `YourProduct.WebAPI` | The org's ASP.NET Core 8 / App Service pattern (`AddCustom*` DI, options, exception middleware, Swagger). |
 
 **.NET-recoverable vs Python-new:** Recover from `7b16806` → AzureDevOpsClient (core writes/reads), Analyst/Tester/BugWriter agents + lenient-JSON converter, AgentOrchestrator + BugOrchestrator (no code-verify), KnowledgebaseService, 3 LLM clients + provider state, ReportService + HtmlBuilder + WeeklyReportScheduler, the 6 controllers, sanitizer, base entities. **Green-field (no .NET predecessor):** CodeVerifier + the whole code-discovery/verify subsystem, Batches/Epic fan-out, Reports v2 (Theme/Summarizer/spotlight/preview), SSE EventBus + `EventLogJson` columns, ClaudeCli provider, AppSettingsService UI-editable layer + ADO discovery endpoints, EF Migrations.
@@ -54,7 +54,7 @@
 
 **Backend:** Python 3.12 / FastAPI / Uvicorn :5250 → **C#/.NET 8 / ASP.NET Core Web API (App Service)**. SQLAlchemy-async + aiosqlite + Alembic → **EF Core 8 + SQLite + EF Migrations**. httpx → typed `HttpClient` (`IHttpClientFactory`). anthropic/openai SDKs → `Anthropic.SDK`/`Azure.AI.OpenAI`/`OpenAI`. APScheduler → `BackgroundService` + Cronos. `asyncio.create_task`+`session_scope` → `Task.Run`+`IServiceScopeFactory.CreateScope`. `asyncio.Semaphore(4)` → `SemaphoreSlim(4)`. `dict[int,Task]` → `ConcurrentDictionary<int,CancellationTokenSource>`. pydantic-settings → Options + `IOptionsMonitor` + Settings table. SSE preserved.
 
-**Frontend:** keep Vite 8 / MUI 9 / TS 6 / React 19 / Framer Motion (target-crm uses Vite 6 / MUI 7 / TS 5.9 — **do NOT downgrade**). Add **Redux Toolkit** (global UI state) + **React Query** (server state, replacing hand-rolled polling). Replace inline `axios('/api/...')` with **centralized `src/api/axios-client.ts`** + per-feature `api/*` modules + **`src/config`** over `VITE_QA_API`. Restructure `pages/`+`session/` into feature modules.
+**Frontend:** keep Vite 8 / MUI 9 / TS 6 / React 19 / Framer Motion (your-product uses Vite 6 / MUI 7 / TS 5.9 — **do NOT downgrade**). Add **Redux Toolkit** (global UI state) + **React Query** (server state, replacing hand-rolled polling). Replace inline `axios('/api/...')` with **centralized `src/api/axios-client.ts`** + per-feature `api/*` modules + **`src/config`** over `VITE_QA_API`. Restructure `pages/`+`session/` into feature modules.
 
 ---
 

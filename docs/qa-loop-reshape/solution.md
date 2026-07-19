@@ -38,7 +38,7 @@ The existing **QA Loop** page inside ADO_Tester (`/qa-loop`) is a four-step pipe
 module → Extract KB → Generate one Playwright spec → Ingest JUnit + triage), scoped to the Deals
 module and to a single UI-level scenario per session. In a separate prototype effort, a
 Playwright framework was built **inside the Your Repo** at
-`web-app/src/target-crm/automation` that introduced three API-test levels (Contract / Endpoint /
+`web-app/src/your-product/automation` that introduced three API-test levels (Contract / Endpoint /
 Workflow) with Zod schemas, DMS execution profiles, owned execution, and impact-based selection
 — none of which exist in the current QA Loop.
 
@@ -1153,8 +1153,8 @@ work through the same watcher.
 
 ## Reference Documents
 
-- [`ralph-loop/specs/solution.md`](file:///C:/Users/temp/Downloads/example-artifacts%202/example-artifacts/ralph-loop/specs/solution.md) — structural reference for this document.
-- [`ralph-loop/specs/blueprint.md`](file:///C:/Users/temp/Downloads/example-artifacts%202/example-artifacts/ralph-loop/specs/blueprint.md) — structural reference for the upcoming implementation guide.
+- `ralph-loop/specs/solution.md` (local reference artifact) — structural reference for this document.
+- `ralph-loop/specs/blueprint.md` (local reference artifact) — structural reference for the upcoming implementation guide.
 - [`ADO_Tester/CLAUDE.md`](../../CLAUDE.md) — architecture invariants (.NET projects, DI root, background-task DI scope, parity rules).
 - [`ADO_Tester/backend/README.md`](../../backend/README.md) — backend internals, parity deviations.
 - [`ADO_Tester/docs/dotnet-migration-spec.md`](../dotnet-migration-spec.md) — locked migration decisions (referenced as "spec §N" in code).

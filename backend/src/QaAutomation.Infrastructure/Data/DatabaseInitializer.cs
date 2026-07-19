@@ -99,12 +99,12 @@ public sealed class DatabaseInitializer
             return;   // fresh seed only — never overwrite an adopted project row
         _db.Projects.Add(new Project
         {
-            Name = "Your Project",
-            AdoOrganization = "YourOrg",
-            AdoProject = "Your Project",
+            Name = "Default Project",
+            AdoOrganization = "",
+            AdoProject = "",
         });
         _db.SaveChanges();
-        _log.LogInformation("Seeded default Project id=1 'Your Project'.");
+        _log.LogInformation("Seeded default Project id=1.");
     }
 
     private bool TableExists(string name) => Count(

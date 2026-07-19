@@ -7,7 +7,7 @@ namespace QaAutomation.Tests;
 /// objects, param sub-routes, an interface with path:/component: that must NOT match).</summary>
 public sealed class FrontendModuleParserTests
 {
-    private const string Root = "web-app/src/target-crm/src";
+    private const string Root = "web-app/src/app/src";
     private const string BaseUrl = "https://your-frontend-qa.example.net";
 
     private const string Routes = """
@@ -39,7 +39,7 @@ public sealed class FrontendModuleParserTests
 
         var deals = Assert.Single(mods, m => m.ModuleName == "deals");
         Assert.Equal("/deals", deals.RoutePath);
-        Assert.Equal("web-app/src/target-crm/src/components/deals", deals.ComponentPath);
+        Assert.Equal("web-app/src/app/src/components/deals", deals.ComponentPath);
         Assert.Equal("https://your-frontend-qa.example.net/deals", deals.Url);
     }
 
@@ -50,7 +50,7 @@ public sealed class FrontendModuleParserTests
         // TaskBoard imports components/lead/components/task-board/task-board → module "lead", route /tasks
         var lead = Assert.Single(mods, m => m.ModuleName == "lead");
         Assert.Equal("/tasks", lead.RoutePath);
-        Assert.Equal("web-app/src/target-crm/src/components/lead", lead.ComponentPath);
+        Assert.Equal("web-app/src/app/src/components/lead", lead.ComponentPath);
     }
 
     [Fact]

@@ -136,7 +136,7 @@ export default function QaPipelinesPage() {
 
   return (
     <Box>
-      <PageHeader title="QA Pipelines" subtitle="Watch ADO pipelines and trigger QA runs automatically"
+      <PageHeader title="QA Pipelines"
         actions={<Button variant="contained" startIcon={<AddIcon />} onClick={() => setAddOpen(true)}>Watch pipeline</Button>} />
       <Box sx={{ px: 3 }}>
         {watches.length === 0 && !watchesQ.isLoading

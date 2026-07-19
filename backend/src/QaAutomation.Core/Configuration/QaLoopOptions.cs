@@ -25,12 +25,32 @@ public sealed class QaLoopOptions
     public bool ActivityEnabled { get; set; } = true;
 
     // ── Frontend-module-driven scan (QA Loop) ────────────────────────────────
-    /// <summary>Repo holding the product SPA; the New Scan module dropdown parses its route file.</summary>
-    public string FrontendRepo { get; set; } = "Your Repo";
+    /// <summary>Repo holding the product SPA; the New Scan module dropdown parses its route file.
+    /// Set via QALOOP_FRONTEND_REPO / qaloop.frontend_repo.</summary>
+    public string FrontendRepo { get; set; } = "";
 
-    /// <summary>Repo-relative SPA source root (holds routes/ and components/).</summary>
-    public string FrontendRoot { get; set; } = "web-app/src/target-crm/src";
+    /// <summary>Repo-relative SPA source root (holds routes/ and components/).
+    /// Set via QALOOP_FRONTEND_ROOT / qaloop.frontend_root.</summary>
+    public string FrontendRoot { get; set; } = "";
 
-    /// <summary>Deployed base URL; each module's reference URL is FrontendBaseUrl + its route path.</summary>
-    public string FrontendBaseUrl { get; set; } = "https://your-frontend-qa.example.net";
+    /// <summary>Deployed base URL; each module's reference URL is FrontendBaseUrl + its route path.
+    /// Set via QALOOP_FRONTEND_BASE_URL / qaloop.frontend_base_url.</summary>
+    public string FrontendBaseUrl { get; set; } = "";
+
+    // ── Derived repo-relative source paths for the QA-Loop scanners ──────────────
+    // All derive from FrontendRoot (the SPA src root) so the product-repo layout is configured in one
+    // place (QALOOP_FRONTEND_ROOT). Empty FrontendRoot → bare relative fallbacks (unconfigured no-op).
+    /// <summary>Module component dir, e.g. FrontendRoot + "/components/{module}".</summary>
+    public string FrontendComponentsDir(string module) => Join(FrontendRoot, $"components/{module}");
+
+    /// <summary>Module e2e-tests dir, a sibling of the SPA src root: repo-root + "/tests-e2e/{module}".</summary>
+    public string FrontendTestsDir(string module) => Join(FrontendRepoRoot, $"tests-e2e/{module}");
+
+    /// <summary>Greenfield automation folder, a sibling of the SPA src root: repo-root + "/automation".</summary>
+    public string AutomationRoot => Join(FrontendRepoRoot, "automation");
+
+    /// <summary>FrontendRoot's parent (the product-repo root), e.g. ".../app/src" → ".../app". Empty when unset.</summary>
+    private string FrontendRepoRoot => FrontendRoot.Contains('/') ? FrontendRoot[..FrontendRoot.LastIndexOf('/')] : "";
+
+    private static string Join(string root, string rel) => string.IsNullOrEmpty(root) ? rel : $"{root}/{rel}";
 }

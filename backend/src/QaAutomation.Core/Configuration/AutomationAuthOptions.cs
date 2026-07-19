@@ -14,7 +14,7 @@ public sealed class AutomationAuthOptions
     public string? LeadApiBaseUrl { get; set; }
 
     /// <summary>Web API base that mints the bearer token (direct, no APIM).
-    /// e.g. https://target-crm-web-api-qa-...azurewebsites.net/api/v1</summary>
+    /// e.g. https://your-web-api.example.net/api/v1</summary>
     public string? WebApiBaseUrl { get; set; }
 
     /// <summary>QA-admin dealer id used for the login call.</summary>

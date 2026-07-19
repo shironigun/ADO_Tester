@@ -191,7 +191,7 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
                 IssueDescription = desc, Fix = closed ? "Resolved in build 2026.05.3." : null,
                 ClosedAt = closed ? "2026-05-22T10:00:00Z" : null,
                 CreatedBy = "Sample User", CreatedDate = "2026-05-19T09:00:00Z",
-                Description = desc, RootCause = rca, AreaPath = "Your Project\\" + board,
+                Description = desc, RootCause = rca, AreaPath = "Sample Area\\" + board,
                 Comments = comments ?? [], Timeline = timeline ?? [],
             };
         }
@@ -199,7 +199,7 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
         List<TicketComment> cmts =
         [
             C("Sample User", "2026-05-20T11:00:00Z", "<div>Reproduced on staging — looks like the parser rejects non-CSV extensions.</div>"),
-            C("Marcus Lee", "2026-05-21T14:30:00Z", "<div>Fix deployed to QA, please re-verify the XLSX path.</div>"),
+            C("Sample User", "2026-05-21T14:30:00Z", "<div>Fix deployed to QA, please re-verify the XLSX path.</div>"),
         ];
         List<TimelineEvent> tl =
         [
@@ -207,26 +207,26 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
             new("2026-05-19T09:05:00Z", "Sample User", "state", "State New → Active"),
             new("2026-05-20T11:00:00Z", "Sample User", "assignment", "Assigned to Unassigned → Sample User"),
             new("2026-05-20T11:00:00Z", "Sample User", "comment", "Comment added"),
-            new("2026-05-22T10:00:00Z", "Marcus Lee", "state", "State Active → Resolved"),
+            new("2026-05-22T10:00:00Z", "Sample User", "state", "State Active → Resolved"),
         ];
 
         var tickets = new List<ReportTicket>
         {
-            // Your Team — Sample User (spotlight)
-            T(101, "CSV import rejects valid XLSX files", "Bug", "Resolved", "Sample User", "Your Team", comments: cmts, timeline: tl),
-            T(102, "Duplicate customers created on re-import", "Defect", "Closed", "Sample User", "Your Team"),
-            T(103, "Add column-mapping step to import wizard", "User Story", "Active", "Sample User", "Your Team"),
-            T(104, "Import preview shows wrong row count", "Bug", "New", "Sample User", "Your Team"),
-            T(105, "Document import size limits", "Task", "Closed", "Sample User", "Your Team", rca: "Parser missing extension validation."),
-            // Backend — Marcus Lee (spotlight)
-            T(201, "Permission API 500 when user has no password", "Defect", "Closed", "Marcus Lee", "Backend"),
-            T(202, "Harden order-import auth check", "User Story", "Closed", "Marcus Lee", "Backend", rca: "Null user not handled in validation."),
-            T(203, "Token refresh race condition", "Bug", "Active", "Marcus Lee", "Backend"),
-            T(204, "Add audit log for permission changes", "Task", "New", "Marcus Lee", "Backend"),
-            // Payments — Priya Nair (spotlight)
-            T(301, "Webhook refund event not received", "Defect", "Resolved", "Priya Nair", "Payments"),
-            T(302, "Retry failed webhook deliveries", "User Story", "Active", "Priya Nair", "Payments"),
-            T(303, "Webhook signature validation missing", "Bug", "New", "Priya Nair", "Payments"),
+            // Sample Board — Sample User (spotlight)
+            T(101, "CSV import rejects valid XLSX files", "Bug", "Resolved", "Sample User", "Sample Board", comments: cmts, timeline: tl),
+            T(102, "Duplicate customers created on re-import", "Defect", "Closed", "Sample User", "Sample Board"),
+            T(103, "Add column-mapping step to import wizard", "User Story", "Active", "Sample User", "Sample Board"),
+            T(104, "Import preview shows wrong row count", "Bug", "New", "Sample User", "Sample Board"),
+            T(105, "Document import size limits", "Task", "Closed", "Sample User", "Sample Board", rca: "Parser missing extension validation."),
+            // Backend — Sample User (spotlight)
+            T(201, "Permission API 500 when user has no password", "Defect", "Closed", "Sample User", "Backend"),
+            T(202, "Harden order-import auth check", "User Story", "Closed", "Sample User", "Backend", rca: "Null user not handled in validation."),
+            T(203, "Token refresh race condition", "Bug", "Active", "Sample User", "Backend"),
+            T(204, "Add audit log for permission changes", "Task", "New", "Sample User", "Backend"),
+            // Payments — Sample User (spotlight)
+            T(301, "Webhook refund event not received", "Defect", "Resolved", "Sample User", "Payments"),
+            T(302, "Retry failed webhook deliveries", "User Story", "Active", "Sample User", "Payments"),
+            T(303, "Webhook signature validation missing", "Bug", "New", "Sample User", "Payments"),
             // Mobile — Unassigned (rolls into Others)
             T(401, "Mobile grid zoom resets on rotate", "Bug", "Closed", "Unassigned", "Mobile"),
             T(402, "Offline cache sync drops edits", "User Story", "Active", "Unassigned", "Mobile"),
@@ -250,7 +250,7 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
             ],
         };
         return Build("Weekly Report — 2026-05-19 to 2026-05-23", new DateTime(2026, 5, 19), new DateTime(2026, 5, 23),
-            "Boards: Your Team, Backend, Payments, Mobile", tickets, theme, summary, teamName, []);
+            "Boards: Sample Board, Backend, Payments, Mobile", tickets, theme, summary, teamName, []);
     }
 
     // ════════════════════════════════════════════════════════════════════════════
@@ -1422,7 +1422,7 @@ body[data-theme="standup"] .ticket .html, body[data-theme="standup"] .md-html { 
 body[data-theme="standup"] .filters select,
 body[data-theme="standup"] .filters input { background:#141c2e; color:#e6edf6; }
 
-/* ── Branded · YourOrg corporate ── */
+/* ── Branded · corporate ── */
 body[data-theme="branded"] {
   --font-display: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
   --font-body: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
@@ -1447,7 +1447,7 @@ body[data-theme="branded"] .hdr .meta { color:#cfd8e3; }
 body[data-theme="branded"] .toggle button { background:rgba(255,255,255,.12); color:#fff; border-color:rgba(255,255,255,.3); }
 body[data-theme="branded"] .toggle button.active { background:#fff; color:#0b2f57; border-color:#fff; }
 body[data-theme="branded"] .slide-cover::before {
-  content:"CONSTELLATIONDEALER";
+  content:"QA ACTIVITY REPORT";
   position:absolute; top:1.5rem; left:0; right:0;
   letter-spacing:.45em; font-size:.7rem; color:var(--accent);
   font-weight:700; text-align:center;

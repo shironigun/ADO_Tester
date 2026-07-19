@@ -92,10 +92,7 @@ export default function KnowledgebasePage() {
 
   return (
     <Box sx={{ pb: 4 }}>
-      <PageHeader
-        title="Knowledgebase"
-        subtitle="The domain base agents retrieve from. Upload Markdown context, then test lexical retrieval (FTS5 / BM25)."
-      />
+      <PageHeader title="Knowledgebase" />
 
       {/* Stat row */}
       <Stagger>

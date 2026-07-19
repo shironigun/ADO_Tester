@@ -1,7 +1,7 @@
 namespace QaAutomation.Core.Models;
 
 /// <summary>A workspace tying an ADO org/project to its knowledgebase + sessions. Seeded as id=1
-/// (Name "Your Project"). Table: Projects.</summary>
+/// (Name "Default Project"). Table: Projects.</summary>
 public sealed class Project
 {
     public int Id { get; set; }

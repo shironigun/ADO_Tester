@@ -42,7 +42,7 @@ public sealed record GenerateSpecRequest
     /// <summary>Absolute path to the <c>/automation</c> folder to write into (takes precedence over SourceRoot).</summary>
     public string? OutputRoot { get; init; }
 
-    /// <summary>Repo root; the automation path is derived as &lt;root&gt;/web-app/src/target-crm/automation.</summary>
+    /// <summary>Repo root; the automation path is derived as &lt;root&gt;/&lt;configured-repo-root&gt;/automation.</summary>
     public string? SourceRoot { get; init; }
 
     /// <summary>Optional repo-relative path to an existing spec used only as a house-style reference.</summary>

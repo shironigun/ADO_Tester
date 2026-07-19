@@ -166,7 +166,3 @@ export async function deleteSession(id: number): Promise<void> {
 }
 
 export const sessionStreamUrl = (id: number) => apiUrl(`/api/qaloop/sessions/${id}/stream`)
-
-// Org-level ADO work-item deep link (unchanged from old qaLoop.ts).
-export const adoWorkItemUrl = (id: number) =>
-  `https://dev.azure.com/your-org/_workitems/edit/${id}`
