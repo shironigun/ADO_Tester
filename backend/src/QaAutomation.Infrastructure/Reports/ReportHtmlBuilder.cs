@@ -42,6 +42,7 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
         var total = tickets.Count;
         var byType = GroupCount(tickets, t => string.IsNullOrEmpty(t.WorkItemType) ? "Unknown" : t.WorkItemType);
         var byPerson = GroupCount(tickets, t => string.IsNullOrEmpty(t.AssignedTo) ? "Unassigned" : t.AssignedTo);
+        var byClosingPerson = GroupCount(tickets.Where(t => ClosedByOf(t) is not null).ToList(), t => ClosedByOf(t)!);
         var boardDetails = BoardDetails(tickets);
 
         var coverBoards = boards.Count > 0
@@ -52,10 +53,6 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
             ? "Weekly Report"
             : $"{teamName.Trim()} · Weekly Report";
 
-        var noFixTickets = tickets.Where(t => string.IsNullOrWhiteSpace(t.Fix)).ToList();
-        var openCritical = tickets.Where(t =>
-            !IsClosed(t.State) &&
-            ((t.WorkItemType ?? "").ToLowerInvariant() is "bug" or "issue")).ToList();
 
         // group_by_person preserving first-seen insertion order (defaultdict(list) semantics).
         var groupedByPerson = new Dictionary<string, List<ReportTicket>>();
@@ -118,13 +115,9 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
         if (boardDetails.Count > 0)
             slides.Add(("overview", SlideBoard(boardDetails)));
         if (byPerson.Count > 1)
-            slides.Add(("by_person", SlideByPerson(byPerson, total)));
+            slides.Add(("by_person", SlideByPerson(byPerson, byClosingPerson, total)));
         if (validThemes.Count > 0)
             slides.Add(("themes", SlideThemes(validThemes)));
-        if (summary.Risks.Count > 0 || noFixTickets.Count > 0 || openCritical.Count > 0)
-            slides.Add(("risks", SlideRisks(summary, noFixTickets, openCritical)));
-        if (summary.Wins.Count > 0)
-            slides.Add(("wins", SlideWins(summary)));
         for (var spotI = 0; spotI < spotlights.Count; spotI++)
         {
             var (person, items) = spotlights[spotI];
@@ -156,18 +149,23 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
         outp.Append(Filters(byType, byPerson));
         if (summary.Tldr.Count > 0 || !string.IsNullOrEmpty(summary.Headline))
             outp.Append(ExploreSummary(summary));
+
+        var insights = new StringBuilder();
         if (byType.Count > 0)
-            outp.Append(ExploreSection("By Ticket Type", DonutWithCards(byType, total)));
+            insights.Append(ExploreSection("By Ticket Type", DonutWithCards(byType, total)));
         if (byPerson.Count > 0)
-            outp.Append(ExploreSection("By Assigned Person", Bars(byPerson, total)));
+            insights.Append(ExploreSection("By Assigned Person", Bars(byPerson, total)));
         if (validThemes.Count > 0)
-            outp.Append(ExploreSection("AI-Detected Themes", ExploreThemes(validThemes)));
+            insights.Append(ExploreSection("AI-Detected Themes", ExploreThemes(validThemes)));
+        if (insights.Length > 0)
+            outp.Append($"<div class=\"explore-insights\">{insights}</div>");
+
         outp.Append(ExploreSection("Tickets", RenderTicketList(personOrder.Select(p => (p, groupedByPerson[p])))));
         outp.Append("</section>");
 
         // Spotlight ticket modal: inlined data + dialog shell.
         outp.Append(ModalDom());
-        outp.Append(ModalDataScript(tickets, spotlights, validThemes));
+        outp.Append(ModalDataScript(tickets, spotlights, validThemes, boardDetails));
 
         outp.Append($"<script>{Js}</script></body></html>");
         return outp.ToString();
@@ -209,17 +207,21 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
             new("2026-05-20T11:00:00Z", "Sample User", "comment", "Comment added"),
             new("2026-05-22T10:00:00Z", "Sample User", "state", "State Active → Resolved"),
         ];
+        // Minimal single-event timelines so the "By Closing Person" spotlight has more than one name.
+        List<TimelineEvent> tlClosedByReviewerA = [new("2026-05-21T09:00:00Z", "Sample Reviewer A", "state", "State Active → Closed")];
+        List<TimelineEvent> tlClosedByReviewerB = [new("2026-05-21T15:00:00Z", "Sample Reviewer B", "state", "State Active → Closed")];
+        List<TimelineEvent> tlClosedByReviewerC = [new("2026-05-23T09:00:00Z", "Sample Reviewer C", "state", "State Active → Closed")];
 
         var tickets = new List<ReportTicket>
         {
             // Sample Board — Sample User (spotlight)
             T(101, "CSV import rejects valid XLSX files", "Bug", "Resolved", "Sample User", "Sample Board", comments: cmts, timeline: tl),
-            T(102, "Duplicate customers created on re-import", "Defect", "Closed", "Sample User", "Sample Board"),
+            T(102, "Duplicate customers created on re-import", "Defect", "Closed", "Sample User", "Sample Board", timeline: tlClosedByReviewerA),
             T(103, "Add column-mapping step to import wizard", "User Story", "Active", "Sample User", "Sample Board"),
             T(104, "Import preview shows wrong row count", "Bug", "New", "Sample User", "Sample Board"),
             T(105, "Document import size limits", "Task", "Closed", "Sample User", "Sample Board", rca: "Parser missing extension validation."),
             // Backend — Sample User (spotlight)
-            T(201, "Permission API 500 when user has no password", "Defect", "Closed", "Sample User", "Backend"),
+            T(201, "Permission API 500 when user has no password", "Defect", "Closed", "Sample User", "Backend", timeline: tlClosedByReviewerB),
             T(202, "Harden order-import auth check", "User Story", "Closed", "Sample User", "Backend", rca: "Null user not handled in validation."),
             T(203, "Token refresh race condition", "Bug", "Active", "Sample User", "Backend"),
             T(204, "Add audit log for permission changes", "Task", "New", "Sample User", "Backend"),
@@ -228,7 +230,7 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
             T(302, "Retry failed webhook deliveries", "User Story", "Active", "Sample User", "Payments"),
             T(303, "Webhook signature validation missing", "Bug", "New", "Sample User", "Payments"),
             // Mobile — Unassigned (rolls into Others)
-            T(401, "Mobile grid zoom resets on rotate", "Bug", "Closed", "Unassigned", "Mobile"),
+            T(401, "Mobile grid zoom resets on rotate", "Bug", "Closed", "Unassigned", "Mobile", timeline: tlClosedByReviewerC),
             T(402, "Offline cache sync drops edits", "User Story", "Active", "Unassigned", "Mobile"),
             T(403, "Crash on rapid rotate", "Defect", "New", "Unassigned", "Mobile"),
         };
@@ -309,7 +311,7 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
         var legend = string.Concat(bt.Select((x, i) =>
             $"<li><span class=\"dot\" style=\"background:{Palette[i % Palette.Length]}\"></span>" +
             $"<span class=\"lg-k\">{H(x.Label)}</span>" +
-            $"<span class=\"lg-v\">{(x.N * 100.0 / d.All).ToString("F0", CultureInfo.InvariantCulture)}%</span></li>"));
+            $"<span class=\"lg-v\">{x.N} ({(x.N * 100.0 / d.All).ToString("F0", CultureInfo.InvariantCulture)}%)</span></li>"));
         var donutBlock =
             "<div class=\"board-type\"><div class=\"board-type-h\">By type</div>" +
             $"{donut}<ul class=\"board-legend\">{legend}</ul></div>";
@@ -317,9 +319,10 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
         if (d.Issues.Count > 0)
         {
             var ic = string.Concat(d.Issues.Select(iss =>
-                "<div class=\"issue-card\"><span class=\"issue-ic\">⚠</span>" +
+                $"<button class=\"issue-card spot-open\" type=\"button\" data-spot=\"{iss.SpotKey}\">" +
+                "<span class=\"issue-ic\">⚠</span>" +
                 $"<span class=\"issue-n\">{iss.N}</span>" +
-                $"<span class=\"issue-l\">{H(iss.Label)}</span></div>"));
+                $"<span class=\"issue-l\">{H(iss.Label)}</span></button>"));
             issuesBlock =
                 "<div class=\"issues\"><div class=\"issues-h\">Issues</div>" +
                 $"<div class=\"issue-cards\">{ic}</div></div>";
@@ -358,13 +361,53 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
             "</div>";
     }
 
-    private static string SlideByPerson(List<(string Key, int Count)> byPerson, int total)
-        =>
-        "<div class=\"slide-body\">" +
-        "<div class=\"slide-eyebrow\">Breakdown</div>" +
-        "<h2 class=\"slide-h\">By Assigned Person</h2>" +
-        $"{Bars(byPerson, total)}" +
-        "</div>";
+    private static string SlideByPerson(
+        List<(string Key, int Count)> byPerson, List<(string Key, int Count)> byClosingPerson, int total)
+    {
+        var closingTotal = byClosingPerson.Sum(x => x.Count);
+        return
+            "<div class=\"slide-body slide-person\">" +
+            "<div class=\"bp-head\">" +
+            "<div class=\"slide-eyebrow\">Breakdown</div>" +
+            "<div class=\"bp-tabs\">" +
+            "<button class=\"bp-tab active\" data-bp=\"0\" type=\"button\">By Assigned Person</button>" +
+            "<button class=\"bp-tab\" data-bp=\"1\" type=\"button\">By Closing Person</button>" +
+            "</div>" +
+            "</div>" +
+            "<div class=\"bp-panel active\" data-bp=\"0\">" +
+            "<h2 class=\"slide-h\">By Assigned Person</h2>" +
+            $"{Bars(byPerson, total)}" +
+            "</div>" +
+            "<div class=\"bp-panel\" data-bp=\"1\">" +
+            "<h2 class=\"slide-h\">By Closing Person</h2>" +
+            $"{Bars(byClosingPerson, closingTotal)}" +
+            "</div>" +
+            "</div>";
+    }
+
+    /// <summary>The actor of the ticket's most recent transition into a closed state, derived from its
+    /// enriched <see cref="ReportTicket.Timeline"/>; null if the ticket isn't currently closed or that
+    /// transition couldn't be determined (e.g. enrichment was capped, or history has no state events).</summary>
+    private static string? ClosedByOf(ReportTicket t)
+    {
+        if (!IsClosed(t.State) || t.Timeline.Count == 0)
+            return null;
+        string? closer = null;
+        foreach (var e in t.Timeline)
+        {
+            if (e.Kind != "state")
+                continue;
+            var arrow = e.Detail.IndexOf('→', StringComparison.Ordinal);
+            var newState = arrow >= 0
+                ? e.Detail[(arrow + 1)..].Trim()
+                : e.Detail.StartsWith("State Set to ", StringComparison.Ordinal)
+                    ? e.Detail["State Set to ".Length..].Trim()
+                    : null;
+            if (newState is not null && ClosedStates.Contains(newState))
+                closer = e.Actor;   // Timeline is chronological ascending — last match wins.
+        }
+        return closer;
+    }
 
     private static string SlideThemes(List<ThemeCluster> themes)
     {
@@ -390,54 +433,6 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
             "</div>";
     }
 
-    private static string SlideRisks(ReportSummary summary, List<ReportTicket> noFixTickets, List<ReportTicket> openCritical)
-    {
-        var sections = new StringBuilder();
-        if (summary.Risks.Count > 0)
-        {
-            var items = string.Concat(summary.Risks.Take(6).Select(x => $"<li>{H(x)}</li>"));
-            sections.Append($"<div class=\"risk-block\"><h3>Identified risks</h3><ul>{items}</ul></div>");
-        }
-        if (noFixTickets.Count > 0)
-        {
-            var items = string.Concat(noFixTickets.Select(t =>
-                $"<li><span class=\"tid\">#{t.Id}</span> {H(t.Title)}</li>"));
-            sections.Append(
-                "<div class=\"risk-block\">" +
-                $"<h3>{noFixTickets.Count} closed without a recorded fix</h3>" +
-                $"<ul class=\"tight scroll-list\">{items}</ul></div>");
-        }
-        if (openCritical.Count > 0)
-        {
-            var items = string.Concat(openCritical.Select(t =>
-                $"<li><span class=\"tid\">#{t.Id}</span> {H(t.Title)} " +
-                $"<span class=\"state-pill open\">{H(t.State ?? "")}</span></li>"));
-            sections.Append(
-                "<div class=\"risk-block\">" +
-                $"<h3>{openCritical.Count} open Bug/Issue(s)</h3>" +
-                $"<ul class=\"tight scroll-list\">{items}</ul></div>");
-        }
-        return
-            "<div class=\"slide-body wide slide-risks\">" +
-            "<div class=\"slide-eyebrow\">Watch list</div>" +
-            "<h2 class=\"slide-h\">Risks &amp; Gaps</h2>" +
-            sections +
-            "</div>";
-    }
-
-    private static string SlideWins(ReportSummary summary)
-    {
-        var cards = string.Concat(summary.Wins.Take(6).Select(w =>
-            "<article class=\"win-card\"><span class=\"win-mark\">✦</span>" +
-            $"<p>{H(w)}</p></article>"));
-        return
-            "<div class=\"slide-body wide slide-wins\">" +
-            "<div class=\"slide-eyebrow\">Highlights</div>" +
-            "<h2 class=\"slide-h\">Wins this week</h2>" +
-            $"<div class=\"win-grid\">{cards}</div>" +
-            "</div>";
-    }
-
     private static string SlideSpotlight(string person, List<ReportTicket> tickets, int spotIndex)
     {
         var total = tickets.Count;
@@ -445,6 +440,7 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
         var bodyRows = new StringBuilder();
         var totOpen = 0;
         var totClosed = 0;
+        var byType = new List<(string Label, int Count)>();
         foreach (var (label, bucket) in typeDefs)
         {
             var items = tickets.Where(t => TypeBucket(t.WorkItemType) == bucket).ToList();
@@ -452,6 +448,8 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
             var opened = items.Count - closed;
             totOpen += opened;
             totClosed += closed;
+            if (items.Count > 0)
+                byType.Add((label, items.Count));
             bodyRows.Append(
                 $"<tr><td class=\"bt-board\">{label}</td>" +
                 $"<td class=\"num\">{opened}</td><td class=\"num\">{closed}</td>" +
@@ -466,6 +464,16 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
             "<th>Type</th><th class=\"num\">Open</th><th class=\"num\">Closed</th>" +
             "<th class=\"num\">All</th></tr></thead>" +
             $"<tbody>{bodyRows}</tbody></table>";
+
+        var donut = total != 0 ? DonutSvg(byType, total) : "<div class=\"chart-empty\">No data</div>";
+        var legend = string.Concat(byType.Select((x, i) =>
+            $"<li><span class=\"dot\" style=\"background:{Palette[i % Palette.Length]}\"></span>" +
+            $"<span class=\"lg-k\">{H(x.Label)}</span>" +
+            $"<span class=\"lg-v\">{x.Count} ({(x.Count * 100.0 / total).ToString("F0", CultureInfo.InvariantCulture)}%)</span></li>"));
+        var donutBlock =
+            "<div class=\"board-type\"><div class=\"board-type-h\">By type</div>" +
+            $"{donut}<ul class=\"board-legend\">{legend}</ul></div>";
+
         return
             "<div class=\"slide-body wide slide-spot\">" +
             "<div class=\"spot-head\">" +
@@ -477,7 +485,10 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
             $"<button class=\"spot-open\" data-spot=\"{spotIndex}\" type=\"button\">" +
             "Open tickets ▸</button>" +
             "</div>" +
-            $"{table}" +
+            "<div class=\"board-grid\">" +
+            $"<div>{table}</div>" +
+            $"{donutBlock}" +
+            "</div>" +
             "</div>";
     }
 
@@ -623,22 +634,33 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
         const int cy = 110;
         var parts = new StringBuilder(
             $"<svg class=\"donut\" viewBox=\"0 0 {size} {size}\" width=\"{size}\" height=\"{size}\">");
-        var a = -Math.PI / 2;
-        for (var i = 0; i < data.Count; i++)
+        if (data.Count == 1)
         {
-            var (k, count) = data[i];
-            var slice = 2 * Math.PI * count / total;
-            var x1 = cx + r * Math.Cos(a);
-            var y1 = cy + r * Math.Sin(a);
-            var x2 = cx + r * Math.Cos(a + slice);
-            var y2 = cy + r * Math.Sin(a + slice);
-            var large = slice > Math.PI ? 1 : 0;
-            var color = Palette[i % Palette.Length];
-            parts.Append(
-                $"<path d=\"M{cx},{cy} L{x1.ToString("F2", CultureInfo.InvariantCulture)},{y1.ToString("F2", CultureInfo.InvariantCulture)} " +
-                $"A{r},{r} 0 {large} 1 {x2.ToString("F2", CultureInfo.InvariantCulture)},{y2.ToString("F2", CultureInfo.InvariantCulture)} Z\" " +
-                $"fill=\"{color}\"><title>{H(k)}: {count}</title></path>");
-            a += slice;
+            // A single 100% category is a full-circle sweep — start and end angles coincide, so the
+            // M/L/A/Z path below degenerates to a zero-length arc and paints nothing. Draw a circle instead.
+            var (k, count) = data[0];
+            parts.Append($"<circle cx=\"{cx}\" cy=\"{cy}\" r=\"{r}\" fill=\"{Palette[0]}\">" +
+                $"<title>{H(k)}: {count}</title></circle>");
+        }
+        else
+        {
+            var a = -Math.PI / 2;
+            for (var i = 0; i < data.Count; i++)
+            {
+                var (k, count) = data[i];
+                var slice = 2 * Math.PI * count / total;
+                var x1 = cx + r * Math.Cos(a);
+                var y1 = cy + r * Math.Sin(a);
+                var x2 = cx + r * Math.Cos(a + slice);
+                var y2 = cy + r * Math.Sin(a + slice);
+                var large = slice > Math.PI ? 1 : 0;
+                var color = Palette[i % Palette.Length];
+                parts.Append(
+                    $"<path d=\"M{cx},{cy} L{x1.ToString("F2", CultureInfo.InvariantCulture)},{y1.ToString("F2", CultureInfo.InvariantCulture)} " +
+                    $"A{r},{r} 0 {large} 1 {x2.ToString("F2", CultureInfo.InvariantCulture)},{y2.ToString("F2", CultureInfo.InvariantCulture)} Z\" " +
+                    $"fill=\"{color}\"><title>{H(k)}: {count}</title></path>");
+                a += slice;
+            }
         }
         parts.Append($"<circle cx=\"{cx}\" cy=\"{cy}\" r=\"50\" fill=\"var(--card-bg)\"/>");
         parts.Append(
@@ -696,7 +718,8 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
     private static string ModalDataScript(
         IReadOnlyList<ReportTicket> tickets,
         List<(string Person, List<ReportTicket> Items)> spotlights,
-        List<ThemeCluster> themes)
+        List<ThemeCluster> themes,
+        List<BoardDetail> boardDetails)
     {
         var ticketMap = new Dictionary<string, object>();
         var ticketIds = new HashSet<int>();
@@ -737,6 +760,14 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
             spots[i.ToString(CultureInfo.InvariantCulture)] = spotlights[i].Items.Select(t => t.Id).ToList();
         for (var i = 0; i < themes.Count; i++)
             spots[$"theme_{i}"] = themes[i].TicketIds.Where(tid => ticketIds.Contains(tid)).ToList();
+        for (var i = 0; i < boardDetails.Count; i++)
+        {
+            var d = boardDetails[i];
+            if (d.NoRcaIds.Count > 0)
+                spots[$"issue_{i}_norca"] = d.NoRcaIds;
+            if (d.OpenBdIds.Count > 0)
+                spots[$"issue_{i}_openbd"] = d.OpenBdIds;
+        }
 
         var payload = JsonSerializer.Serialize(
             new { tickets = ticketMap, spots },
@@ -806,7 +837,9 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
         };
         public int NoRca { get; set; }
         public int OpenBd { get; set; }
-        public List<(int N, string Label)> Issues { get; } = [];
+        public List<int> NoRcaIds { get; } = [];
+        public List<int> OpenBdIds { get; } = [];
+        public List<(int N, string Label, string SpotKey)> Issues { get; } = [];
     }
 
     private static List<BoardDetail> BoardDetails(IReadOnlyList<ReportTicket> tickets)
@@ -835,18 +868,25 @@ public sealed partial class ReportHtmlBuilder : IReportHtmlBuilder
             if ((t.WorkItemType ?? "").ToLowerInvariant() is "bug" or "defect")
             {
                 if (closed && string.IsNullOrWhiteSpace(t.RootCause))
+                {
                     d.NoRca += 1;
+                    d.NoRcaIds.Add(t.Id);
+                }
                 if (!closed)
+                {
                     d.OpenBd += 1;
+                    d.OpenBdIds.Add(t.Id);
+                }
             }
         }
         var outp = order.Select(b => agg[b]).OrderByDescending(d => d.All).ToList();
-        foreach (var d in outp)
+        for (var i = 0; i < outp.Count; i++)
         {
+            var d = outp[i];
             if (d.NoRca != 0)
-                d.Issues.Add((d.NoRca, "Closed Bug/Defect with no Root Cause recorded"));
+                d.Issues.Add((d.NoRca, "Root cause missing", $"issue_{i}_norca"));
             if (d.OpenBd != 0)
-                d.Issues.Add((d.OpenBd, "Bug/Defect still open"));
+                d.Issues.Add((d.OpenBd, "Bug/Defect still open", $"issue_{i}_openbd"));
         }
         return outp;
     }
@@ -881,7 +921,10 @@ body[data-mode="present"] .explore { display:none; }
 body[data-mode="explore"] .present { display:none; }
 body[data-mode="explore"] #btn-script { opacity:.5; pointer-events:none; }
 
-.explore { padding:1rem; max-width:1200px; margin:0 auto; }
+.explore { padding:1.25rem clamp(1rem,4vw,3rem) 3rem; max-width:1760px; margin:0 auto; }
+.explore-insights { display:grid; gap:1.2rem; grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
+                     margin-bottom:1.2rem; align-items:start; }
+.explore-insights .section { margin-bottom:0; height:100%; }
 .filters { position:sticky; top:48px; background:var(--bg); padding:.5rem 0 .75rem;
            display:flex; gap:.75rem; flex-wrap:wrap; align-items:center; z-index:5; }
 .filters label { display:inline-flex; align-items:center; gap:.4rem; font-size:.9rem; color:var(--muted); }
@@ -910,7 +953,7 @@ body[data-mode="explore"] #btn-script { opacity:.5; pointer-events:none; }
 .donut-lbl { font-size:.8rem; fill:var(--muted); }
 
 .bars { display:flex; flex-direction:column; gap:.4rem; }
-.bar-row { display:grid; grid-template-columns:180px 1fr 140px; gap:.6rem; align-items:center; }
+.bar-row { display:grid; grid-template-columns:minmax(70px,120px) 1fr minmax(64px,auto); gap:.6rem; align-items:center; }
 .bar-label { color:var(--fg); font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .bar-track { background:var(--track-bg); height:14px; border-radius:7px; overflow:hidden; }
 .bar-fill { height:100%; border-radius:7px; background:var(--bar-c); width:0;
@@ -918,23 +961,30 @@ body[data-mode="explore"] #btn-script { opacity:.5; pointer-events:none; }
 .bar-num { color:var(--muted); font-size:.9rem; }
 @keyframes barfill { to { width:var(--bar-w); } }
 
-.person-group { margin-bottom:1.4rem; }
-.person-group h3 { font-size:1rem; margin:1rem 0 .5rem; padding-bottom:.3rem; border-bottom:1px solid var(--border); }
+.person-group { margin-bottom:1.8rem; display:grid; gap:1rem;
+                grid-template-columns:repeat(auto-fill,minmax(340px,1fr)); align-items:start; }
+.person-group h3 { grid-column:1 / -1; font-size:1.05rem; margin:0; padding-bottom:.5rem;
+                    border-bottom:1px solid var(--border); display:flex; align-items:baseline; gap:.5rem; }
 .person-group h3 .count { color:var(--muted); font-weight:400; font-size:.9rem; }
-.ticket { background:var(--card-bg); border:1px solid var(--border); border-radius:8px;
-          padding:.7rem .9rem; margin-bottom:.6rem; }
+.ticket { background:var(--card-bg); border:1px solid var(--border); border-left:4px solid var(--border);
+          border-radius:var(--radius); box-shadow:var(--shadow); padding:1rem 1.1rem;
+          display:flex; flex-direction:column; transition:transform .15s, box-shadow .15s; }
+.ticket:hover { transform:translateY(-2px); box-shadow:var(--shadow-lg); }
+.ticket.closed { border-left-color:var(--accent-good); }
+.ticket.open   { border-left-color:var(--accent-warn); }
 .ticket header { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; }
-.ticket header .id { color:var(--muted); font-size:.85rem; }
+.ticket header .id { color:var(--muted); font-size:.85rem; font-family:var(--font-mono); }
 .ticket header .type { background:var(--pill-bg); color:var(--pill-fg);
                         padding:.05rem .5rem; border-radius:999px; font-size:.75rem; }
 .ticket header .state { padding:.05rem .5rem; border-radius:999px; font-size:.75rem; }
 .ticket header .state.closed { background:var(--closed-bg); color:var(--closed-fg); }
 .ticket header .state.open   { background:var(--open-bg);   color:var(--open-fg); }
-.ticket h4 { margin:0; font-size:.98rem; flex:1 1 100%; }
-.ticket .body { margin-top:.5rem; display:grid; gap:.5rem; grid-template-columns:1fr 1fr; }
-.ticket .field b { display:block; color:var(--muted); font-size:.78rem; text-transform:uppercase; margin-bottom:.2rem; }
-.ticket .html { font-size:.9rem; line-height:1.4; max-height:200px; overflow:auto;
-                padding:.4rem; background:var(--inner-bg); border-radius:4px; }
+.ticket h4 { margin:.4rem 0 0; font-size:1rem; flex:1 1 100%; line-height:1.3; }
+.ticket .body { margin-top:.7rem; display:flex; flex-direction:column; gap:.7rem; flex:1; }
+.ticket .field b { display:block; color:var(--muted); font-size:.75rem; text-transform:uppercase;
+                    letter-spacing:.06em; margin-bottom:.25rem; }
+.ticket .html { font-size:.9rem; line-height:1.45; max-height:180px; overflow:auto;
+                padding:.5rem .6rem; background:var(--inner-bg); border-radius:8px; }
 .ticket .html img { max-width:100%; }
 .missing { color:var(--missing-fg); font-weight:500; background:var(--missing-bg);
            padding:.3rem .5rem; border-radius:4px; display:inline-block; }
@@ -983,17 +1033,6 @@ body[data-mode="present"] .present { scroll-snap-type:y mandatory;
 .theme-count { color:var(--muted); font-size:.8rem; margin-top:.5rem; text-transform:uppercase;
                letter-spacing:.1em; }
 
-.slide-risks .risk-block { background:var(--inner-bg); border-left:4px solid var(--accent-warn);
-                            padding:.8rem 1rem; border-radius:4px; margin-bottom:1rem; }
-.slide-risks .risk-block h3 { margin:0 0 .5rem; font-size:1.05rem; color:var(--accent-warn); }
-.slide-risks ul { margin:0; padding-left:1.2rem; }
-.slide-risks ul.tight li { line-height:1.5; }
-.tid { color:var(--muted); margin-right:.3rem; font-family:var(--font-mono); }
-.state-pill { padding:.05rem .5rem; border-radius:999px; font-size:.7rem; margin-left:.3rem; }
-.state-pill.open { background:var(--open-bg); color:var(--open-fg); }
-.state-pill.closed { background:var(--closed-bg); color:var(--closed-fg); }
-
-.slide-wins .big-bullets li::marker { color:var(--accent-good); }
 
 .spot-count { font-size:.95rem; color:var(--muted); font-weight:400; font-family:var(--font-body); }
 .spot-list { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:.4rem; }
@@ -1055,7 +1094,6 @@ body[data-script="on"][data-mode="present"] .speaker { display:block; }
              font:inherit; font-size:.95rem; font-weight:600; padding:.5rem 1rem;
              border-radius:8px; cursor:pointer; white-space:nowrap; transition:background .15s,color .15s; }
 .spot-open:hover { background:var(--accent); color:#fff; }
-.scroll-list { max-height:62vh; overflow:auto; }
 
 /* ── Ticket modal ── */
 .modal[hidden] { display:none; }
@@ -1194,8 +1232,6 @@ body { background:var(--bg); background-image:var(--bg-grad); background-attachm
 /* Theme / risk / wins cards */
 .theme-card { border-radius:var(--radius); box-shadow:var(--shadow); background:var(--card-bg); }
 .theme-card h3 { font-family:var(--font-display); }
-.slide-risks .risk-block { background:var(--card-bg); border:1px solid var(--border);
-       border-left:4px solid var(--accent-warn); border-radius:12px; box-shadow:var(--shadow); }
 .big-bullets { font-size:1.3rem; }
 .big-bullets li::marker { color:var(--accent); }
 
@@ -1260,7 +1296,7 @@ body { background:var(--bg); background-image:var(--bg-grad); background-attachm
        font-size:clamp(.85rem,1.3vw,1.25rem); font-weight:600; box-shadow:var(--shadow); }
 
 /* ── Board slide · matrix + type donut + issues ── */
-.slide-board .board-grid { display:grid; grid-template-columns:minmax(0,2.4fr) minmax(260px,1fr);
+.slide-board .board-grid, .slide-spot .board-grid { display:grid; grid-template-columns:minmax(0,2.4fr) minmax(260px,1fr);
        gap:clamp(1.6rem,3vw,3.5rem); align-items:start; }
 .board-table { width:100%; border-collapse:collapse; font-size:clamp(1.05rem,1.5vw,1.7rem); }
 .board-table th { text-align:left; color:var(--muted); font-size:clamp(.72rem,1vw,1.05rem);
@@ -1294,25 +1330,27 @@ body { background:var(--bg); background-image:var(--bg-grad); background-attachm
        background:var(--missing-bg); border:1px solid var(--accent-warn);
        border-left:6px solid var(--accent-warn); border-radius:var(--radius);
        box-shadow:0 0 0 1px var(--accent-warn) inset, var(--shadow);
-       padding:clamp(.85rem,1.5vh,1.3rem) clamp(1.1rem,1.7vw,1.7rem); }
+       padding:clamp(.85rem,1.5vh,1.3rem) clamp(1.1rem,1.7vw,1.7rem);
+       font:inherit; text-align:left; cursor:pointer; transition:box-shadow .15s, transform .15s; }
+.issue-card:hover { box-shadow:0 0 0 1px var(--accent-warn) inset, var(--shadow-lg); transform:translateY(-1px); }
 .issue-ic { color:var(--accent-warn); font-size:clamp(1.1rem,1.5vw,1.5rem); line-height:1; }
 .issue-n { font-family:var(--font-display); font-weight:800; color:var(--accent-warn); line-height:1;
        font-variant-numeric:tabular-nums; font-size:clamp(2rem,2.9vw,2.9rem); }
 .issue-l { color:var(--missing-fg); font-weight:600; font-size:clamp(.9rem,1.1vw,1.2rem);
        max-width:20ch; line-height:1.25; }
 
-/* Tabbed by-board slide */
-.bd-head { display:flex; justify-content:space-between; align-items:center; gap:1.2rem;
+/* Tabbed by-board slide (and the by-person assigned/closing toggle, which shares the same look) */
+.bd-head, .bp-head { display:flex; justify-content:space-between; align-items:center; gap:1.2rem;
        flex-wrap:wrap; margin-bottom:clamp(.9rem,2.2vh,1.8rem); }
-.bd-tabs { display:flex; gap:.5rem; flex-wrap:wrap; }
-.bd-tab { border:1px solid var(--border); background:var(--card-bg); color:var(--muted); font:inherit;
+.bd-tabs, .bp-tabs { display:flex; gap:.5rem; flex-wrap:wrap; }
+.bd-tab, .bp-tab { border:1px solid var(--border); background:var(--card-bg); color:var(--muted); font:inherit;
        font-weight:600; font-size:clamp(.8rem,1vw,1.1rem); padding:clamp(.4rem,.8vh,.6rem) clamp(.9rem,1.4vw,1.3rem);
        border-radius:999px; cursor:pointer; transition:background .15s, color .15s, border-color .15s; }
-.bd-tab:hover { border-color:var(--accent); color:var(--accent); }
-.bd-tab.active { background:var(--accent); color:#fff; border-color:var(--accent); box-shadow:var(--shadow); }
-.bd-panel { display:none; }
-.bd-panel.active { display:block; animation:slideIn 360ms ease-out; }
-.bd-panel .slide-h { margin:0; }
+.bd-tab:hover, .bp-tab:hover { border-color:var(--accent); color:var(--accent); }
+.bd-tab.active, .bp-tab.active { background:var(--accent); color:#fff; border-color:var(--accent); box-shadow:var(--shadow); }
+.bd-panel, .bp-panel { display:none; }
+.bd-panel.active, .bp-panel.active { display:block; animation:slideIn 360ms ease-out; }
+.bd-panel .slide-h, .bp-panel .slide-h { margin:0; }
 .bd-sub { color:var(--muted); font-size:clamp(.95rem,1.4vw,1.5rem); font-variant-numeric:tabular-nums;
        margin:clamp(.3rem,.8vh,.6rem) 0 clamp(1rem,2.4vh,2rem); }
 .bd-typecards { display:grid; grid-template-columns:1fr 1fr; gap:clamp(.9rem,1.6vw,1.5rem); }
@@ -1335,7 +1373,7 @@ body { background:var(--bg); background-image:var(--bg-grad); background-attachm
 .tc-st b { font-family:var(--font-display); font-size:1.15em; line-height:1; }
 .tc-st.open { background:var(--open-bg); color:var(--open-fg); }
 .tc-st.closed { background:var(--closed-bg); color:var(--closed-fg); }
-@media (max-width:900px) { .slide-board .board-grid { grid-template-columns:1fr; }
+@media (max-width:900px) { .slide-board .board-grid, .slide-spot .board-grid { grid-template-columns:1fr; }
        .bd-typecards { grid-template-columns:1fr 1fr; } }
 /* Centered vertically; matrix scrolls internally if there are many boards (keeps the
    whole body within the viewport so centering never clips). */
@@ -1357,14 +1395,6 @@ body { background:var(--bg); background-image:var(--bg-grad); background-attachm
 .module-l { text-transform:uppercase; letter-spacing:.16em; font-size:.7rem; color:var(--muted);
        margin-bottom:1.1rem; }
 .module-btn { margin-top:auto; align-self:flex-start; }
-
-/* ── Wins cards ── */
-.win-grid { display:grid; gap:1.1rem; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); }
-.win-card { background:var(--card-bg); border:1px solid var(--border);
-       border-left:4px solid var(--accent-good); border-radius:var(--radius); box-shadow:var(--shadow);
-       padding:1.2rem 1.3rem; }
-.win-card .win-mark { color:var(--accent-good); font-size:1.1rem; }
-.win-card p { margin:.4rem 0 0; font-size:1rem; line-height:1.45; }
 
 /* ── Spotlight matrix ── */
 .slide-spot .spot-table { max-width:560px; font-size:1.1rem; margin-top:1.4rem; }
@@ -1468,6 +1498,15 @@ document.addEventListener('click', e => {
   const i = tab.dataset.bt;
   slide.querySelectorAll('.bd-tab').forEach(b => b.classList.toggle('active', b === tab));
   slide.querySelectorAll('.bd-panel').forEach(p => p.classList.toggle('active', p.dataset.board === i));
+});
+// By-person tab switcher — assigned vs. closing person.
+document.addEventListener('click', e => {
+  const tab = e.target.closest('.bp-tab');
+  if (!tab) return;
+  const slide = tab.closest('.slide-person'); if (!slide) return;
+  const i = tab.dataset.bp;
+  slide.querySelectorAll('.bp-tab').forEach(b => b.classList.toggle('active', b === tab));
+  slide.querySelectorAll('.bp-panel').forEach(p => p.classList.toggle('active', p.dataset.bp === i));
 });
 function setMode(m) {
   body.dataset.mode = m;

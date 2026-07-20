@@ -71,6 +71,7 @@ const K = {
   DEFAULT_RANGE: 'reports.default_range_days',
   REPORT_TEAM_NAME: 'reports.team_name',
   REPORT_TYPES: 'reports.ticket_types',
+  REPORT_DATE_FIELDS: 'reports.date_filter_fields',
   VERIFY_DETAIL: 'find_bugs.verify_detail',
   VERIFY_STEP_SCOPE: 'find_bugs.verify_step_scope',
   BUG_FROM_CASE_MODE: 'find_bugs.bug_from_case_mode',
@@ -86,6 +87,7 @@ const K = {
 }
 
 const REPORT_TYPE_OPTIONS = ['User Story', 'Bug', 'Defect', 'Task', 'Issue', 'Feature']
+const DATE_FIELD_OPTIONS = ['Changed', 'Created', 'Closed']
 
 // ── Reusable parts ─────────────────────────────────────────────────────────
 
@@ -248,6 +250,7 @@ export default function SettingsPage() {
   const [defaultRange, setDefaultRange] = useState('7')
   const [teamName, setTeamName] = useState('')
   const [typesList, setTypesList] = useState<string[]>([])
+  const [dateFieldsList, setDateFieldsList] = useState<string[]>([])
   const [previewTheme, setPreviewTheme] = useState('Executive')
   const [verifyDetail, setVerifyDetail] = useState('step')
   const [verifyScope, setVerifyScope] = useState('fails_only')
@@ -319,6 +322,7 @@ export default function SettingsPage() {
       setDefaultRange(String(data[K.DEFAULT_RANGE] ?? '7'))
       setTeamName(String(data[K.REPORT_TEAM_NAME] ?? ''))
       setTypesList(String(data[K.REPORT_TYPES] ?? '').split(';').map(s => s.trim()).filter(Boolean))
+      setDateFieldsList(String(data[K.REPORT_DATE_FIELDS] ?? '').split(';').map(s => s.trim()).filter(Boolean))
       setVerifyDetail(String(data[K.VERIFY_DETAIL] ?? 'step'))
       setVerifyScope(String(data[K.VERIFY_STEP_SCOPE] ?? 'fails_only'))
       setBugFromMode(String(data[K.BUG_FROM_CASE_MODE] ?? 'instant'))
@@ -940,6 +944,15 @@ export default function SettingsPage() {
                         )}
                       />
 
+                      <Autocomplete<string, true, true, false>
+                        multiple disableClearable options={DATE_FIELD_OPTIONS} value={dateFieldsList}
+                        onChange={(_, v) => setDateFieldsList(v as string[])}
+                        renderInput={p => (
+                          <TextField {...p} label="Include tickets by" size="small"
+                            helperText="Which date counts as “in range” — changed (any touch), created, and/or closed. Empty = Changed." />
+                        )}
+                      />
+
                       <Autocomplete<string, true, false, true>
                         multiple freeSolo options={areaPaths} value={boardsList}
                         onChange={(_, v) => setBoardsList(v as string[])}
@@ -957,6 +970,7 @@ export default function SettingsPage() {
                       [K.DEFAULT_RANGE]: defaultRange,
                       [K.DEFAULT_BOARDS]: boardsList.join('; '),
                       [K.REPORT_TYPES]: typesList.join('; '),
+                      [K.REPORT_DATE_FIELDS]: dateFieldsList.join('; '),
                     })} />
                   </Panel>
                 </Box>

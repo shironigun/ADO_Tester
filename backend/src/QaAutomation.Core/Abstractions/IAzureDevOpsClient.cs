@@ -35,9 +35,13 @@ public interface IAzureDevOpsClient
     Task<IReadOnlyList<LinkedTestCase>> GetSuiteTestCasesAsync(int planId, int suiteId, bool recurse = true, CancellationToken ct = default);
 
     // ── Reports query + enrichment ──────────────────────────────────────────
+    /// <summary>
+    /// <paramref name="dateFields"/> selects which date defines "in range": any of "changed", "created",
+    /// "closed" (OR'd together); defaults to "changed" (any touch) when empty/null.
+    /// </summary>
     Task<IReadOnlyList<ReportTicket>> GetTicketsInRangeAsync(
         DateTime fromUtc, DateTime toUtc, IReadOnlyList<string> boards,
-        IReadOnlyList<string>? types = null, CancellationToken ct = default);
+        IReadOnlyList<string>? types = null, IReadOnlyList<string>? dateFields = null, CancellationToken ct = default);
     Task<IReadOnlyList<TicketComment>> GetWorkItemCommentsAsync(int workItemId, CancellationToken ct = default);
     Task<IReadOnlyList<TimelineEvent>> GetWorkItemUpdatesAsync(int workItemId, CancellationToken ct = default);
     Task<IReadOnlyList<ReportTicket>> EnrichTicketsForReportAsync(

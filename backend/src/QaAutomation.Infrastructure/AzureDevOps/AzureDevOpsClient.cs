@@ -599,9 +599,12 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
 
     // ── Reports query + enrichment ──────────────────────────────────────────
 
+    // Currently-closed state names for the "closed" date-field option (mirrors ReportHtmlBuilder.ClosedStates).
+    private static readonly string[] ClosedStateNames = ["Closed", "Done", "Resolved", "Completed"];
+
     public async Task<IReadOnlyList<ReportTicket>> GetTicketsInRangeAsync(
         DateTime fromUtc, DateTime toUtc, IReadOnlyList<string> boards,
-        IReadOnlyList<string>? types = null, CancellationToken ct = default)
+        IReadOnlyList<string>? types = null, IReadOnlyList<string>? dateFields = null, CancellationToken ct = default)
     {
         // [System.ChangedDate] is date-precision in WIQL — supplying a time fails. Use date-only.
         var fromS = fromUtc.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
@@ -617,13 +620,27 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
             chosen = DefaultReportTypes.ToList();
         var typesCsv = string.Join(", ", chosen.Select(t => $"'{Esc(t)}'"));
 
+        // Which real-world date defines "in range": changed (any touch), created, and/or closed. OR'd together.
+        // System.ClosedDate itself can't be a WHERE-clause comparison (TF51535) — "closed" instead uses
+        // State + StateChangeDate, which is the date a currently-closed item last entered its Closed state.
+        var chosenDateFields = (dateFields ?? []).Select(f => f.Trim().ToLowerInvariant()).Where(f => f.Length > 0).Distinct().ToList();
+        if (chosenDateFields.Count == 0)
+            chosenDateFields = ["changed"];
+        var closedStatesCsv = string.Join(", ", ClosedStateNames.Select(s => $"'{Esc(s)}'"));
+        var dateClauses = chosenDateFields.Select(f => f switch
+        {
+            "created" => $"([System.CreatedDate] >= '{fromS}' AND [System.CreatedDate] <= '{toS}')",
+            "closed" => $"([System.State] IN ({closedStatesCsv}) AND [Microsoft.VSTS.Common.StateChangeDate] >= '{fromS}' AND [Microsoft.VSTS.Common.StateChangeDate] <= '{toS}')",
+            _ => $"([System.ChangedDate] >= '{fromS}' AND [System.ChangedDate] <= '{toS}')",
+        }).Distinct().ToList();
+        var dateClause = "(" + string.Join(" OR ", dateClauses) + ")";
+
         var wiql = new JsonObject
         {
             ["query"] =
                 $"SELECT [System.Id] FROM WorkItems " +
                 $"WHERE [System.TeamProject] = '{Opts.Project}' " +
-                $"AND [System.ChangedDate] >= '{fromS}' " +
-                $"AND [System.ChangedDate] <= '{toS}' " +
+                $"AND {dateClause} " +
                 $"AND [System.WorkItemType] IN ({typesCsv}) " +
                 $"{areaClause}" +
                 $" ORDER BY [System.ChangedDate] DESC",
