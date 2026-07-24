@@ -147,6 +147,25 @@ public sealed class SettingsController : ControllerBase
         }
     }
 
+    [HttpGet("ado/work-item-types")]
+    public async Task<IActionResult> AdoWorkItemTypes([FromQuery] string? organization, [FromQuery] string? project, CancellationToken cancellationToken)
+    {
+        var org = string.IsNullOrWhiteSpace(organization) ? _adoOptions.CurrentValue.Organization : organization;
+        var proj = string.IsNullOrWhiteSpace(project) ? _adoOptions.CurrentValue.Project : project;
+        if (string.IsNullOrWhiteSpace(org) || string.IsNullOrWhiteSpace(proj))
+            return StatusCode(400, new { detail = "Organization and project required." });
+        try
+        {
+            var workItemTypes = await _ado.DiscoverWorkItemTypesAsync(org, proj, cancellationToken);
+            return Ok(new { organization = org, project = proj, workItemTypes });
+        }
+        catch (Exception e)
+        {
+            _log.LogWarning("ADO discover work item types failed for {Org} / {Proj}: {Error}", org, proj, e.Message);
+            return StatusCode(502, new { detail = e.Message });
+        }
+    }
+
     [HttpGet("ado/repositories")]
     public async Task<IActionResult> AdoRepositories(CancellationToken cancellationToken)
     {

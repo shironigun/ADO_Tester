@@ -14,6 +14,11 @@ public interface IAzureDevOpsClient
     Task<IReadOnlyList<AdoNamedRef>> DiscoverProjectsAsync(string organization, CancellationToken ct = default);
     Task<IReadOnlyList<string>> DiscoverAreaPathsAsync(string organization, string project, CancellationToken ct = default);
 
+    /// <summary>Work-item type names defined in the project (e.g. "User Story", "Bug", "Defect",
+    /// "Support"), excluding disabled types and the test-management containers. Drives the Reports
+    /// "Ticket types" picker so it always reflects the project's real process.</summary>
+    Task<IReadOnlyList<string>> DiscoverWorkItemTypesAsync(string organization, string project, CancellationToken ct = default);
+
     /// <summary>List branch (head) names for the given repository, or the configured ado.repository when null.</summary>
     Task<IReadOnlyList<string>> DiscoverBranchesAsync(string? repository = null, CancellationToken ct = default);
 

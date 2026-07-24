@@ -136,6 +136,21 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
         return outPaths;
     }
 
+    public async Task<IReadOnlyList<string>> DiscoverWorkItemTypesAsync(string organization, string project, CancellationToken ct = default)
+    {
+        // Org-level URL, api-version HARDCODED 7.1 (mirrors the other discovery calls). Skip disabled
+        // types and the test-management containers (never "tickets" in a report).
+        using var doc = await GetDocAsync(
+            $"https://dev.azure.com/{organization}/{Quote(project)}/_apis/wit/workitemtypes?api-version=7.1",
+            $"Work item types ({project})", ct);
+        return Array(doc.RootElement, "value")
+            .Where(t => !(t.TryGetProperty("isDisabled", out var dis) && dis.ValueKind == JsonValueKind.True))
+            .Select(t => GetStr(t, "name"))
+            .Where(n => !string.IsNullOrEmpty(n) && !NonTestableWorkItemTypes.Contains(n!))
+            .Select(n => n!)
+            .ToList();
+    }
+
     // ── reads ───────────────────────────────────────────────────────────────
 
     public async Task<AdoWorkItem> GetWorkItemAsync(int workItemId, bool forceRefresh = false, CancellationToken ct = default)

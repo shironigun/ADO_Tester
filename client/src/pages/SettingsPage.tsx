@@ -36,7 +36,7 @@ import { MONO_FONT } from '../theme/tokens'
 import { apiUrl } from '../config/env'
 import { axiosMessage } from '../common/errors'
 import {
-  getConfig, saveConfig, getClaudeCliModels, getCopilotCliModels, getAdoOrgs, getAdoProjects, getAdoAreaPaths, getAdoBranches, getAdoRepositories,
+  getConfig, saveConfig, getClaudeCliModels, getCopilotCliModels, getAdoOrgs, getAdoProjects, getAdoAreaPaths, getAdoWorkItemTypes, getAdoBranches, getAdoRepositories,
   type Config, type AdoProject,
 } from '../api/settings'
 import { getEnvStatus, getWorkItem, pingLlm, type EnvStatus, type WorkItem } from '../api/diagnostics'
@@ -86,6 +86,8 @@ const K = {
   QALOOP_DEFAULT_SUITE: 'qaloop.default_suite_id',
 }
 
+// Fallback suggestions for the Reports "Ticket types" picker when the project's real work-item
+// types can't be loaded from ADO (e.g. no connection yet). Replaced live by getAdoWorkItemTypes.
 const REPORT_TYPE_OPTIONS = ['User Story', 'Bug', 'Defect', 'Task', 'Issue', 'Feature']
 const DATE_FIELD_OPTIONS = ['Changed', 'Created', 'Closed']
 
@@ -250,6 +252,7 @@ export default function SettingsPage() {
   const [defaultRange, setDefaultRange] = useState('7')
   const [teamName, setTeamName] = useState('')
   const [typesList, setTypesList] = useState<string[]>([])
+  const [typeOptions, setTypeOptions] = useState<string[]>(REPORT_TYPE_OPTIONS)
   const [dateFieldsList, setDateFieldsList] = useState<string[]>([])
   const [previewTheme, setPreviewTheme] = useState('Executive')
   const [verifyDetail, setVerifyDetail] = useState('step')
@@ -387,6 +390,15 @@ export default function SettingsPage() {
       .then(setAreaPaths)
       .catch(() => setAreaPaths([]))
       .finally(() => setAreasLoading(false))
+  }, [adoOrg, adoProject, config[`${K.ADO_PAT}.set`]])
+
+  // Reports "Ticket types" picker — load the project's real work-item types. On failure/empty
+  // (e.g. no connection), keep the static fallback so the picker is never empty.
+  useEffect(() => {
+    if (!adoOrg || !adoProject) return
+    getAdoWorkItemTypes(adoOrg, adoProject)
+      .then(t => { if (t.length) setTypeOptions(t) })
+      .catch(() => {})
   }, [adoOrg, adoProject, config[`${K.ADO_PAT}.set`]])
 
   // Branches for the configured repo (drives the Default branch dropdown). Reloads when the saved
@@ -936,11 +948,11 @@ export default function SettingsPage() {
                         value={defaultRange} onChange={e => setDefaultRange(e.target.value)} />
 
                       <Autocomplete<string, true, false, true>
-                        multiple freeSolo options={REPORT_TYPE_OPTIONS} value={typesList}
+                        multiple freeSolo options={typeOptions} value={typesList}
                         onChange={(_, v) => setTypesList(v as string[])}
                         renderInput={p => (
                           <TextField {...p} label="Ticket types" size="small"
-                            helperText="Empty = default set." />
+                            helperText={adoOrg && adoProject ? "From your project's work-item types. Empty = default set." : 'Empty = default set.'} />
                         )}
                       />
 
