@@ -110,7 +110,9 @@ public sealed class ReportService : IReportService
 
             var typesRaw = await _settings.GetAsync("reports.ticket_types");
             var ticketTypes = typesRaw.Split(';').Select(t => t.Trim()).Where(t => t.Length > 0).ToList();
-            var tickets = await _ado.GetTicketsInRangeAsync(fromUtc, toUtc, boards, ticketTypes);
+            var dateFieldsRaw = await _settings.GetAsync("reports.date_filter_fields");
+            var dateFields = dateFieldsRaw.Split(';').Select(t => t.Trim()).Where(t => t.Length > 0).ToList();
+            var tickets = await _ado.GetTicketsInRangeAsync(fromUtc, toUtc, boards, ticketTypes, dateFields);
             var boardsLabel = boards.Count == 0 ? "" : "Boards: " + string.Join(", ", boards);
             Pub(key, EventKinds.Result, EventPhases.Fetch, $"Pulled {tickets.Count} ticket(s) in range", EventLevels.Success, new() { ["tickets"] = tickets.Count });
 

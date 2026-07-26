@@ -58,6 +58,16 @@ export async function getAdoAreaPaths(organization?: string, project?: string): 
   return data.areaPaths ?? []
 }
 
+// Both args optional: when omitted the backend falls back to the saved ado.organization / ado.project.
+// Drives the Reports "Ticket types" picker from the project's real process work-item types.
+export async function getAdoWorkItemTypes(organization?: string, project?: string): Promise<string[]> {
+  const params: Record<string, string> = {}
+  if (organization) params.organization = organization
+  if (project) params.project = project
+  const { data } = await api.get<{ workItemTypes: string[] }>('/api/settings/ado/work-item-types', { params })
+  return data.workItemTypes ?? []
+}
+
 export async function getAdoRepositories(): Promise<string[]> {
   const { data } = await api.get<{ repositories: string[] }>('/api/settings/ado/repositories')
   return data.repositories ?? []
