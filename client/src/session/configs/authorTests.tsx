@@ -23,6 +23,7 @@ import RuleIcon from '@mui/icons-material/Rule'
 import SearchIcon from '@mui/icons-material/Search'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
 import PsychologyIcon from '@mui/icons-material/Psychology'
+import TravelExploreIcon from '@mui/icons-material/TravelExplore'
 import AgentPipeline, { type PipelineStep } from '../../components/AgentPipeline'
 import AgentConsole from '../../components/AgentConsole'
 import AnalysisPanel from '../../components/AnalysisPanel'
@@ -42,6 +43,7 @@ import {
   getPlans, getSuites, searchWorkItems, startSession, listSessionsPage, getSessionDetail,
   patchDraft, approveAllDrafts, runTester as apiRunTester, cancelSession, pushSession, pushDraft, saveAnalysis,
   rerunAnalyst as apiRerunAnalyst, refineTester as apiRefineTester,
+  rescanPlan, getScanStatus,
   sessionStreamUrl, type TestPlan, type TestSuite, type TestFeedbackItem,
 } from '../../api/authorTests'
 import { getConfig } from '../../api/settings'
@@ -59,6 +61,7 @@ interface DraftPatch { title?: string; preconditions?: string; steps?: Step[] }
 const PIPELINE_STEPS: PipelineStep[] = [
   { key: 'fetch',    label: 'Fetch ticket',  icon: <SearchIcon /> },
   { key: 'retrieve', label: 'Retrieve KB',   icon: <MenuBookIcon /> },
+  { key: 'discover', label: 'Discover code', icon: <TravelExploreIcon /> },
   { key: 'analyst',  label: 'Analyst',       icon: <PsychologyIcon /> },
   { key: 'tester',   label: 'Tester',        icon: <RuleIcon /> },
 ]
@@ -66,19 +69,21 @@ const PIPELINE_STEPS: PipelineStep[] = [
 function activeStepIndex(status: string, activity: string | null): number {
   const a = (activity ?? '').toLowerCase()
   if (status === 'Done' || status === 'Drafted') return PIPELINE_STEPS.length
-  if (status === 'Pushing') return 3 // push fires from the Tester phase — keep that circle lit
-  if (status === 'AwaitingTester') return 3
+  if (status === 'Pushing') return 4 // push fires from the Tester phase — keep that circle lit
+  if (status === 'AwaitingTester') return 4
   if (status === 'Failed' || status === 'Cancelled') {
     // currentActivity is overwritten with a generic terminal string on failure, so these substring
-    // checks rarely match — BugDetailBody/AuthorDetailBody refine this from durable session data.
-    if (a.includes('analyst')) return 2
-    if (a.includes('retriev')) return 1
-    if (a.includes('fetch'))   return 0
-    if (a.includes('tester'))  return 3
+    // checks rarely match — reachedIdx derived from durable session data is the authoritative fallback.
+    if (a.includes('tester'))   return 4
+    if (a.includes('analyst'))  return 3
+    if (a.includes('discover') || a.includes('triage')) return 2
+    if (a.includes('retriev'))  return 1
+    if (a.includes('fetch'))    return 0
     return 0
   }
-  if (status === 'Drafting' || a.includes('tester')) return 3
-  if (a.includes('analyst'))   return 2
+  if (status === 'Drafting' || a.includes('tester')) return 4
+  if (a.includes('analyst'))   return 3
+  if (a.includes('discover') || a.includes('triage')) return 2
   if (a.includes('retriev'))   return 1
   if (a.includes('fetch') || a.includes('work item')) return 0
   return 0
@@ -318,11 +323,31 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
   const [removeSet, setRemoveSet] = useState<Record<number, boolean>>({})
   const [refineBusy, setRefineBusy] = useState(false)
 
+  // Reference plan dedup state (seeded from session).
+  const [refPlanId, setRefPlanId] = useState<number | ''>(session.referenceTestPlanId ?? '')
+  const [refSuiteId, setRefSuiteId] = useState<number | ''>(session.referenceTestSuiteId ?? '')
+  const [refSuites, setRefSuites] = useState<TestSuite[]>([])
+  const [navHint, setNavHint] = useState(session.planNavigationHint ?? '')
+  const [scanStatus, setScanStatus] = useState<{ caseCount: number; scannedAt: string } | null>(null)
+  const [rescanning, setRescanning] = useState(false)
+
   useEffect(() => { getPlans().then(setPlans).catch(() => {}) }, [])
   useEffect(() => {
     if (!selectedPlan) { setSuites([]); return }
     getSuites(selectedPlan).then(setSuites).catch(() => {})
   }, [selectedPlan])
+
+  // Ref plan suites + scan status.
+  useEffect(() => {
+    if (!refPlanId) { setRefSuites([]); return }
+    getSuites(refPlanId).then(setRefSuites).catch(() => {})
+  }, [refPlanId])
+  useEffect(() => {
+    if (!refPlanId) { setScanStatus(null); return }
+    getScanStatus(refPlanId, refSuiteId !== '' ? refSuiteId : undefined)
+      .then(s => { if (s.scanId) setScanStatus({ caseCount: s.caseCount!, scannedAt: s.scannedAt! }) })
+      .catch(() => {})
+  }, [refPlanId, refSuiteId])
 
   // Seed the push Plan/Suite from the Settings defaults (defaults.test_plan_id / _suite_id) so they're
   // pre-filled here. Fills only empty selectors — a manual choice is never overridden.
@@ -367,8 +392,24 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
     if (patch.steps !== undefined) body.stepsJson = JSON.stringify(patch.steps)
     try { await patchDraft(id, body); refetch() } catch (e) { onError(e, 'Save failed') }
   }
+  const rescan = async () => {
+    if (!refPlanId) return
+    setRescanning(true)
+    try {
+      const result = await rescanPlan(refPlanId, refSuiteId !== '' ? refSuiteId : undefined)
+      setScanStatus({ caseCount: result.caseCount, scannedAt: result.scannedAt })
+    } catch (e) { onError(e, 'Rescan failed') } finally { setRescanning(false) }
+  }
   const runTester = async () => {
-    try { await apiRunTester(session.id, { additionalContext: testerCtx.trim() || undefined }); refetch() }
+    try {
+      await apiRunTester(session.id, {
+        additionalContext: testerCtx.trim() || undefined,
+        referenceTestPlanId: refPlanId !== '' ? refPlanId : undefined,
+        referenceTestSuiteId: refSuiteId !== '' ? refSuiteId : undefined,
+        planNavigationHint: navHint.trim() || undefined,
+      })
+      refetch()
+    }
     catch (e) { onError(e, 'Run Tester failed') }
   }
   const refineAnalyst = async () => {
@@ -423,7 +464,10 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
   // On a terminal failure/cancel currentActivity is a generic "Failed: …" string, so infer the
   // furthest phase reached from durable data, landing the failed circle + default panel there.
   const terminalFailed = session.status === 'Failed' || session.status === 'Cancelled'
-  const reachedIdx = drafts.length > 0 ? 3 : session.analysisJson ? 2 : kbFiles.length > 0 ? 1 : 0
+  const dedupEv = persisted.find(e => e.phase === 'dedup')
+  const skippedDups = ((dedupEv?.data as Record<string, unknown> | undefined)?.skipped as Array<{ title: string; matchedTitle?: string; matchedAdoId?: number }> | undefined) ?? []
+  const flaggedDups = ((dedupEv?.data as Record<string, unknown> | undefined)?.flagged as Array<{ title: string; matchedTitle?: string; matchedAdoId?: number }> | undefined) ?? []
+  const reachedIdx = drafts.length > 0 ? 4 : session.analysisJson ? 3 : session.codeContext ? 2 : kbFiles.length > 0 ? 1 : 0
   const activeIdx = terminalFailed ? reachedIdx : activeStepIndex(session.status, session.currentActivity)
   const [picked, setPicked] = useState<number | null>(null)
   const sel = Math.min(picked ?? activeIdx, PIPELINE_STEPS.length - 1)
@@ -461,6 +505,43 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
             <TextField label="Extra context for the Tester (optional)" size="small" multiline minRows={2} fullWidth
               value={testerCtx} onChange={e => setTesterCtx(e.target.value)}
               placeholder="Anything the Tester should keep in mind (special data, environment, flows to emphasize)…" />
+            <Box>
+              <Typography variant="caption" color="text.secondary" sx={{ mb: 0.75, display: 'block' }}>Reference Test Plan (optional — avoid recreating existing tests)</Typography>
+              <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
+                <FormControl size="small" sx={{ minWidth: 200 }}>
+                  <InputLabel>Reference Test Plan</InputLabel>
+                  <Select label="Reference Test Plan" value={refPlanId}
+                    onChange={e => { setRefPlanId(e.target.value as number); setRefSuiteId('') }}>
+                    <MenuItem value=""><em>None</em></MenuItem>
+                    {plans.map(p => <MenuItem key={p.id} value={p.id}>{p.name} <Box component="span" sx={{ ml: 1, color: 'text.secondary', fontSize: '0.85em' }}>#{p.id}</Box></MenuItem>)}
+                  </Select>
+                </FormControl>
+                <FormControl size="small" sx={{ minWidth: 200 }} disabled={!refPlanId}>
+                  <InputLabel>Suite scope (optional)</InputLabel>
+                  <Select label="Suite scope (optional)" value={refSuiteId}
+                    onChange={e => setRefSuiteId(e.target.value as number)}>
+                    <MenuItem value=""><em>All suites</em></MenuItem>
+                    {refSuites.map(s => <MenuItem key={s.id} value={s.id}>{s.name} <Box component="span" sx={{ ml: 1, color: 'text.secondary', fontSize: '0.85em' }}>#{s.id}</Box></MenuItem>)}
+                  </Select>
+                </FormControl>
+                {!!refPlanId && (
+                  <Button size="small" variant="outlined" disabled={rescanning}
+                    startIcon={rescanning ? <CircularProgress size={12} /> : undefined}
+                    onClick={rescan}>
+                    {rescanning ? 'Rescanning…' : 'Rescan plan'}
+                  </Button>
+                )}
+              </Stack>
+              {!!refPlanId && scanStatus && (
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                  Indexed {scanStatus.caseCount} cases · scanned {new Date(scanStatus.scannedAt).toLocaleString()}
+                </Typography>
+              )}
+            </Box>
+            <TextField label="Plan navigation hint (optional)" size="small" fullWidth
+              value={navHint} onChange={e => setNavHint(e.target.value)}
+              placeholder='e.g. "Only Billing → Invoices; ignore Regression folder"'
+              disabled={!refPlanId} />
             <Box sx={{ textAlign: 'right' }}>
               <Button variant="contained" size="small" onClick={runTester}>Run Tester</Button>
             </Box>
@@ -509,6 +590,21 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
       )}
 
       {view === 'findings' && sel === 2 && (
+        <Card variant="outlined"><CardContent>
+          <Typography variant="subtitle2" gutterBottom>Code discovery</Typography>
+          {session.codeContext ? (
+            <Box component="pre" sx={{ fontFamily: 'monospace', fontSize: '0.75rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 400, overflowY: 'auto', bgcolor: 'action.hover', p: 1.5, borderRadius: 1 }}>
+              {session.codeContext}
+            </Box>
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              {inFlight ? 'Discovering code…' : 'No code context was discovered for this story.'}
+            </Typography>
+          )}
+        </CardContent></Card>
+      )}
+
+      {view === 'findings' && sel === 3 && (
         <>
           {session.status === 'Analyzing' && !session.analysisJson && <AnalystProgress streamUrl={streamUrl} />}
           <AnalysisPanel analysisJson={session.analysisJson}
@@ -537,13 +633,42 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
         </>
       )}
 
-      {view === 'findings' && sel === 3 && (
+      {view === 'findings' && sel === 4 && (
         <>
           {session.status === 'Drafting' && drafts.length === 0 && <TesterProgress streamUrl={streamUrl} />}
           {drafts.length === 0 && session.status !== 'Drafting' && (
             <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: 'center' }}>
-              {session.status === 'AwaitingTester' ? 'Tester has not run yet — click “Run Tester” above.' : 'No test cases yet.'}
+              {session.status === 'AwaitingTester' ? 'Tester has not run yet — click "Run Tester" above.' : 'No test cases yet.'}
             </Typography>
+          )}
+          {(skippedDups.length > 0 || flaggedDups.length > 0) && (
+            <Card variant="outlined" sx={{ mb: 2, borderColor: 'info.main' }}><CardContent>
+              <Typography variant="subtitle2" gutterBottom>Dedup — existing ADO tests considered</Typography>
+              {skippedDups.length > 0 && (
+                <Box sx={{ mb: 1 }}>
+                  <Typography variant="caption" color="text.secondary">Skipped (already covered):</Typography>
+                  <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                    {skippedDups.map((d, i) => (
+                      <Tooltip key={i} title={d.matchedTitle ? `Matched: ${d.matchedTitle}${d.matchedAdoId ? ` (TC #${d.matchedAdoId})` : ''}` : ''}>
+                        <Chip size="small" color="info" variant="outlined" label={d.title} />
+                      </Tooltip>
+                    ))}
+                  </Stack>
+                </Box>
+              )}
+              {flaggedDups.length > 0 && (
+                <Box>
+                  <Typography variant="caption" color="text.secondary">Similar to existing (kept for review):</Typography>
+                  <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                    {flaggedDups.map((d, i) => (
+                      <Tooltip key={i} title={d.matchedTitle ? `Similar to: ${d.matchedTitle}${d.matchedAdoId ? ` (TC #${d.matchedAdoId})` : ''}` : ''}>
+                        <Chip size="small" color="warning" variant="outlined" label={d.title} />
+                      </Tooltip>
+                    ))}
+                  </Stack>
+                </Box>
+              )}
+            </CardContent></Card>
           )}
           {drafts.length > 0 && (
         <>
@@ -644,6 +769,11 @@ function AuthorStartForm({ onStarted, onError, onClose }: StartFormProps) {
   const [pauseAtReview, setPauseAtReview] = useState(false)
   const [additional, setAdditional] = useState('')
   const [starting, setStarting] = useState(false)
+  const [startPlans, setStartPlans] = useState<TestPlan[]>([])
+  const [startSuites, setStartSuites] = useState<TestSuite[]>([])
+  const [startRefPlanId, setStartRefPlanId] = useState<number | ''>('')
+  const [startRefSuiteId, setStartRefSuiteId] = useState<number | ''>('')
+  const [startNavHint, setStartNavHint] = useState('')
 
   useEffect(() => {
     if (wiQuery.length < 2) { setWiOptions([]); return }
@@ -652,6 +782,12 @@ function AuthorStartForm({ onStarted, onError, onClose }: StartFormProps) {
     }, 400)
     return () => clearTimeout(t)
   }, [wiQuery])
+
+  useEffect(() => { getPlans().then(setStartPlans).catch(() => {}) }, [])
+  useEffect(() => {
+    if (!startRefPlanId) { setStartSuites([]); return }
+    getSuites(startRefPlanId).then(setStartSuites).catch(() => {})
+  }, [startRefPlanId])
 
   async function start() {
     if (!selectedWi) return
@@ -662,6 +798,9 @@ function AuthorStartForm({ onStarted, onError, onClose }: StartFormProps) {
       const { sessionId } = await startSession(PROJECT_ID, {
         workItemId: selectedWi.id, autoHandoff: auto,
         additionalContext: additional.trim() || undefined,
+        referenceTestPlanId: startRefPlanId !== '' ? startRefPlanId : undefined,
+        referenceTestSuiteId: startRefSuiteId !== '' ? startRefSuiteId : undefined,
+        planNavigationHint: startNavHint.trim() || undefined,
       })
       onClose(); onStarted(sessionId)
     } catch (e) { onError(e, 'Start failed') } finally { setStarting(false) }
@@ -694,6 +833,32 @@ function AuthorStartForm({ onStarted, onError, onClose }: StartFormProps) {
         value={additional} onChange={e => setAdditional(e.target.value)}
         placeholder="Anything not in the story — e.g. the feature lives at route /admin/settings, Billing tab. Guides the Analyst (and code discovery)."
         helperText="Free-text guidance for the Analyst. Extra Tester context can be added later, at the review gate." />
+      <Box>
+        <Typography variant="body2" sx={{ mb: 0.75, fontWeight: 500 }}>Reference Test Plan (optional)</Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>Point the Tester at an existing plan so it avoids recreating covered tests.</Typography>
+        <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap', gap: 1 }}>
+          <FormControl size="small" sx={{ minWidth: 200 }}>
+            <InputLabel>Reference Test Plan</InputLabel>
+            <Select label="Reference Test Plan" value={startRefPlanId}
+              onChange={e => { setStartRefPlanId(e.target.value as number); setStartRefSuiteId('') }}>
+              <MenuItem value=""><em>None</em></MenuItem>
+              {startPlans.map(p => <MenuItem key={p.id} value={p.id}>{p.name} <Box component="span" sx={{ ml: 1, color: 'text.secondary', fontSize: '0.85em' }}>#{p.id}</Box></MenuItem>)}
+            </Select>
+          </FormControl>
+          <FormControl size="small" sx={{ minWidth: 200 }} disabled={!startRefPlanId}>
+            <InputLabel>Suite scope (optional)</InputLabel>
+            <Select label="Suite scope (optional)" value={startRefSuiteId}
+              onChange={e => setStartRefSuiteId(e.target.value as number)}>
+              <MenuItem value=""><em>All suites</em></MenuItem>
+              {startSuites.map(s => <MenuItem key={s.id} value={s.id}>{s.name} <Box component="span" sx={{ ml: 1, color: 'text.secondary', fontSize: '0.85em' }}>#{s.id}</Box></MenuItem>)}
+            </Select>
+          </FormControl>
+        </Stack>
+      </Box>
+      <TextField label="Plan navigation hint (optional)" size="small" fullWidth
+        value={startNavHint} onChange={e => setStartNavHint(e.target.value)}
+        placeholder='e.g. "Only Billing → Invoices; ignore Regression folder"'
+        disabled={!startRefPlanId} />
       <Button variant="contained" onClick={start} disabled={starting || !selectedWi}>
         {starting ? <CircularProgress size={18} sx={{ color: 'white' }} /> : 'Run Analyst + Tester'}
       </Button>

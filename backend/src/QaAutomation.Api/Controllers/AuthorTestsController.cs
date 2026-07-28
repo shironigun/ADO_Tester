@@ -23,16 +23,18 @@ public sealed class AuthorTestsController : ControllerBase
     private readonly IAzureDevOpsClient _ado;
     private readonly IEventBus _bus;
     private readonly QaDbContext _db;
+    private readonly IExistingTestsIndexService _dedupIndex;
     private readonly ILogger<AuthorTestsController> _log;
 
     public AuthorTestsController(
         IAgentOrchestrator orchestrator, IAzureDevOpsClient ado, IEventBus bus, QaDbContext db,
-        ILogger<AuthorTestsController> log)
+        IExistingTestsIndexService dedupIndex, ILogger<AuthorTestsController> log)
     {
         _orchestrator = orchestrator;
         _ado = ado;
         _bus = bus;
         _db = db;
+        _dedupIndex = dedupIndex;
         _log = log;
     }
 
@@ -70,6 +72,42 @@ public sealed class AuthorTestsController : ControllerBase
     {
         try { return Ok(await _ado.GetTestSuitesAsync(planId, cancellationToken)); }
         catch (Exception e) { return StatusCode(502, new { detail = e.Message }); }
+    }
+
+    /// <summary>Force-rescan a reference test plan (+ optional suite scope) and rebuild the dedup index.</summary>
+    [HttpPost("plans/{planId:int}/rescan")]
+    public async Task<IActionResult> RescanPlan(int planId, [FromQuery] int? suiteId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var scan = await _dedupIndex.EnsureIndexAsync(planId, suiteId, forceRescan: true, cancellationToken);
+            return Ok(new RescanPlanResponse { ScanId = scan.Id, CaseCount = scan.CaseCount, ScannedAt = scan.ScannedAt });
+        }
+        catch (Exception e)
+        {
+            _log.LogError(e, "Rescan failed for plan {PlanId}", planId);
+            return StatusCode(500, new { detail = e.Message });
+        }
+    }
+
+    /// <summary>Return the current scan status for a reference plan (null fields = never scanned).</summary>
+    [HttpGet("plans/{planId:int}/scan-status")]
+    public async Task<IActionResult> ScanStatus(int planId, [FromQuery] int? suiteId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var scan = await _dedupIndex.GetScanStatusAsync(planId, suiteId, cancellationToken);
+            return Ok(new ScanStatusResponse
+            {
+                ScanId = scan?.Id,
+                CaseCount = scan?.CaseCount,
+                ScannedAt = scan?.ScannedAt,
+            });
+        }
+        catch (Exception e)
+        {
+            return StatusCode(500, new { detail = e.Message });
+        }
     }
 
     [HttpPost("{projectId:int}/start")]

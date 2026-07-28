@@ -17,6 +17,8 @@ using QaAutomation.Infrastructure.Results;
 using QaAutomation.Infrastructure.Llm;
 using QaAutomation.Infrastructure.Logging;
 using QaAutomation.Infrastructure.Notifications;
+using QaAutomation.Infrastructure.CodeContext;
+using QaAutomation.Infrastructure.ExistingTests;
 using QaAutomation.Infrastructure.Orchestrators;
 using QaAutomation.Infrastructure.QaPipelines;
 using QaAutomation.Infrastructure.QaRuns;
@@ -121,6 +123,8 @@ public static class DependencyInjection
         services.AddSingleton<IEventBus, EventBus>();
         services.AddSingleton<PipelineConcurrency>();
         services.AddSingleton<CancellationRegistry>();
+        services.AddSingleton<ICodeContextService, CodeContextService>();
+        services.AddSingleton<IExistingTestsIndexService, ExistingTestsIndexService>();
         services.AddSingleton<IAgentOrchestrator, AgentOrchestrator>();
         services.AddSingleton<IBugOrchestrator, BugOrchestrator>();
         services.AddScoped<IBatchService, BatchService>();   // scoped: uses the request/background DbContext

@@ -119,3 +119,23 @@ export async function saveAnalysis(sessionId: number, analysis: unknown): Promis
 }
 
 export const sessionStreamUrl = (id: number) => apiUrl(`/api/author-tests/sessions/${id}/stream`)
+
+export interface RescanPlanResponse { scanId: number; caseCount: number; scannedAt: string }
+export interface ScanStatusResponse { scanId: number | null; caseCount: number | null; scannedAt: string | null }
+
+export async function rescanPlan(planId: number, suiteId?: number): Promise<RescanPlanResponse> {
+  const { data } = await api.post<RescanPlanResponse>(
+    `/api/author-tests/plans/${planId}/rescan`,
+    null,
+    { params: suiteId !== undefined ? { suiteId } : {} },
+  )
+  return data
+}
+
+export async function getScanStatus(planId: number, suiteId?: number): Promise<ScanStatusResponse> {
+  const { data } = await api.get<ScanStatusResponse>(
+    `/api/author-tests/plans/${planId}/scan-status`,
+    { params: suiteId !== undefined ? { suiteId } : {} },
+  )
+  return data
+}

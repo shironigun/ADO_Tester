@@ -184,3 +184,19 @@ public sealed class TestSessionDetail
         Drafts = drafts.OrderBy(d => d.SortOrder).Select(TestCaseDraftDto.From).ToList(),
     };
 }
+
+/// <summary>Response from a force-rescan of a reference test plan index.</summary>
+public sealed class RescanPlanResponse
+{
+    public int ScanId { get; set; }
+    public int CaseCount { get; set; }
+    public DateTime ScannedAt { get; set; }
+}
+
+/// <summary>Current scan status for a reference plan index (null fields = never scanned).</summary>
+public sealed class ScanStatusResponse
+{
+    public int? ScanId { get; set; }
+    public int? CaseCount { get; set; }
+    public DateTime? ScannedAt { get; set; }
+}

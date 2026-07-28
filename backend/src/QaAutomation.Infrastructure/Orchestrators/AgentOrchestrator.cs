@@ -31,11 +31,14 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     private readonly CancellationRegistry _cancellations;
     private readonly IAzureDevOpsClient _ado;
     private readonly ILlmClientFactory _llmFactory;
+    private readonly ICodeContextService _codeContext;
+    private readonly IExistingTestsIndexService _dedupIndex;
     private readonly ILogger<AgentOrchestrator> _log;
 
     public AgentOrchestrator(
         IServiceScopeFactory scopeFactory, IEventBus bus, PipelineConcurrency concurrency,
         CancellationRegistry cancellations, IAzureDevOpsClient ado, ILlmClientFactory llmFactory,
+        ICodeContextService codeContext, IExistingTestsIndexService dedupIndex,
         ILogger<AgentOrchestrator> log)
     {
         _scopeFactory = scopeFactory;
@@ -44,6 +47,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         _cancellations = cancellations;
         _ado = ado;
         _llmFactory = llmFactory;
+        _codeContext = codeContext;
+        _dedupIndex = dedupIndex;
         _log = log;
     }
 
@@ -237,6 +242,26 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             Pub(key, EventKinds.Result, EventPhases.Retrieve, $"Retrieved {context.Count} knowledgebase chunk(s)",
                 EventLevels.Success, new() { ["chunks"] = context.Count, ["files"] = context.Select(h => h.FileName).ToList() });
 
+            // Phase 2 — Discover code context from the ADO repo.
+            await UpdateActivityAsync(db, session, "Discovering code context from ADO repository", ct);
+            Pub(key, EventKinds.Phase, EventPhases.Discover, "Discovering code context from repository");
+            try
+            {
+                var (_, codeCtx) = await _codeContext.DiscoverAsync(
+                    workItemId, wi, null, [], [], session.AdditionalContext, alwaysSearch: true, llm, key, ct);
+                session.CodeContext = string.IsNullOrEmpty(codeCtx) ? null : codeCtx;
+                session.UpdatedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync(ct);
+                Pub(key, EventKinds.Result, EventPhases.Discover,
+                    string.IsNullOrEmpty(codeCtx) ? "No code context found" : "Code context discovered",
+                    EventLevels.Success, new() { ["hasCode"] = !string.IsNullOrEmpty(codeCtx) });
+            }
+            catch (Exception discoverEx) when (discoverEx is not OperationCanceledException)
+            {
+                _log.LogWarning(discoverEx, "Code discovery failed for session {SessionId} — continuing without code context", sessionId);
+                Pub(key, EventKinds.System, EventPhases.Discover, $"Code discovery skipped: {discoverEx.Message}", EventLevels.Warn);
+            }
+
             await UpdateActivityAsync(db, session, $"Analyst — analyzing story (using {context.Count} KB chunks)", ct);
             Pub(key, EventKinds.Phase, EventPhases.Analyst, $"Analyst started ({context.Count} chunks)");
             var analysis = await RunStreamingAsync(db, session, "Analyst — analyzing story",
@@ -353,19 +378,73 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         QaDbContext db, TestSession session, AnalystOutput analysis, AdoWorkItem wi, string key, CancellationToken ct)
     {
         var llm = await _llmFactory.CreateAsync(ct);
+
+        // Phase 3 — Build existing-tests dedup block from the reference plan index (if configured).
+        string? existingTestsBlock = null;
+        if (session.ReferenceTestPlanId is not null)
+        {
+            try
+            {
+                await _dedupIndex.EnsureIndexAsync(
+                    session.ReferenceTestPlanId.Value, session.ReferenceTestSuiteId, forceRescan: false, ct);
+                existingTestsBlock = await _dedupIndex.BuildTesterContextAsync(
+                    session.ReferenceTestPlanId.Value, session.ReferenceTestSuiteId, analysis, 8192, ct);
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "Dedup index build failed for session {SessionId} — proceeding without it", session.Id);
+            }
+        }
+
         Pub(key, EventKinds.Phase, EventPhases.Tester, "Tester started — generating test cases in QA style");
         var generated = await RunStreamingAsync(db, session, "Tester — generating test cases",
             (p, c) => new TesterAgent(llm).GenerateAsync(
-                analysis, wi, session.TesterContext, /* existingTestsBlock (Phase 3) */ null,
+                analysis, wi, session.TesterContext, existingTestsBlock,
                 p, EmitClosure(key, EventPhases.Tester), c),
             key, EventPhases.Tester, ct);
+
+        // Post-gen dedup: similarity check against the full reference plan index.
+        IReadOnlyList<DedupResult> dedupResults = [];
+        if (session.ReferenceTestPlanId is not null && generated.Count > 0)
+        {
+            try
+            {
+                var toCheck = generated
+                    .Select(g => new GeneratedTestCase(g.Title, string.Join(" | ", g.Steps.Select(s => s.Action))))
+                    .ToList();
+                dedupResults = await _dedupIndex.FindDuplicatesAsync(
+                    session.ReferenceTestPlanId.Value, session.ReferenceTestSuiteId, toCheck, ct);
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "Post-gen dedup check failed for session {SessionId} — proceeding without filtering", session.Id);
+            }
+        }
+
+        var clearDupTitles = dedupResults.Where(d => d.IsClearDuplicate)
+            .Select(d => d.Title).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var filteredGenerated = generated.Where(g => !clearDupTitles.Contains(g.Title)).ToList();
+
+        if (dedupResults.Count > 0)
+        {
+            var skipped = dedupResults.Where(d => d.IsClearDuplicate).ToList();
+            var flagged = dedupResults.Where(d => !d.IsClearDuplicate).ToList();
+            Pub(key, EventKinds.Result, EventPhases.Dedup,
+                $"Dedup: skipped {skipped.Count} duplicate(s), flagged {flagged.Count} borderline",
+                EventLevels.Info,
+                new()
+                {
+                    ["skipped"] = skipped.Select(d => new { d.Title, d.MatchedTitle, d.MatchedAdoId }).ToList<object>(),
+                    ["flagged"] = flagged.Select(d => new { d.Title, d.MatchedTitle, d.MatchedAdoId }).ToList<object>(),
+                });
+        }
 
         // Clear any prior drafts (re-run) then insert the new ones — one transaction via SaveChanges.
         var existing = await db.TestCaseDrafts.Where(d => d.SessionId == session.Id).ToListAsync(ct);
         db.TestCaseDrafts.RemoveRange(existing);
-        for (var i = 0; i < generated.Count; i++)
+        for (var i = 0; i < filteredGenerated.Count; i++)
         {
-            var g = generated[i];
+            var g = filteredGenerated[i];
             db.TestCaseDrafts.Add(new TestCaseDraft
             {
                 SessionId = session.Id,
@@ -374,13 +453,13 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 StepsJson = JsonSerializer.Serialize(g.Steps.Select(st => new { action = st.Action, expected = st.Expected })),
                 SortOrder = i,
             });
-            Pub(key, EventKinds.Result, EventPhases.Tester, $"Test case {i + 1}/{generated.Count}: {g.Title}");
+            Pub(key, EventKinds.Result, EventPhases.Tester, $"Test case {i + 1}/{filteredGenerated.Count}: {g.Title}");
         }
 
         session.Status = SessionStatus.Drafted;
-        session.CurrentActivity = $"Drafted {generated.Count} test case(s) — awaiting review";
-        Pub(key, EventKinds.System, EventPhases.Tester, $"Drafted {generated.Count} test case(s) — awaiting review",
-            EventLevels.Success, new() { ["terminal"] = true, ["count"] = generated.Count });
+        session.CurrentActivity = $"Drafted {filteredGenerated.Count} test case(s) — awaiting review";
+        Pub(key, EventKinds.System, EventPhases.Tester, $"Drafted {filteredGenerated.Count} test case(s) — awaiting review",
+            EventLevels.Success, new() { ["terminal"] = true, ["count"] = filteredGenerated.Count });
         PersistLog(session, key);
         session.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
@@ -483,6 +562,21 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
             var wi = await _ado.GetWorkItemAsync(session.WorkItemId, ct: ct);
 
+            // Phase 3 — Build existing-tests dedup block from the reference plan index (if configured).
+            string? existingTestsBlock = null;
+            if (session.ReferenceTestPlanId is not null)
+            {
+                try
+                {
+                    existingTestsBlock = await _dedupIndex.BuildTesterContextAsync(
+                        session.ReferenceTestPlanId.Value, session.ReferenceTestSuiteId, analysis, 8192, ct);
+                }
+                catch (Exception ex)
+                {
+                    _log.LogWarning(ex, "Dedup index build failed for session {SessionId} refine — proceeding without it", session.Id);
+                }
+            }
+
             var drafts = await db.TestCaseDrafts.Where(d => d.SessionId == sessionId).ToListAsync(ct);
             var feedbackByDraft = perTest.Where(f => !f.Remove)
                 .GroupBy(f => f.DraftId).ToDictionary(g => g.Key, g => g.First().Feedback);
@@ -504,7 +598,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             var refined = await RunStreamingAsync(db, session, "Tester — refining test cases",
                 (p, c) => new TesterAgent(llm).RefineAsync(
                     analysis, wi, existing, removedTitles, overallFeedback, session.TesterContext,
-                    /* existingTestsBlock (Phase 3) */ null, p, EmitClosure(key, EventPhases.Tester), c),
+                    existingTestsBlock, p, EmitClosure(key, EventPhases.Tester), c),
                 key, EventPhases.Tester, ct);
 
             ReconcileDrafts(db, session, drafts, toRemove, refined, key);
