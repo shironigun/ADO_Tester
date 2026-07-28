@@ -166,7 +166,8 @@ public sealed class BugOrchestrator : IBugOrchestrator
 
                 await UpdateAsync(db, session, $"Analyst — analyzing story (using {context.Count} KB chunks)", ct);
                 Pub(key, EventKinds.Phase, EventPhases.Analyst, $"Analyst started ({context.Count} chunks)");
-                var analysis = await new AnalystAgent(llm).AnalyzeAsync(wi, context, null, EmitClosure(key, EventPhases.Analyst), ct);
+                var analysis = await new AnalystAgent(llm).AnalyzeAsync(
+                    wi, context, progress: null, emit: EmitClosure(key, EventPhases.Analyst), cancellationToken: ct);
                 Pub(key, EventKinds.Result, EventPhases.Analyst,
                     $"Analyst produced: {analysis.Module} / {analysis.Feature} · " +
                     $"{analysis.AcceptanceCriteria.Count} ACs · {analysis.EdgeCases.Count} edge", EventLevels.Success);

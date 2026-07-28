@@ -19,21 +19,33 @@ local build/test) · `blocked` (needs a human decision)
 ---
 
 ## Current iteration
-**Iter 0 — scaffolding.** Create docs structure, CLAUDE.md rule, this tracker. → then start Phase 1.
+**Iter 1 — Phase 1 backend (data + agents + orchestrator + controller).** Written; `pending-local-verify`.
+Next: Phase 1 frontend (verifiable here via `npm`), then Phase 1 docs.
+
+### ⚠️ Migration must be generated locally (one command)
+The model gained 6 nullable columns on `TestSession`. Do **not** hand-edit the EF snapshot (it would make
+a later `migrations add` emit an empty migration). On a machine with the SDK, run:
+```
+dotnet ef migrations add AuthorTestsContextFields \
+  --project src/QaAutomation.Infrastructure --startup-project src/QaAutomation.Api
+```
+It generates the migration + Designer + snapshot update; applies automatically on next backend start.
 
 ---
 
 ## Phase 1 — Free-text context + refine loops (prompt-only)
 
 ### Backend
-- [ ] `TestSession.cs`: add `AdditionalContext`, `CodeContext`, `TesterContext`, `ReferenceTestPlanId`, `ReferenceTestSuiteId`, `PlanNavigationHint`. — `pending-local-verify`
-- [ ] `AuthorTestsContracts.cs`: `StartRequest`/`RunTesterRequest`/`RerunAnalystRequest`/`RefineTesterRequest`(+`TestFeedback`) + `TestSessionDetail` new fields. — `pending-local-verify`
-- [ ] `IAgentOrchestrator.cs`: add `RerunAnalystAsync`, `RefineTesterAsync`; extend `StartAsync`/`RunTesterAsync` signatures. — `pending-local-verify`
-- [ ] `AnalystAgent`: `BuildUserPrompt` gains `additionalContext`+`codeContext`; add `RefineAsync`. — `pending-local-verify`
-- [ ] `TesterAgent`: `BuildUserPrompt` gains `testerContext`(+`existingTestsBlock` stub); add `RefineAsync`. — `pending-local-verify`
-- [ ] `AgentOrchestrator`: thread `additionalContext`; add `RerunAnalystAsync`; add `RefineTesterAsync`+`ReconcileDrafts` merge. — `pending-local-verify`
-- [ ] `AuthorTestsController.cs`: pass new fields; add `rerun-analyst` + `refine-tester` endpoints. — `pending-local-verify`
-- [ ] EF migration `AuthorTestsContextAndIndex` (session fields; index tables added in Phase 3). — `pending-local-verify`
+- [x] `TestSession.cs`: add `AdditionalContext`, `CodeContext`, `TesterContext`, `ReferenceTestPlanId`, `ReferenceTestSuiteId`, `PlanNavigationHint`. — `pending-local-verify`
+- [x] `AuthorRunContext` record (Core/Models) — carries free-text + reference plan through the interface. — `pending-local-verify`
+- [x] `AuthorTestsContracts.cs`: `StartRequest`/`RunTesterRequest`/`RerunAnalystRequest`/`RefineTesterRequest`(+`TestFeedback`) + `TestSessionDetail` new fields. — `pending-local-verify`
+- [x] `IAgentOrchestrator.cs`: add `RerunAnalystAsync`, `RefineTesterAsync`; extend `StartAsync`/`RunTesterAsync` signatures. — `pending-local-verify`
+- [x] `AnalystAgent`: `BuildUserPrompt` gains `additionalContext`+`codeContext`; add `RefineAsync`. — `pending-local-verify`
+- [x] `TesterAgent`: `BuildUserPrompt` gains `testerContext`+`existingTestsBlock`; add `RefineAsync` (+`RefinedTestCase`/`ExistingDraftForRefine`). — `pending-local-verify`
+- [x] `AgentOrchestrator`: thread context via session; `RerunAnalystInnerAsync`; `RefineTesterInnerAsync`+`ReconcileDrafts` merge; `ApplyRunContextAsync`. — `pending-local-verify`
+- [x] `BugOrchestrator.cs:169`: AnalystAgent call switched to named args (parity-preserving) after AnalyzeAsync gained params. — `pending-local-verify`
+- [x] `AuthorTestsController.cs`: thread new fields; add `rerun-analyst` + `refine-tester` endpoints; `run-tester` optional body. — `pending-local-verify`
+- [ ] EF migration `AuthorTestsContextFields` — **generate locally** (see command above). — `needs-user-migration`
 
 ### Frontend
 - [ ] `api/authorTests.ts`: extend `startSession`/`runTester` bodies; add `rerunAnalyst`, `refineTester`.

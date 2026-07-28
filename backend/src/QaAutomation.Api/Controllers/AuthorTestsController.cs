@@ -89,7 +89,10 @@ public sealed class AuthorTestsController : ControllerBase
         }
         try
         {
-            var sessionId = await _orchestrator.StartAsync(projectId, request.WorkItemId, request.AutoHandoff, cancellationToken: cancellationToken);
+            var context = new AuthorRunContext(
+                request.AdditionalContext, request.ReferenceTestPlanId, request.ReferenceTestSuiteId, request.PlanNavigationHint);
+            var sessionId = await _orchestrator.StartAsync(
+                projectId, request.WorkItemId, request.AutoHandoff, context, cancellationToken: cancellationToken);
             return Ok(new StartResponse { SessionId = sessionId });
         }
         catch (Exception e)
@@ -100,9 +103,26 @@ public sealed class AuthorTestsController : ControllerBase
     }
 
     [HttpPost("sessions/{sessionId:int}/run-tester")]
-    public async Task<IActionResult> RunTester(int sessionId, CancellationToken cancellationToken)
+    public async Task<IActionResult> RunTester(int sessionId, [FromBody] RunTesterRequest? request, CancellationToken cancellationToken)
     {
-        await _orchestrator.RunTesterAsync(sessionId, cancellationToken);
+        // Empty body → null request → pre-enhancement behavior (no extra context/reference plan).
+        var context = request is null ? null : new AuthorRunContext(
+            request.AdditionalContext, request.ReferenceTestPlanId, request.ReferenceTestSuiteId, request.PlanNavigationHint);
+        await _orchestrator.RunTesterAsync(sessionId, context, cancellationToken);
+        return StatusCode(202, new AcceptedResponse { Started = true });
+    }
+
+    [HttpPost("sessions/{sessionId:int}/rerun-analyst")]
+    public async Task<IActionResult> RerunAnalyst(int sessionId, [FromBody] RerunAnalystRequest request, CancellationToken cancellationToken)
+    {
+        await _orchestrator.RerunAnalystAsync(sessionId, request?.Feedback ?? "", cancellationToken);
+        return StatusCode(202, new AcceptedResponse { Started = true });
+    }
+
+    [HttpPost("sessions/{sessionId:int}/refine-tester")]
+    public async Task<IActionResult> RefineTester(int sessionId, [FromBody] RefineTesterRequest request, CancellationToken cancellationToken)
+    {
+        await _orchestrator.RefineTesterAsync(sessionId, request?.OverallFeedback, request?.PerTest ?? [], cancellationToken);
         return StatusCode(202, new AcceptedResponse { Started = true });
     }
 

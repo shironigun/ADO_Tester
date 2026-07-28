@@ -17,6 +17,24 @@ public sealed class TestSession
     public string? ErrorMessage { get; set; }
     /// <summary>Persisted narrative of the live console (non-token events) as a JSON array; never tokens.</summary>
     public string? EventLogJson { get; set; }
+
+    // ── Free-form guidance + code awareness (Author Tests enhancements) ──
+    /// <summary>Free-text context the tester supplies at start (routes/screens/notes not in the story);
+    /// feeds the code-discovery search hints and the Analyst prompt.</summary>
+    public string? AdditionalContext { get; set; }
+    /// <summary>Repo code snippets discovered for the feature (linked PRs/commits + hint search),
+    /// assembled by the code-context service and fed to the Analyst. Mirrors <c>BugSession.CodeContext</c>.</summary>
+    public string? CodeContext { get; set; }
+    /// <summary>Free-text context the tester supplies at the Analyst→Tester gate; feeds the Tester prompt.</summary>
+    public string? TesterContext { get; set; }
+
+    // ── Existing-test dedup: optional reference Test Plan the Tester considers ──
+    /// <summary>Optional reference Test Plan whose existing test cases the Tester should NOT duplicate.</summary>
+    public int? ReferenceTestPlanId { get; set; }
+    /// <summary>Optional suite scope within <see cref="ReferenceTestPlanId"/> (null = whole plan).</summary>
+    public int? ReferenceTestSuiteId { get; set; }
+    /// <summary>Optional free-text hint on how to navigate the reference plan's suites/sub-folders.</summary>
+    public string? PlanNavigationHint { get; set; }
     /// <summary>Set when part of an Epic/Feature run (a Batch); NULL for single runs. Plain indexed
     /// int — there is NO FK constraint in the DB (spec §5.3).</summary>
     public int? BatchId { get; set; }

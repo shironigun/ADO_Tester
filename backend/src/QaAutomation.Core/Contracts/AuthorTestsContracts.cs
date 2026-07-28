@@ -9,6 +9,45 @@ public sealed class StartRequest
 {
     public int WorkItemId { get; set; }
     public bool AutoHandoff { get; set; } = true;
+    /// <summary>Free-text context to guide the run (routes/screens/notes not in the story).</summary>
+    public string? AdditionalContext { get; set; }
+    /// <summary>Optional reference Test Plan whose existing cases the Tester should not duplicate.</summary>
+    public int? ReferenceTestPlanId { get; set; }
+    public int? ReferenceTestSuiteId { get; set; }
+    public string? PlanNavigationHint { get; set; }
+}
+
+/// <summary>Body for the run-tester (Analyst→Tester gate) call. All fields optional — an empty body
+/// preserves the pre-existing no-body behavior.</summary>
+public sealed class RunTesterRequest
+{
+    /// <summary>Extra free-text context for the Tester, entered at the gate.</summary>
+    public string? AdditionalContext { get; set; }
+    public int? ReferenceTestPlanId { get; set; }
+    public int? ReferenceTestSuiteId { get; set; }
+    public string? PlanNavigationHint { get; set; }
+}
+
+/// <summary>Re-run the Analyst with reviewer feedback to improve/fill gaps in the existing analysis.</summary>
+public sealed class RerunAnalystRequest
+{
+    public string Feedback { get; set; } = "";
+}
+
+/// <summary>Re-run the Tester as a feedback-driven refine that MERGES into the existing drafts
+/// (update flagged, add new, remove only those explicitly flagged; pushed drafts are untouched).</summary>
+public sealed class RefineTesterRequest
+{
+    public string? OverallFeedback { get; set; }
+    public List<TestFeedback> PerTest { get; set; } = [];
+}
+
+/// <summary>Per-draft feedback for a Tester refine. <c>Remove</c> explicitly drops that draft.</summary>
+public sealed class TestFeedback
+{
+    public int DraftId { get; set; }
+    public string? Feedback { get; set; }
+    public bool Remove { get; set; }
 }
 
 public sealed class StartResponse
@@ -123,6 +162,12 @@ public sealed class TestSessionDetail
     public string? AnalysisJson { get; set; }
     public string? ErrorMessage { get; set; }
     public string? EventLogJson { get; set; }
+    public string? AdditionalContext { get; set; }
+    public string? CodeContext { get; set; }
+    public string? TesterContext { get; set; }
+    public int? ReferenceTestPlanId { get; set; }
+    public int? ReferenceTestSuiteId { get; set; }
+    public string? PlanNavigationHint { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public IReadOnlyList<TestCaseDraftDto> Drafts { get; set; } = [];
@@ -131,7 +176,11 @@ public sealed class TestSessionDetail
     {
         Id = s.Id, ProjectId = s.ProjectId, WorkItemId = s.WorkItemId, WorkItemTitle = s.WorkItemTitle,
         Status = s.Status, CurrentActivity = s.CurrentActivity, AnalysisJson = s.AnalysisJson,
-        ErrorMessage = s.ErrorMessage, EventLogJson = s.EventLogJson, CreatedAt = s.CreatedAt, UpdatedAt = s.UpdatedAt,
+        ErrorMessage = s.ErrorMessage, EventLogJson = s.EventLogJson,
+        AdditionalContext = s.AdditionalContext, CodeContext = s.CodeContext, TesterContext = s.TesterContext,
+        ReferenceTestPlanId = s.ReferenceTestPlanId, ReferenceTestSuiteId = s.ReferenceTestSuiteId,
+        PlanNavigationHint = s.PlanNavigationHint,
+        CreatedAt = s.CreatedAt, UpdatedAt = s.UpdatedAt,
         Drafts = drafts.OrderBy(d => d.SortOrder).Select(TestCaseDraftDto.From).ToList(),
     };
 }
