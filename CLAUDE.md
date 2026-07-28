@@ -138,3 +138,22 @@ Every feature or non-trivial change is tracked under `/docs` so future work need
   agreed verification for that unit). In-flight trackers under `docs/progress/` are updated every iteration.
 - **Keep it current.** When behavior changes, update the relevant doc in the same change — never leave a
   feature doc describing the old behavior.
+
+## Ralph loop execution (standing rule)
+
+When executing a **Ralph loop** (self-continuing, disk-tracked iterative build), follow the ruleset in
+`docs/progress/RalphLoop/<feature>/Ralph loop.md` **every iteration** — it is the source of truth, not
+memory. Each feature run gets its own subfolder under `docs/progress/RalphLoop/` containing that
+ruleset plus the standard doc set.
+
+- **Doc creation sequence:** `solution.md` (design) → `blueprint.md` (file-by-file implementation guide)
+  → `prd.md` (divide into `ID-###` tasks with acceptance criteria) → `progress.md` (track execution).
+  Design first, then derive the task backlog, then track.
+- **Per-iteration cycle:** read `progress.md` for the resume point → pick the highest-priority
+  incomplete `[ ]` task from `prd.md` → read existing code → implement **one** task → test + verify
+  (`dotnet build`/`dotnet test`, `npm run build`/`npm run lint`) → flip `[ ]`→`[x]` in `prd.md` →
+  append what/why to `progress.md` → commit only verified chunks → loop.
+- **Rules:** ONE task per iteration; `progress.md` is memory between iterations and is always updated;
+  **never commit failing code**; if a task is `[x]` in `prd.md` but not-started in `progress.md`, treat
+  it as **not started**; if stuck after 3 attempts, log the blocker in `progress.md` and move on.
+- **Reference example:** `docs/qa-loop-reshape/` (a completed run's full doc set + `Ralph loop.md`).
