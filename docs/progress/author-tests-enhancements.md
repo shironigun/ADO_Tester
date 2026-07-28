@@ -18,18 +18,31 @@ local build/test) · `blocked` (needs a human decision)
 
 ---
 
-## Current iteration
-**Iter 1 — Phase 1 backend (data + agents + orchestrator + controller).** Written; `pending-local-verify`.
-Next: Phase 1 frontend (verifiable here via `npm`), then Phase 1 docs.
+## Current status — HANDED OFF FOR LOCAL CONTINUATION
+**Phase 1 code complete** and pushed to `claude/chat-session-flzhjh` (3 commits). Frontend verified in
+CI-less container (`npm run build` green; lint net-zero). Backend `pending-local-verify` (container has
+no .NET SDK; .NET/NuGet egress blocked). Design/plan committed at `author-tests-enhancements-plan.md`.
 
-### ⚠️ Migration must be generated locally (one command)
-The model gained 6 nullable columns on `TestSession`. Do **not** hand-edit the EF snapshot (it would make
-a later `migrations add` emit an empty migration). On a machine with the SDK, run:
+## ▶ Resume locally (Ralph loop)
+Do these on a machine with the .NET SDK (use the repo's `dotnet` wrapper — see the `dotnet-build-environment`
+memory / `CLAUDE.md`). Then keep looping: read this tracker → smallest next unit → verify → update docs
+(after verified) → commit/push → repeat.
+
+**Step 1 — generate the Phase 1 migration** (do NOT hand-edit the EF snapshot; that would make this emit
+an empty migration):
 ```
 dotnet ef migrations add AuthorTestsContextFields \
   --project src/QaAutomation.Infrastructure --startup-project src/QaAutomation.Api
 ```
-It generates the migration + Designer + snapshot update; applies automatically on next backend start.
+**Step 2 — verify Phase 1 backend:** `dotnet build` && `dotnet test`
+(watch `AdoGoldenTests` + `AgentOrchestratorTests` — the only parity-sensitive touch was
+`BugOrchestrator.cs:169` switched to named args; behavior unchanged).
+**Step 3 — if green:** flip the Phase 1 backend rows below to `done`, then write
+`docs/features/author-tests-context-and-refine.md` + a `docs/changelog/` entry.
+**Step 4 — continue** with Phase 2 then Phase 3 per `author-tests-enhancements-plan.md`
+(each: build → test → npm build/lint → docs → commit/push).
+
+**If the build fails here in a web session instead:** paste the errors back and I'll fix them in the loop.
 
 ---
 
