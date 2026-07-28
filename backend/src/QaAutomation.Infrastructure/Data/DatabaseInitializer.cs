@@ -2,6 +2,7 @@ using System.Reflection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using QaAutomation.Core.Models;
+using QaAutomation.Infrastructure.TextSearch;
 
 namespace QaAutomation.Infrastructure.Data;
 
@@ -19,32 +20,30 @@ namespace QaAutomation.Infrastructure.Data;
 /// </summary>
 public sealed class DatabaseInitializer
 {
-    private const string FtsBootstrapSql =
-        "CREATE VIRTUAL TABLE IF NOT EXISTS doc_chunks USING fts5(content, project_id UNINDEXED, doc_id UNINDEXED)";
-
-    private const string FtsTestIndexBootstrapSql =
-        "CREATE VIRTUAL TABLE IF NOT EXISTS test_case_index USING fts5(title, steps_summary, scan_id UNINDEXED, entry_id UNINDEXED)";
-
     private static readonly string EfProductVersion =
         (typeof(DbContext).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
             ?.InformationalVersion ?? "8.0.11").Split('+')[0];
 
     private readonly QaDbContext _db;
+    private readonly ITextSearchProvider _textSearch;
     private readonly ILogger<DatabaseInitializer> _log;
 
-    public DatabaseInitializer(QaDbContext db, ILogger<DatabaseInitializer> log)
+    public DatabaseInitializer(QaDbContext db, ITextSearchProvider textSearch, ILogger<DatabaseInitializer> log)
     {
         _db = db;
+        _textSearch = textSearch;
         _log = log;
     }
 
     public void Initialize()
     {
-        if (ExistingSchemaNeedsAdoption())
+        // The adopt-existing-qa.db path is SQLite-only (an Alembic-era file DB). On PostgreSQL there is
+        // never a pre-existing non-EF schema, so Migrate() just builds it fresh.
+        if (_db.Database.IsSqlite() && ExistingSchemaNeedsAdoption())
             StampBaselineAsApplied();
 
         _db.Database.Migrate();   // fresh → create schema + history; adopted / up-to-date → no-op
-        EnsureFtsTable();
+        _textSearch.EnsureSchema(_db);   // FTS stores (SQLite fts5 virtual tables / Postgres tsvector tables)
         SeedProject();
         ReconcileOrphanedRuns();
     }
@@ -92,12 +91,6 @@ public sealed class DatabaseInitializer
             baseline, EfProductVersion);
         _log.LogInformation(
             "Adopted existing Alembic database: recorded baseline {Baseline} as applied (no DDL ran).", baseline);
-    }
-
-    private void EnsureFtsTable()
-    {
-        _db.Database.ExecuteSqlRaw(FtsBootstrapSql);
-        _db.Database.ExecuteSqlRaw(FtsTestIndexBootstrapSql);
     }
 
     private void SeedProject()

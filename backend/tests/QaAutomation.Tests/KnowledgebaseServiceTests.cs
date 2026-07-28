@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using QaAutomation.Core.Configuration;
 using QaAutomation.Infrastructure.Data;
 using QaAutomation.Infrastructure.Knowledgebase;
+using QaAutomation.Infrastructure.TextSearch;
 
 namespace QaAutomation.Tests;
 
@@ -83,11 +84,12 @@ public sealed class KnowledgebaseServiceTests
         try
         {
             using (var ctx = NewContext(dbPath))
-                new DatabaseInitializer(ctx, NullLogger<DatabaseInitializer>.Instance).Initialize();
+                new DatabaseInitializer(ctx, new SqliteFts5Search(), NullLogger<DatabaseInitializer>.Instance).Initialize();
 
             using var db = NewContext(dbPath);
             var svc = new KnowledgebaseService(
                 db,
+                new SqliteFts5Search(),
                 Options.Create(new StorageOptions { DataDirectory = dataDir, KnowledgebaseFolderName = "kb" }),
                 NullLogger<KnowledgebaseService>.Instance);
 

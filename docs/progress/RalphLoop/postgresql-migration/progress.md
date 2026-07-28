@@ -25,13 +25,13 @@
 | PGM-001 | Add Npgsql EF Core provider package | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | Npgsql.EntityFrameworkCore.PostgreSQL 8.0.11 added; user restores/builds locally |
 | PGM-002 | Boot-time provider selection + DatabaseOptions | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | DatabaseOptions enum; Program.cs reads DATABASE_PROVIDER (+ legacy-timestamp switch); AddInfrastructure branch (SQLite overload kept for tests) |
 | PGM-003 | Design-time factory provider branch | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | QaDbContextFactory branches on DATABASE_PROVIDER |
-| PGM-004 | ITextSearchProvider abstraction | NOT STARTED | | | Phase 2 |
-| PGM-005 | SqliteFts5Search + PostgresFtsSearch | NOT STARTED | | | SQLite impl moved verbatim |
-| PGM-006 | Generate the Npgsql migration set | NOT STARTED | | | Local only (needs .NET SDK) |
-| PGM-007 | DatabaseInitializer provider branch | NOT STARTED | | | Gate sqlite-isms |
-| PGM-008 | KnowledgebaseService delegates FTS | NOT STARTED | | | |
-| PGM-009 | ExistingTestsIndexService delegates FTS | NOT STARTED | | | |
-| PGM-010 | Register ITextSearchProvider by provider (DI) | NOT STARTED | | | |
+| PGM-004 | ITextSearchProvider abstraction | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | Interface + DocChunkHit in Infrastructure/TextSearch (see layering note in log) |
+| PGM-005 | SqliteFts5Search + PostgresFtsSearch | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | SQLite = bm25/MATCH moved verbatim; Postgres = tsvector/GIN/ts_rank; FtsMatch shared tokenizer |
+| PGM-006 | Generate the Npgsql migration set | NOT STARTED | | | Local only (needs .NET SDK) — run `dotnet ef migrations add InitialNpgsql` |
+| PGM-007 | DatabaseInitializer provider branch | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | adopt-qa.db gated to IsSqlite(); EnsureFtsTable → _textSearch.EnsureSchema |
+| PGM-008 | KnowledgebaseService delegates FTS | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | upload/delete/search via provider; MatchExpression kept (delegates to FtsMatch) |
+| PGM-009 | ExistingTestsIndexService delegates FTS | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | write + FTS read via provider; also removed a latent non-partial-class regex issue |
+| PGM-010 | Register ITextSearchProvider by provider (DI) | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | Sqlite/Postgres singleton by DATABASE_PROVIDER; 2 test fixtures updated |
 | PGM-011 | .env keys | VERIFIED | 2026-07-28 | 2026-07-28 | DATABASE_PROVIDER + POSTGRES_CONNECTION_STRING documented in .env.example (config text) |
 | PGM-012 | Local Docker setup guide | VERIFIED | 2026-07-28 | 2026-07-28 | docs/setup/postgresql-docker.md written |
 | PGM-013 | Azure deployment guide | VERIFIED | 2026-07-28 | 2026-07-28 | docs/setup/postgresql-azure.md written |
@@ -43,12 +43,36 @@
 ## Summary
 - **Total Tasks:** 15
 - **VERIFIED:** 3 (two setup guides + .env keys)
-- **CODE-COMPLETE:** 3 (PGM-001/002/003 — Phase 1 provider plumbing)
-- **NOT STARTED:** 9
+- **CODE-COMPLETE:** 9 (PGM-001/002/003 plumbing · PGM-004/005/007/008/009/010 FTS abstraction + wiring)
+- **NOT STARTED:** 3 (PGM-006 Npgsql migration · PGM-014 verify · PGM-015 feature doc)
 
 ---
 
 ## Log
+
+### 2026-07-28 (Phase 2 + 3 — FTS abstraction + wiring)
+- **PGM-004/005** — new `Infrastructure/TextSearch/`: `ITextSearchProvider` (+ `DocChunkHit`), `SqliteFts5Search`
+  (doc_chunks/test_case_index fts5 + bm25/rank reads moved VERBATIM), `PostgresFtsSearch` (real tables with a
+  generated `tsvector` column + GIN index, `websearch_to_tsquery`/`ts_rank`), and `FtsMatch` (shared SQLite
+  match-expression tokenizer).
+  - **Layering note (deviation from plan):** the interface lives in **Infrastructure**, not Core — it must take
+    `QaDbContext`, and Core has no implementation dependencies. This is an internal data-layer seam, not a Core contract.
+  - **FTS tables are outside EF on BOTH providers:** created idempotently by `EnsureSchema` (SQLite fts5 virtual
+    tables; Postgres real tables + GIN). So the Npgsql migration (PGM-006) only needs the relational tables.
+- **PGM-008/009** — `KnowledgebaseService` and `ExistingTestsIndexService` now delegate all FTS write/read to the
+  provider (no raw `SqliteConnection`). `KnowledgebaseService.MatchExpression` kept (delegates to `FtsMatch`) so the
+  BM25 unit tests are unchanged; `FindDuplicatesAsync`’s in-memory Jaccard is untouched.
+- **PGM-007** — `DatabaseInitializer` branches: the adopt-existing-`qa.db` path (sqlite_master / INSERT OR IGNORE)
+  is gated to `_db.Database.IsSqlite()`; `EnsureFtsTable()` replaced by `_textSearch.EnsureSchema(_db)`.
+- **PGM-010** — DI registers `SqliteFts5Search` or `PostgresFtsSearch` by `DATABASE_PROVIDER`.
+- **Tests updated** (ruleset — keep green): `KnowledgebaseServiceTests` + `DatabaseInitializerTests` now pass a
+  `new SqliteFts5Search()` into the `DatabaseInitializer`/`KnowledgebaseService` constructors. The `MatchExpression`
+  and BM25-ordering assertions are unchanged.
+- **Bonus fix:** removing `ExistingTestsIndexService`’s `[GeneratedRegex]` `TokenRegex` cleared a latent issue — it
+  was a `partial` method inside a **non-`partial`** class (a compile error the un-built author-tests code carried).
+- **CODE-COMPLETE, pending local verify:** no .NET SDK/Docker in the container. The user builds + tests locally.
+- **Next:** PGM-006 (Npgsql migration, local) → PGM-014 verify (SQLite green + Postgres round-trip on Docker) →
+  Azure deploy → PGM-015 feature doc.
 
 ### 2026-07-28 (Phase 1 — provider plumbing; SQLite default unchanged)
 - **PGM-001** — added `Npgsql.EntityFrameworkCore.PostgreSQL` 8.0.11 to the Infrastructure csproj
@@ -93,10 +117,37 @@
 
 ---
 
-## Pending / next actions
-1. Implement Phase 1 (PGM-001..003) — SQLite default must stay green with no env change.
-2. Phase 2 FTS abstraction (PGM-004..005) — move the SQLite impl verbatim to keep BM25 tests green.
-3. Phase 3 wire services + initializer (PGM-007..010).
-4. Phase 4 Npgsql migration (PGM-006) — **user runs `dotnet ef` locally**.
-5. Phase 5 config (PGM-011) — .env keys.
-6. PGM-014 local verification (user), then PGM-015 feature doc + changelog.
+## Remaining — to run locally (nothing here can run in the container: no .NET SDK / Docker)
+
+Do these on your machine, in order. Backend commands use your usual `dotnet` invocation (see the
+`dotnet-build-environment` note in `CLAUDE.md` if `dotnet` isn't on PATH). Guides:
+`docs/setup/postgresql-docker.md` (local) and `docs/setup/postgresql-azure.md` (deploy).
+
+### A. Confirm nothing regressed on SQLite (the default)
+- [ ] **Build the project** — from `backend/`: `dotnet build` → 0 errors (this also restores the new Npgsql package).
+- [ ] **Run the tests** — `dotnet test` → all green. Watch especially:
+  - [ ] `dotnet test --filter "FullyQualifiedName~AdoGoldenTests"` (byte-parity unchanged)
+  - [ ] `dotnet test --filter "FullyQualifiedName~KnowledgebaseServiceTests"` (BM25 round-trip + MatchExpression)
+  - [ ] `dotnet test --filter "FullyQualifiedName~DatabaseInitializerTests"` (adopt + fresh + fts5 bootstrap)
+- [ ] **Run the app on SQLite** (no env change): `dotnet run --project src/QaAutomation.Api` + `npm run dev` in `client/` → open http://localhost:5173 and confirm it behaves exactly as before.
+
+### B. Bring up PostgreSQL locally (Docker) — PGM-006 + PGM-014
+- [ ] **Start Postgres in Docker** (Step 1–2 of the Docker guide): `docker run … postgres:16` (or compose).
+- [ ] **Set `.env`**: `DATABASE_PROVIDER=postgres` + `POSTGRES_CONNECTION_STRING=Host=localhost;Port=5432;Database=qa;Username=qa;Password=qa`.
+- [ ] **PGM-006 — generate the Npgsql migration**: `DATABASE_PROVIDER=postgres dotnet ef migrations add InitialNpgsql --project src/QaAutomation.Infrastructure --startup-project src/QaAutomation.Api --output-dir Data/Migrations/Npgsql`. Confirm Postgres DDL (`integer`/`text`/`timestamp`, `GENERATED … AS IDENTITY`) and that the SQLite set is untouched. (If EF complains about the shared model snapshot, fall back to a dedicated per-provider migrations project — see solution.md Migrations.)
+- [ ] **Start the backend on Postgres** → confirm the schema + the `doc_chunks`/`test_case_index` tsvector/GIN tables are created on boot (no errors).
+
+### C. Do a real run for a module / ticket (functional check on Postgres)
+- [ ] **Knowledgebase**: upload a `.md`, then search → returns ranked hits (now Postgres `ts_rank`).
+- [ ] **Author Tests**: start a run for a work item (e.g. standing ticket **171740**) → Fetch → Retrieve KB → Discover → Analyst → Tester; confirm KB retrieval steers it and drafts generate.
+- [ ] **Existing-test dedup**: point a run at a reference Test Plan → the scan indexes and the dedup card shows skipped/flagged.
+- [ ] **Find Bugs** and/or **QA Loop module scan**: run one to exercise the pipelines end-to-end against Postgres.
+- [ ] **Switch back to SQLite** (`DATABASE_PROVIDER=sqlite`, restart) → app still runs on the original `qa.db`.
+
+### D. Deploy to Azure (go-live) — per `docs/setup/postgresql-azure.md`
+- [ ] Create an Azure Database for PostgreSQL **Flexible Server**; get the connection string (`SSL Mode=Require`).
+- [ ] Create the **App Service** (.NET 8); set `DATABASE_PROVIDER=postgres` + `POSTGRES_CONNECTION_STRING` (+ the other secrets) as app settings.
+- [ ] Deploy the backend; confirm migrations apply on boot; smoke-test the QA flows the team will use.
+
+### E. Close out
+- [ ] **PGM-015** — once B–D pass, write `docs/features/postgresql-dual-provider.md` + a dated `docs/changelog/` entry, and flip PGM-006/014/015 to done here.

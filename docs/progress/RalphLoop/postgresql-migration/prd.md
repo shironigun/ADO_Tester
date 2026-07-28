@@ -65,7 +65,7 @@ or bug-pipeline behavior changes — data-layer only.
 ### PHASE 2 — FULL-TEXT SEARCH ABSTRACTION
 
 #### PGM-004: ITextSearchProvider abstraction
-- **Status:** [ ]
+- **Status:** [~]
 - **ID:** PGM-004
 - **Description:** solution.md FTS Abstraction. Interface covering FTS ensure + KB `doc_chunks` upsert/delete/search + dedup `test_case_index` upsert/delete/search.
 - **File:** `backend/src/QaAutomation.Core/Abstractions/ITextSearchProvider.cs`
@@ -74,7 +74,7 @@ or bug-pipeline behavior changes — data-layer only.
   - Returns ranked results (doc/entry ids); compiles
 
 #### PGM-005: SqliteFts5Search + PostgresFtsSearch implementations
-- **Status:** [ ]
+- **Status:** [~]
 - **ID:** PGM-005
 - **Description:** solution.md FTS Abstraction. SQLite impl = current `bm25`/`MATCH` reads + fts5 bootstrap + mirror INSERT/DELETE moved **verbatim** (behavior must not change). Postgres impl = `to_tsvector`/`websearch_to_tsquery` + `ts_rank`, real tables + GIN (schema owned by migrations; `EnsureAsync` no-op).
 - **File:** `backend/src/QaAutomation.Infrastructure/TextSearch/SqliteFts5Search.cs`, `backend/src/QaAutomation.Infrastructure/TextSearch/PostgresFtsSearch.cs`
@@ -86,7 +86,7 @@ or bug-pipeline behavior changes — data-layer only.
 ### PHASE 3 — WIRE SERVICES + INITIALIZER
 
 #### PGM-007: DatabaseInitializer provider branch
-- **Status:** [ ]
+- **Status:** [~]
 - **ID:** PGM-007
 - **Description:** solution.md DatabaseInitializer. Gate the adopt-`qa.db` path (`sqlite_master`, `INSERT OR IGNORE`) and `EnsureFtsTable` fts5 bootstrap to SQLite; Postgres skips adoption, `Migrate()`s fresh (schema incl. FTS tables), `EnsureAsync` no-op. `SeedProject` + `ReconcileOrphanedRuns` stay on both.
 - **File:** `backend/src/QaAutomation.Infrastructure/Data/DatabaseInitializer.cs`
@@ -96,7 +96,7 @@ or bug-pipeline behavior changes — data-layer only.
   - Compiles
 
 #### PGM-008: KnowledgebaseService delegates FTS
-- **Status:** [ ]
+- **Status:** [~]
 - **ID:** PGM-008
 - **Description:** solution.md FTS Abstraction. Replace the raw `SqliteConnection`/`bm25`/`MATCH` read + `INSERT`/`DELETE` with `ITextSearchProvider` calls; drop the manual `PRAGMA busy_timeout`. Public `IKnowledgebaseService` surface unchanged.
 - **File:** `backend/src/QaAutomation.Infrastructure/Knowledgebase/KnowledgebaseService.cs`
@@ -105,7 +105,7 @@ or bug-pipeline behavior changes — data-layer only.
   - No direct `Microsoft.Data.Sqlite` usage remains in the service; compiles
 
 #### PGM-009: ExistingTestsIndexService delegates FTS
-- **Status:** [ ]
+- **Status:** [~]
 - **ID:** PGM-009
 - **Description:** solution.md FTS Abstraction. Replace the raw `test_case_index` `MATCH`/`ORDER BY rank` read + `INSERT`/`DELETE` with `ITextSearchProvider`. `FindDuplicatesAsync` (in-memory signature+Jaccard) unchanged.
 - **File:** `backend/src/QaAutomation.Infrastructure/ExistingTests/ExistingTestsIndexService.cs`
@@ -114,7 +114,7 @@ or bug-pipeline behavior changes — data-layer only.
   - `FindDuplicatesAsync` unchanged; compiles
 
 #### PGM-010: Register ITextSearchProvider by provider (DI)
-- **Status:** [ ]
+- **Status:** [~]
 - **ID:** PGM-010
 - **Description:** solution.md FTS Abstraction. Register `SqliteFts5Search` or `PostgresFtsSearch` per `DATABASE_PROVIDER` in the Infrastructure DI root.
 - **File:** `backend/src/QaAutomation.Infrastructure/DependencyInjection.cs`

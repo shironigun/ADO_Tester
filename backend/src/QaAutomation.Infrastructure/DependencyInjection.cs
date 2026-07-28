@@ -24,6 +24,7 @@ using QaAutomation.Infrastructure.QaPipelines;
 using QaAutomation.Infrastructure.QaRuns;
 using QaAutomation.Infrastructure.Reports;
 using QaAutomation.Infrastructure.Settings;
+using QaAutomation.Infrastructure.TextSearch;
 
 namespace QaAutomation.Infrastructure;
 
@@ -51,6 +52,12 @@ public static class DependencyInjection
             else
                 o.UseSqlite(connectionString).AddInterceptors(SqliteBusyTimeoutInterceptor.Instance);
         });
+
+        // Full-text search provider — MUST match the DB provider (SQLite fts5/bm25 vs Postgres tsvector/ts_rank).
+        // Stateless singletons; they operate on whichever QaDbContext the caller passes.
+        services.AddSingleton<ITextSearchProvider>(
+            provider == DatabaseProvider.Postgres ? new PostgresFtsSearch() : new SqliteFts5Search());
+
         services.AddScoped<DatabaseInitializer>();
         services.AddScoped<LeadsScanSeeder>();
         services.AddScoped<SchemaExplorer.SchemaScanService>();   // DB Schema Explorer repo scanner (read-only)

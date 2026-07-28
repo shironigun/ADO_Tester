@@ -1,7 +1,4 @@
-using System.Data;
 using System.Text;
-using System.Text.RegularExpressions;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -9,6 +6,7 @@ using QaAutomation.Core.Abstractions;
 using QaAutomation.Core.Configuration;
 using QaAutomation.Core.Models;
 using QaAutomation.Infrastructure.Data;
+using QaAutomation.Infrastructure.TextSearch;
 
 namespace QaAutomation.Infrastructure.Knowledgebase;
 
@@ -18,17 +16,20 @@ namespace QaAutomation.Infrastructure.Knowledgebase;
 /// virtual table, and runs lexical BM25 retrieval. Scoped: it shares the request/background
 /// <see cref="QaDbContext"/> scope.
 /// </summary>
-public sealed partial class KnowledgebaseService : IKnowledgebaseService
+public sealed class KnowledgebaseService : IKnowledgebaseService
 {
     private const int TargetChunkChars = 1000;
 
     private readonly QaDbContext _db;
+    private readonly ITextSearchProvider _textSearch;
     private readonly ILogger<KnowledgebaseService> _log;
     private readonly string _kbRoot;
 
-    public KnowledgebaseService(QaDbContext db, IOptions<StorageOptions> storage, ILogger<KnowledgebaseService> log)
+    public KnowledgebaseService(
+        QaDbContext db, ITextSearchProvider textSearch, IOptions<StorageOptions> storage, ILogger<KnowledgebaseService> log)
     {
         _db = db;
+        _textSearch = textSearch;
         _log = log;
         var opts = storage.Value;
         _kbRoot = Path.GetFullPath(Path.Combine(opts.DataDirectory, opts.KnowledgebaseFolderName));
@@ -61,26 +62,11 @@ public sealed partial class KnowledgebaseService : IKnowledgebaseService
         return chunks.Count > 0 ? chunks : [markdown.Trim()];
     }
 
+    // (FTS5 MATCH tokenizer moved to FtsMatch; the bm25 read moved to SqliteFts5Search.)
+
     /// <summary>Builds the FTS5 MATCH expression: <c>[A-Za-z0-9_]+</c> tokens of length &gt; 1, de-duped
     /// in order, capped at 20, quoted and OR-joined. Returns null when the query has no usable token.</summary>
-    internal static string? MatchExpression(string query)
-    {
-        var seen = new HashSet<string>();
-        var unique = new List<string>();
-        foreach (Match m in TokenRegex().Matches(query))
-        {
-            var token = m.Value;
-            if (token.Length <= 1)
-                continue;
-            if (seen.Add(token))
-                unique.Add(token);
-            if (unique.Count >= 20)
-                break;
-        }
-        if (unique.Count == 0)
-            return null;
-        return string.Join(" OR ", unique.Select(t => $"\"{t}\""));
-    }
+    internal static string? MatchExpression(string query) => FtsMatch.SqliteMatchExpression(query);
 
     // ── ops ───────────────────────────────────────────────────────────────────
 
@@ -111,11 +97,7 @@ public sealed partial class KnowledgebaseService : IKnowledgebaseService
         await _db.SaveChangesAsync(cancellationToken);   // assigns doc.Id
 
         foreach (var chunk in chunks)
-        {
-            await _db.Database.ExecuteSqlRawAsync(
-                "INSERT INTO doc_chunks (content, project_id, doc_id) VALUES ({0}, {1}, {2})",
-                [chunk, projectId, doc.Id], cancellationToken);
-        }
+            await _textSearch.IndexDocChunkAsync(_db, projectId, doc.Id, chunk, cancellationToken);
         await tx.CommitAsync(cancellationToken);
         return doc;
     }
@@ -134,8 +116,7 @@ public sealed partial class KnowledgebaseService : IKnowledgebaseService
             return;   // idempotent
 
         await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
-        await _db.Database.ExecuteSqlRawAsync(
-            "DELETE FROM doc_chunks WHERE doc_id = {0}", [documentId], cancellationToken);
+        await _textSearch.DeleteDocChunksAsync(_db, documentId, cancellationToken);
 
         try
         {
@@ -153,8 +134,8 @@ public sealed partial class KnowledgebaseService : IKnowledgebaseService
     public async Task<IReadOnlyList<KnowledgebaseHit>> SearchAsync(
         int projectId, string query, int topK = 8, CancellationToken cancellationToken = default)
     {
-        var matchExpr = MatchExpression(query);
-        if (matchExpr is null)
+        // Fast out on a query with no usable token (the unit-tested seam), before touching the DB.
+        if (MatchExpression(query) is null)
             return [];
 
         // doc id → file name for this project, fetched once (avoid N+1 on result mapping).
@@ -163,52 +144,11 @@ public sealed partial class KnowledgebaseService : IKnowledgebaseService
             .Select(d => new { d.Id, d.FileName })
             .ToDictionaryAsync(x => x.Id, x => x.FileName, cancellationToken);
 
-        var conn = (SqliteConnection)_db.Database.GetDbConnection();
-        var mustClose = conn.State != ConnectionState.Open;
-        if (mustClose)
-            await conn.OpenAsync(cancellationToken);
-        try
-        {
-            // This is a raw open (the EF busy-timeout interceptor only covers EF-managed opens), so set
-            // busy_timeout here too — otherwise an FTS read during a pipeline write can fail with "locked".
-            await using (var pragma = conn.CreateCommand())
-            {
-                pragma.CommandText = $"PRAGMA busy_timeout={SqliteBusyTimeoutInterceptor.BusyTimeoutMs};";
-                await pragma.ExecuteNonQueryAsync(cancellationToken);
-            }
-
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText =
-                """
-                SELECT doc_id, content, bm25(doc_chunks) AS score
-                FROM doc_chunks
-                WHERE doc_chunks MATCH $q AND project_id = $p
-                ORDER BY score
-                LIMIT $k
-                """;
-            cmd.Parameters.Add(new SqliteParameter("$q", matchExpr));
-            cmd.Parameters.Add(new SqliteParameter("$p", projectId));
-            cmd.Parameters.Add(new SqliteParameter("$k", topK));
-
-            var hits = new List<KnowledgebaseHit>();
-            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                var docId = Convert.ToInt32(reader.GetValue(0));
-                var content = reader.GetString(1);
-                var score = Convert.ToDouble(reader.GetValue(2));
-                hits.Add(new KnowledgebaseHit(
-                    docId, fileNames.GetValueOrDefault(docId, "(unknown)"), content, score));
-            }
-            return hits;
-        }
-        finally
-        {
-            if (mustClose)
-                await conn.CloseAsync();
-        }
+        // Provider-specific lexical retrieval (SQLite bm25 / PostgreSQL ts_rank), best match first.
+        var hits = await _textSearch.SearchDocChunksAsync(_db, projectId, query, topK, cancellationToken);
+        return hits
+            .Select(h => new KnowledgebaseHit(h.DocId, fileNames.GetValueOrDefault(h.DocId, "(unknown)"), h.Content, h.Score))
+            .ToList();
     }
 
-    [GeneratedRegex("[A-Za-z0-9_]+")]
-    private static partial Regex TokenRegex();
 }
