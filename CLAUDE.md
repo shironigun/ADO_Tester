@@ -125,3 +125,16 @@ Author Tests, Find Bugs, Reports, Diagnostics.
 - `backend/README.md` — backend internals, migration phase log (B0–B5+), and accepted parity deviations.
 - `docs/dotnet-migration-spec.md` — authoritative brief + locked decisions (referenced as "spec §N" in code).
 - `docs/manual-verification-and-open-issues.md` — living verification log + known open issues.
+
+## Documentation discipline (standing rule)
+
+Every feature or non-trivial change is tracked under `/docs` so future work needs little searching.
+
+- **Structure** (predictable subfolders): `docs/features/` (one page per feature: what/why + data flow +
+  key files), `docs/architecture/` (cross-cutting design notes), `docs/changelog/` (dated entries, newest
+  first), `docs/progress/` (live per-effort task trackers for in-flight work). Existing top-level docs stay.
+- **Update *after* verification, not before.** A feature's `docs/features/*` page and a `docs/changelog/`
+  entry are written/updated only once the change is implemented **and** verified (build + tests, or the
+  agreed verification for that unit). In-flight trackers under `docs/progress/` are updated every iteration.
+- **Keep it current.** When behavior changes, update the relevant doc in the same change — never leave a
+  feature doc describing the old behavior.
