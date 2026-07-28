@@ -47,17 +47,17 @@ It generates the migration + Designer + snapshot update; applies automatically o
 - [x] `AuthorTestsController.cs`: thread new fields; add `rerun-analyst` + `refine-tester` endpoints; `run-tester` optional body. — `pending-local-verify`
 - [ ] EF migration `AuthorTestsContextFields` — **generate locally** (see command above). — `needs-user-migration`
 
-### Frontend
-- [ ] `api/authorTests.ts`: extend `startSession`/`runTester` bodies; add `rerunAnalyst`, `refineTester`.
-- [ ] `authorTests.tsx` start form: "Additional context" field.
-- [ ] `authorTests.tsx` AwaitingTester gate: "Extra Tester context" box.
-- [ ] `authorTests.tsx` Analyst panel: "Refine analysis with feedback".
-- [ ] `authorTests.tsx` Tester panel/`TestDraftCard`: per-test feedback + remove toggle + overall feedback + "Regenerate with feedback".
-- [ ] Re-seed all new fields from `session` detail.
-- [ ] Verify: `npm run build` + `npm run lint` green.
+### Frontend  (verified here — `npm run build` green; lint net-zero: 65 problems before & after)
+- [x] `api/authorTests.ts`: extend `startSession`/`runTester` bodies; add `rerunAnalyst`, `refineTester`, `TestFeedbackItem`.
+- [x] `session/types.ts`: `SessionDetail` tolerates `additionalContext`/`testerContext`/reference-plan fields.
+- [x] `authorTests.tsx` start form: "Additional context" field → `startSession` body.
+- [x] `authorTests.tsx` AwaitingTester gate: "Extra Tester context" box → `runTester` body.
+- [x] `authorTests.tsx` Analyst panel: "Refine analysis with feedback" → `rerunAnalyst`.
+- [x] `authorTests.tsx` `TestDraftCard`: per-test feedback + Remove toggle; dialog: overall feedback + "Regenerate with feedback" → `refineTester`.
+- [x] Fields seed from `session` detail via `useState` initializers (no extra effect → no new lint error).
 
-### Docs (after Phase 1 verified)
-- [ ] `docs/features/author-tests-context-and-refine.md` + `docs/changelog/` entry.
+### Docs (after Phase 1 verified end-to-end incl. backend build)
+- [ ] `docs/features/author-tests-context-and-refine.md` + `docs/changelog/` entry. — deferred until backend builds locally
 
 ## Phase 2 — Code discovery
 - [ ] Extract `ICodeContextService` + `CodeContextService` from `BugOrchestrator` (behavior-preserving delegation). — `pending-local-verify`

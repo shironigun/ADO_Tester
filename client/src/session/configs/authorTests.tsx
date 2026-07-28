@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  Alert, Autocomplete, Box, Button, Card, CardContent, Chip, CircularProgress,
+  Alert, Autocomplete, Box, Button, Card, CardContent, Checkbox, Chip, CircularProgress,
   Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl,
   FormControlLabel, IconButton, InputLabel, Link, MenuItem, Select, Stack, Switch,
   Table, TableBody, TableCell, TableHead, TableRow, TextField, ToggleButton,
@@ -41,7 +41,8 @@ import { PROJECT_ID } from '../../config/env'
 import {
   getPlans, getSuites, searchWorkItems, startSession, listSessionsPage, getSessionDetail,
   patchDraft, approveAllDrafts, runTester as apiRunTester, cancelSession, pushSession, pushDraft, saveAnalysis,
-  sessionStreamUrl, type TestPlan, type TestSuite,
+  rerunAnalyst as apiRerunAnalyst, refineTester as apiRefineTester,
+  sessionStreamUrl, type TestPlan, type TestSuite, type TestFeedbackItem,
 } from '../../api/authorTests'
 import { getConfig } from '../../api/settings'
 
@@ -84,9 +85,12 @@ function activeStepIndex(status: string, activity: string | null): number {
 }
 
 // ── Draft card: compact row + detail/edit dialog ─────────────────────────────
-function TestDraftCard({ draft, onApprove, onReject, onPush, onSave, canPush }: {
+function TestDraftCard({ draft, onApprove, onReject, onPush, onSave, canPush,
+  feedback, onFeedbackChange, markedRemove, onToggleRemove }: {
   draft: Draft; onApprove: () => void; onReject: () => void; onPush: () => Promise<void>; canPush: boolean
   onSave: (patch: DraftPatch) => Promise<void> | void
+  feedback?: string; onFeedbackChange?: (v: string) => void
+  markedRemove?: boolean; onToggleRemove?: (v: boolean) => void
 }) {
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -153,6 +157,18 @@ function TestDraftCard({ draft, onApprove, onReject, onPush, onSave, canPush }: 
             )}
             <Button size="small" variant="outlined" startIcon={<VisibilityIcon />} onClick={openView}>View</Button>
           </Stack>
+          {isEditable && onFeedbackChange && (
+            <Stack direction="row" spacing={1} sx={{ mt: 1, alignItems: 'flex-start' }}>
+              <TextField size="small" fullWidth multiline placeholder="Feedback for this test (used on Regenerate)"
+                value={feedback ?? ''} onChange={e => onFeedbackChange(e.target.value)}
+                disabled={markedRemove} />
+              <Tooltip title="Mark this test for removal on Regenerate">
+                <FormControlLabel sx={{ m: 0, whiteSpace: 'nowrap' }}
+                  control={<Checkbox size="small" checked={!!markedRemove} onChange={(_, v) => onToggleRemove?.(v)} />}
+                  label={<Typography variant="caption">Remove</Typography>} />
+              </Tooltip>
+            </Stack>
+          )}
         </CardContent>
       </Card>
 
@@ -293,6 +309,14 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
   const [pushedContext, setPushedContext] = useState<{ plan: TestPlan; suite: TestSuite }>()
   const [tcOpen, setTcOpen] = useState(false)
   const [tcFilter, setTcFilter] = useState<'all' | 'Draft' | 'Approved' | 'Pushed' | 'Rejected'>('all')
+  // Free-text context + feedback-driven refine state.
+  const [testerCtx, setTesterCtx] = useState(session.testerContext ?? '')
+  const [analystFeedback, setAnalystFeedback] = useState('')
+  const [analystBusy, setAnalystBusy] = useState(false)
+  const [overallFeedback, setOverallFeedback] = useState('')
+  const [perTestFb, setPerTestFb] = useState<Record<number, string>>({})
+  const [removeSet, setRemoveSet] = useState<Record<number, boolean>>({})
+  const [refineBusy, setRefineBusy] = useState(false)
 
   useEffect(() => { getPlans().then(setPlans).catch(() => {}) }, [])
   useEffect(() => {
@@ -343,7 +367,31 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
     if (patch.steps !== undefined) body.stepsJson = JSON.stringify(patch.steps)
     try { await patchDraft(id, body); refetch() } catch (e) { onError(e, 'Save failed') }
   }
-  const runTester = async () => { try { await apiRunTester(session.id); refetch() } catch (e) { onError(e, 'Run Tester failed') } }
+  const runTester = async () => {
+    try { await apiRunTester(session.id, { additionalContext: testerCtx.trim() || undefined }); refetch() }
+    catch (e) { onError(e, 'Run Tester failed') }
+  }
+  const refineAnalyst = async () => {
+    if (!analystFeedback.trim()) return
+    setAnalystBusy(true)
+    try { await apiRerunAnalyst(session.id, analystFeedback.trim()); setAnalystFeedback(''); refetch() }
+    catch (e) { onError(e, 'Refine analysis failed') } finally { setAnalystBusy(false) }
+  }
+  const regenerateTester = async () => {
+    const perTest: TestFeedbackItem[] = []
+    for (const d of drafts) {
+      if (d.status === 'Pushed') continue
+      const fb = (perTestFb[d.id] ?? '').trim()
+      const rm = !!removeSet[d.id]
+      if (fb || rm) perTest.push({ draftId: d.id, feedback: fb || undefined, remove: rm })
+    }
+    if (!overallFeedback.trim() && perTest.length === 0) return
+    setRefineBusy(true)
+    try {
+      await apiRefineTester(session.id, { overallFeedback: overallFeedback.trim() || undefined, perTest })
+      setOverallFeedback(''); setPerTestFb({}); setRemoveSet({}); refetch()
+    } catch (e) { onError(e, 'Regenerate failed') } finally { setRefineBusy(false) }
+  }
   const cancel = async () => { try { await cancelSession(session.id); refetch() } catch (e) { onError(e, 'Cancel failed') } }
   const push = async () => {
     if (!selectedPlan || !selectedSuite) return
@@ -405,12 +453,17 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
 
       {session.status === 'AwaitingTester' && (
         <Alert severity="info" icon={false} sx={{ mb: 2 }}>
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ alignItems: { sm: 'center' } }}>
-            <Box sx={{ flex: 1 }}>
+          <Stack spacing={1.5}>
+            <Box>
               <Typography variant="body2" sx={{ fontWeight: 600 }}>Analyst done — review (and edit) the analysis, then run the Tester</Typography>
               <Typography variant="caption" color="text.secondary">Open the Analyst circle to review/edit. Edits you save steer the Tester.</Typography>
             </Box>
-            <Button variant="contained" size="small" onClick={runTester}>Run Tester</Button>
+            <TextField label="Extra context for the Tester (optional)" size="small" multiline minRows={2} fullWidth
+              value={testerCtx} onChange={e => setTesterCtx(e.target.value)}
+              placeholder="Anything the Tester should keep in mind (special data, environment, flows to emphasize)…" />
+            <Box sx={{ textAlign: 'right' }}>
+              <Button variant="contained" size="small" onClick={runTester}>Run Tester</Button>
+            </Box>
           </Stack>
         </Alert>
       )}
@@ -463,6 +516,24 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
           {session.status !== 'Analyzing' && !session.analysisJson && (
             <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: 'center' }}>No analysis available.</Typography>
           )}
+          {!!session.analysisJson && !inFlight && (
+            <Card variant="outlined" sx={{ mt: 2 }}><CardContent>
+              <Typography variant="subtitle2" gutterBottom>Refine analysis with feedback</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Missing edge cases, permissions, or a whole area? Describe what to add — the Analyst improves
+                the existing analysis in place (it won't start over).
+              </Typography>
+              <TextField size="small" multiline minRows={2} fullWidth sx={{ mt: 1 }}
+                value={analystFeedback} onChange={e => setAnalystFeedback(e.target.value)}
+                placeholder="e.g. No edge cases for expired sessions; add admin-vs-viewer permission checks." />
+              <Box sx={{ textAlign: 'right', mt: 1 }}>
+                <Button variant="outlined" size="small" disabled={analystBusy || !analystFeedback.trim()}
+                  startIcon={analystBusy ? <CircularProgress size={14} /> : <PsychologyIcon />} onClick={refineAnalyst}>
+                  Refine analysis
+                </Button>
+              </Box>
+            </CardContent></Card>
+          )}
         </>
       )}
 
@@ -505,7 +576,9 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
                 {visible.map(d => (
                   <TestDraftCard key={d.id} draft={d}
                     onApprove={() => approveDraft(d.id)} onReject={() => rejectDraft(d.id)} onPush={() => pushDraftRow(d.id)} onSave={p => saveDraft(d.id, p)}
-                    canPush={!!selectedPlan && !!selectedSuite} />
+                    canPush={!!selectedPlan && !!selectedSuite}
+                    feedback={perTestFb[d.id]} onFeedbackChange={v => setPerTestFb(m => ({ ...m, [d.id]: v }))}
+                    markedRemove={!!removeSet[d.id]} onToggleRemove={v => setRemoveSet(m => ({ ...m, [d.id]: v }))} />
                 ))}
                 {visible.length === 0 && (
                   <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: 'center' }}>
@@ -513,6 +586,23 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
                   </Typography>
                 )}
               </Stack>
+              <Divider sx={{ my: 2.5 }} />
+              <Typography variant="subtitle2" gutterBottom>Regenerate with feedback</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Leave feedback on individual tests above (or mark some to remove), and/or give overall direction.
+                The Tester updates flagged tests, adds new ones, and drops only those you marked — pushed tests are kept.
+              </Typography>
+              <TextField size="small" multiline minRows={2} fullWidth sx={{ mt: 1 }}
+                value={overallFeedback} onChange={e => setOverallFeedback(e.target.value)}
+                placeholder="Overall feedback — e.g. add negative cases for invalid input; split the long happy-path test." />
+              <Box sx={{ textAlign: 'right', mt: 1 }}>
+                <Button variant="outlined" size="small"
+                  disabled={refineBusy || (!overallFeedback.trim()
+                    && !Object.values(perTestFb).some(v => (v ?? '').trim())
+                    && !Object.values(removeSet).some(Boolean))}
+                  startIcon={refineBusy ? <CircularProgress size={14} /> : <RuleIcon />}
+                  onClick={regenerateTester}>Regenerate with feedback</Button>
+              </Box>
               <Divider sx={{ my: 2.5 }} />
               <Typography variant="subtitle2" gutterBottom>Push approved to ADO</Typography>
               <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
@@ -552,6 +642,7 @@ function AuthorStartForm({ onStarted, onError, onClose }: StartFormProps) {
   const [selectedWi, setSelectedWi] = useState<WorkItemOption | null>(null)
   const [autoHandoff, setAutoHandoff] = useState(true)
   const [pauseAtReview, setPauseAtReview] = useState(false)
+  const [additional, setAdditional] = useState('')
   const [starting, setStarting] = useState(false)
 
   useEffect(() => {
@@ -568,7 +659,10 @@ function AuthorStartForm({ onStarted, onError, onClose }: StartFormProps) {
     try {
       // Auto + pause-at-review reuses the manual stop: don't auto-trigger Tester.
       const auto = autoHandoff && !pauseAtReview
-      const { sessionId } = await startSession(PROJECT_ID, { workItemId: selectedWi.id, autoHandoff: auto })
+      const { sessionId } = await startSession(PROJECT_ID, {
+        workItemId: selectedWi.id, autoHandoff: auto,
+        additionalContext: additional.trim() || undefined,
+      })
       onClose(); onStarted(sessionId)
     } catch (e) { onError(e, 'Start failed') } finally { setStarting(false) }
   }
@@ -596,6 +690,10 @@ function AuthorStartForm({ onStarted, onError, onClose }: StartFormProps) {
       </Box>
       <FormControlLabel control={<Switch checked={pauseAtReview} disabled={!autoHandoff} onChange={(_, v) => setPauseAtReview(v)} />}
         label={<Typography variant="body2">Pause at analysis review <Typography component="span" variant="caption" color="text.secondary">(stop before Tester)</Typography></Typography>} />
+      <TextField label="Additional context (optional)" size="small" multiline minRows={2} fullWidth
+        value={additional} onChange={e => setAdditional(e.target.value)}
+        placeholder="Anything not in the story — e.g. the feature lives at route /admin/settings, Billing tab. Guides the Analyst (and code discovery)."
+        helperText="Free-text guidance for the Analyst. Extra Tester context can be added later, at the review gate." />
       <Button variant="contained" onClick={start} disabled={starting || !selectedWi}>
         {starting ? <CircularProgress size={18} sx={{ color: 'white' }} /> : 'Run Analyst + Tester'}
       </Button>
