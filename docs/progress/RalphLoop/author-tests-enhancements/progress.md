@@ -1,6 +1,8 @@
 # Progress: Author Tests Enhancements Implementation
 
 ## Overview
+- **Ruleset:** `Ralph loop.md` (the execution cycle + rules — follow it every iteration)
+- **Creation sequence:** solution.md → blueprint.md → prd.md (divide into tasks) → progress.md (track execution)
 - **PRD:** prd.md
 - **Design:** solution.md · **Guide:** blueprint.md
 - **Branch:** `claude/chat-session-flzhjh`
@@ -74,6 +76,12 @@
 ---
 
 ## Log
+
+### 2026-07-28 (Ralph loop ruleset added to folder)
+- Per user correction: the reference folder (`docs/qa-loop-reshape/`) also contains `Ralph loop.md` — the **execution ruleset** — which I had missed. Copied it verbatim into this feature folder so the folder is self-contained (ruleset + the 4 docs), matching the reference.
+- Recorded the two standing rules the user emphasized:
+  - **Creation sequence** — solution → blueprint → prd → progress (design, then implementation guide, then derive the task backlog, then track execution). Content of the already-authored docs follows this flow; the sequence is honored going forward.
+  - **Follow `Ralph loop.md` always** when executing a Ralph loop: ONE task per iteration; `progress.md` is memory between iterations and is always updated; NEVER commit failing code; read existing code before writing; if a task is `[x]` in PRD but NOT STARTED here, treat it as NOT STARTED. Adapted only where the container cannot run `dotnet` — backend "verify" steps defer to the user's local machine, which is why backend tasks are CODE-COMPLETE (not VERIFIED) rather than falsely marked green.
 
 ### 2026-07-28 (Docs re-format to RalphLoop 4-file convention)
 - Per user direction ("the ralphloop docs are solution.md, prd.md, progress.md, blueprint.md … understand the format and re-write the docs"), studied the reference set in `docs/qa-loop-reshape/` and re-authored this feature's docs into the same 4-file convention under `docs/progress/RalphLoop/author-tests-enhancements/`.
