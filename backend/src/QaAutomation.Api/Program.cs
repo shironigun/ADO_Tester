@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using QaAutomation.Api.Configurations;
 using QaAutomation.Api.Middlewares;
 using QaAutomation.Core.Abstractions;
+using QaAutomation.Core.Configuration;
 using QaAutomation.Infrastructure;
 
 // Load local secrets (ADOACCESS_PAT, ANTHROPIC_API_KEY, …) from a .env file into process env vars.
@@ -29,7 +30,29 @@ builder.Services.AddCustomControllers();
 builder.Services.AddCustomCors();
 builder.Services.AddCustomSwagger();
 builder.Services.AddProblemDetails();
-builder.Services.AddInfrastructure(builder.Configuration, $"Data Source={dbPath}");
+
+// Database provider (spec: PostgreSQL migration). Default = sqlite, so behavior is unchanged until
+// DATABASE_PROVIDER=postgres is set. Bound once here at boot; switching providers means a restart.
+var dbProviderName = (Environment.GetEnvironmentVariable("DATABASE_PROVIDER") ?? "sqlite").Trim().ToLowerInvariant();
+DatabaseProvider dbProvider;
+string dbConnectionString;
+if (dbProviderName is "postgres" or "postgresql" or "npgsql")
+{
+    dbProvider = DatabaseProvider.Postgres;
+    dbConnectionString = Environment.GetEnvironmentVariable("POSTGRES_CONNECTION_STRING")
+        ?? Environment.GetEnvironmentVariable("DATABASE_URL")
+        ?? throw new InvalidOperationException(
+            "DATABASE_PROVIDER=postgres but neither POSTGRES_CONNECTION_STRING nor DATABASE_URL is set.");
+    // The app writes DateTime.UtcNow throughout; legacy behavior maps DateTime to 'timestamp without
+    // time zone', so no model changes are needed for the first Postgres port (see solution.md Data Design).
+    AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+}
+else
+{
+    dbProvider = DatabaseProvider.Sqlite;
+    dbConnectionString = $"Data Source={dbPath}";
+}
+builder.Services.AddInfrastructure(builder.Configuration, dbProvider, dbConnectionString);
 
 var app = builder.Build();
 

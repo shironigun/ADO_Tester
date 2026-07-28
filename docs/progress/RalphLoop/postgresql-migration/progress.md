@@ -22,9 +22,9 @@
 
 | Task ID | Task Name | Status | Started | Completed | Notes |
 |---------|-----------|--------|---------|-----------|-------|
-| PGM-001 | Add Npgsql EF Core provider package | NOT STARTED | | | Phase 1 |
-| PGM-002 | Boot-time provider selection + DatabaseOptions | NOT STARTED | | | Program.cs + DI + DatabaseOptions |
-| PGM-003 | Design-time factory provider branch | NOT STARTED | | | QaDbContextFactory |
+| PGM-001 | Add Npgsql EF Core provider package | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | Npgsql.EntityFrameworkCore.PostgreSQL 8.0.11 added; user restores/builds locally |
+| PGM-002 | Boot-time provider selection + DatabaseOptions | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | DatabaseOptions enum; Program.cs reads DATABASE_PROVIDER (+ legacy-timestamp switch); AddInfrastructure branch (SQLite overload kept for tests) |
+| PGM-003 | Design-time factory provider branch | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | QaDbContextFactory branches on DATABASE_PROVIDER |
 | PGM-004 | ITextSearchProvider abstraction | NOT STARTED | | | Phase 2 |
 | PGM-005 | SqliteFts5Search + PostgresFtsSearch | NOT STARTED | | | SQLite impl moved verbatim |
 | PGM-006 | Generate the Npgsql migration set | NOT STARTED | | | Local only (needs .NET SDK) |
@@ -32,7 +32,7 @@
 | PGM-008 | KnowledgebaseService delegates FTS | NOT STARTED | | | |
 | PGM-009 | ExistingTestsIndexService delegates FTS | NOT STARTED | | | |
 | PGM-010 | Register ITextSearchProvider by provider (DI) | NOT STARTED | | | |
-| PGM-011 | .env keys | NOT STARTED | | | DATABASE_PROVIDER + POSTGRES_CONNECTION_STRING |
+| PGM-011 | .env keys | VERIFIED | 2026-07-28 | 2026-07-28 | DATABASE_PROVIDER + POSTGRES_CONNECTION_STRING documented in .env.example (config text) |
 | PGM-012 | Local Docker setup guide | VERIFIED | 2026-07-28 | 2026-07-28 | docs/setup/postgresql-docker.md written |
 | PGM-013 | Azure deployment guide | VERIFIED | 2026-07-28 | 2026-07-28 | docs/setup/postgresql-azure.md written |
 | PGM-014 | Local verification (SQLite green + PG round-trip) | NOT STARTED | | | User-run |
@@ -42,13 +42,35 @@
 
 ## Summary
 - **Total Tasks:** 15
-- **VERIFIED:** 2 (the two setup guides)
-- **CODE-COMPLETE:** 0
-- **NOT STARTED:** 13
+- **VERIFIED:** 3 (two setup guides + .env keys)
+- **CODE-COMPLETE:** 3 (PGM-001/002/003 — Phase 1 provider plumbing)
+- **NOT STARTED:** 9
 
 ---
 
 ## Log
+
+### 2026-07-28 (Phase 1 — provider plumbing; SQLite default unchanged)
+- **PGM-001** — added `Npgsql.EntityFrameworkCore.PostgreSQL` 8.0.11 to the Infrastructure csproj
+  (alongside the SQLite provider). Version tracks EF Core 8.x.
+- **PGM-002** — new `Core/Configuration/DatabaseOptions.cs` (`DatabaseProvider { Sqlite, Postgres }` +
+  `DatabaseOptions`). `Program.cs` reads `DATABASE_PROVIDER` (default `sqlite`); for `postgres` it reads
+  `POSTGRES_CONNECTION_STRING`/`DATABASE_URL` (fail-fast if absent) and sets
+  `AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true)`. `AddInfrastructure` gained a
+  provider-aware overload that branches `UseNpgsql(cs, EnableRetryOnFailure)` vs
+  `UseSqlite(cs)+SqliteBusyTimeoutInterceptor`; the **original 2-arg SQLite overload is kept** so the two
+  test callers (`LlmProviderFactoryTests`, `SettingsServiceTests`) and any legacy caller still compile.
+- **PGM-003** — `QaDbContextFactory` branches on `DATABASE_PROVIDER` so `dotnet ef` targets either
+  provider (Postgres falls back to a dummy design-time connection string, fine for `migrations add`).
+- **PGM-011** — documented `DATABASE_PROVIDER` + `POSTGRES_CONNECTION_STRING` in `.env.example`; default
+  keeps SQLite.
+- **Safety:** with no env change the app still selects SQLite via the exact original code path
+  (`$"Data Source={dbPath}"` + interceptor) — zero behavior change; SQLite remains the default.
+- **CODE-COMPLETE, pending local verify:** the backend can't be built in the container (no .NET SDK). The
+  user runs `dotnet build` + `dotnet test` locally to confirm restore + green tests before this is
+  VERIFIED.
+- **Next:** Phase 2 — `ITextSearchProvider` (PGM-004) + `SqliteFts5Search`/`PostgresFtsSearch` (PGM-005),
+  moving the SQLite `bm25`/`MATCH` logic verbatim so BM25 tests stay green.
 
 ### 2026-07-28 (Design + setup guides authored)
 - Created the RalphLoop feature folder `docs/progress/RalphLoop/postgresql-migration/` and authored the

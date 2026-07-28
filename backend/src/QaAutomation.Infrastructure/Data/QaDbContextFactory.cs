@@ -12,9 +12,24 @@ public sealed class QaDbContextFactory : IDesignTimeDbContextFactory<QaDbContext
 {
     public QaDbContext CreateDbContext(string[] args)
     {
-        var options = new DbContextOptionsBuilder<QaDbContext>()
-            .UseSqlite("Data Source=qa_designtime.db")
-            .Options;
-        return new QaDbContext(options);
+        // Branch on DATABASE_PROVIDER so `dotnet ef` can scaffold/apply migrations for either provider.
+        // (This factory runs INSTEAD of Program.cs, so DotNetEnv is not loaded — read the shell env.
+        // For `migrations add` the connection string is never opened, so the Postgres fallback is fine;
+        // for `database update` export a real POSTGRES_CONNECTION_STRING.)
+        var provider = (Environment.GetEnvironmentVariable("DATABASE_PROVIDER") ?? "sqlite")
+            .Trim().ToLowerInvariant();
+        var builder = new DbContextOptionsBuilder<QaDbContext>();
+        if (provider is "postgres" or "postgresql" or "npgsql")
+        {
+            var cs = Environment.GetEnvironmentVariable("POSTGRES_CONNECTION_STRING")
+                ?? Environment.GetEnvironmentVariable("DATABASE_URL")
+                ?? "Host=localhost;Port=5432;Database=qa_designtime;Username=postgres;Password=postgres";
+            builder.UseNpgsql(cs);
+        }
+        else
+        {
+            builder.UseSqlite("Data Source=qa_designtime.db");
+        }
+        return new QaDbContext(builder.Options);
     }
 }

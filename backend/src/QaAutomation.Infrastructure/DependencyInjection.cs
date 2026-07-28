@@ -33,12 +33,24 @@ namespace QaAutomation.Infrastructure;
 /// </summary>
 public static class DependencyInjection
 {
+    // Backward-compatible SQLite overload (tests + any legacy caller). Defaults the provider to SQLite.
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services, IConfiguration config, string sqliteConnectionString)
+        => services.AddInfrastructure(config, DatabaseProvider.Sqlite, sqliteConnectionString);
+
+    public static IServiceCollection AddInfrastructure(
+        this IServiceCollection services, IConfiguration config,
+        DatabaseProvider provider, string connectionString)
     {
-        services.AddDbContext<QaDbContext>(o => o
-            .UseSqlite(sqliteConnectionString)
-            .AddInterceptors(SqliteBusyTimeoutInterceptor.Instance));
+        services.AddDbContext<QaDbContext>(o =>
+        {
+            if (provider == DatabaseProvider.Postgres)
+                // The Npgsql migrations set is generated locally (PGM-006). When both providers' migration
+                // sets live in this assembly, scope MigrationsAssembly/MigrationsHistoryTable per provider.
+                o.UseNpgsql(connectionString, npgsql => npgsql.EnableRetryOnFailure());
+            else
+                o.UseSqlite(connectionString).AddInterceptors(SqliteBusyTimeoutInterceptor.Instance);
+        });
         services.AddScoped<DatabaseInitializer>();
         services.AddScoped<LeadsScanSeeder>();
         services.AddScoped<SchemaExplorer.SchemaScanService>();   // DB Schema Explorer repo scanner (read-only)

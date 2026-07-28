@@ -34,7 +34,7 @@ or bug-pipeline behavior changes — data-layer only.
 ### PHASE 1 — PROVIDER PLUMBING (SQLite default unchanged)
 
 #### PGM-001: Add Npgsql EF Core provider package
-- **Status:** [ ]
+- **Status:** [~]
 - **ID:** PGM-001
 - **Description:** blueprint.md Phase 1. Add the Npgsql EF Core provider so `UseNpgsql` is available; SQLite provider stays.
 - **File:** `backend/src/QaAutomation.Infrastructure/QaAutomation.Infrastructure.csproj`
@@ -43,7 +43,7 @@ or bug-pipeline behavior changes — data-layer only.
   - `Microsoft.EntityFrameworkCore.Sqlite` 8.0.11 remains; solution restores/builds
 
 #### PGM-002: Boot-time provider selection + DatabaseOptions
-- **Status:** [ ]
+- **Status:** [~]
 - **ID:** PGM-002
 - **Description:** solution.md Provider Selection. Add `DatabaseProvider` enum + `DatabaseOptions`; read `DATABASE_PROVIDER` (default `sqlite`) + `POSTGRES_CONNECTION_STRING` in `Program.cs`; enable the Npgsql legacy-timestamp switch when postgres; generalize `AddInfrastructure(config, provider, connectionString)` and branch `UseSqlite`(+interceptor) vs `UseNpgsql`(+retry).
 - **File:** `backend/src/QaAutomation.Core/Configuration/DatabaseOptions.cs`, `backend/src/QaAutomation.Api/Program.cs`, `backend/src/QaAutomation.Infrastructure/DependencyInjection.cs`
@@ -54,7 +54,7 @@ or bug-pipeline behavior changes — data-layer only.
   - Builds
 
 #### PGM-003: Design-time factory provider branch
-- **Status:** [ ]
+- **Status:** [~]
 - **ID:** PGM-003
 - **Description:** solution.md Provider Selection. `QaDbContextFactory` reads `DATABASE_PROVIDER` and branches so `dotnet ef` targets either provider.
 - **File:** `backend/src/QaAutomation.Infrastructure/Data/QaDbContextFactory.cs`
@@ -136,7 +136,7 @@ or bug-pipeline behavior changes — data-layer only.
 ### PHASE 5 — CONFIG + DOCS
 
 #### PGM-011: .env keys
-- **Status:** [ ]
+- **Status:** [x]
 - **ID:** PGM-011
 - **Description:** solution.md Settings. Add `DATABASE_PROVIDER` (default `sqlite`) + a commented `POSTGRES_CONNECTION_STRING` to `.env.example` (and the user's `.env`), documented.
 - **File:** `.env.example`
