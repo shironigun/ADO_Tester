@@ -1,0 +1,29 @@
+# Local PostgreSQL for ADO_Tester development (dual-provider migration).
+# Usage:
+#   docker compose up -d          # start Postgres on localhost:5432
+#   docker compose down           # stop (data kept in the named volume)
+#   docker compose down -v        # stop AND wipe the data volume
+# Then set in .env:
+#   DATABASE_PROVIDER=postgres
+#   POSTGRES_CONNECTION_STRING=Host=localhost;Port=5432;Database=qa;Username=qa;Password=qa
+# SQLite stays the default when DATABASE_PROVIDER is unset. See docs/setup/postgresql-docker.md.
+services:
+  postgres:
+    image: postgres:16
+    container_name: adotester-postgres
+    environment:
+      POSTGRES_USER: qa
+      POSTGRES_PASSWORD: qa
+      POSTGRES_DB: qa
+    ports:
+      - "5432:5432"
+    volumes:
+      - adotester_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qa -d qa"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  adotester_pgdata:

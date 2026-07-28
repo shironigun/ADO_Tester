@@ -27,7 +27,7 @@
 | PGM-003 | Design-time factory provider branch | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | QaDbContextFactory branches on DATABASE_PROVIDER |
 | PGM-004 | ITextSearchProvider abstraction | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | Interface + DocChunkHit in Infrastructure/TextSearch (see layering note in log) |
 | PGM-005 | SqliteFts5Search + PostgresFtsSearch | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | SQLite = bm25/MATCH moved verbatim; Postgres = tsvector/GIN/ts_rank; FtsMatch shared tokenizer |
-| PGM-006 | Generate the Npgsql migration set | NOT STARTED | | | Local only (needs .NET SDK) — run `dotnet ef migrations add InitialNpgsql` |
+| PGM-006 | Generate the Npgsql migration | NOT STARTED | | | Local only — scaffold ready (PGM-016); run `dotnet sln add` + `dotnet ef migrations add` |
 | PGM-007 | DatabaseInitializer provider branch | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | adopt-qa.db gated to IsSqlite(); EnsureFtsTable → _textSearch.EnsureSchema |
 | PGM-008 | KnowledgebaseService delegates FTS | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | upload/delete/search via provider; MatchExpression kept (delegates to FtsMatch) |
 | PGM-009 | ExistingTestsIndexService delegates FTS | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | write + FTS read via provider; also removed a latent non-partial-class regex issue |
@@ -37,18 +37,36 @@
 | PGM-013 | Azure deployment guide | VERIFIED | 2026-07-28 | 2026-07-28 | docs/setup/postgresql-azure.md written |
 | PGM-014 | Local verification (SQLite green + PG round-trip) | NOT STARTED | | | User-run |
 | PGM-015 | Feature doc + changelog | NOT STARTED | | | After verification |
+| PGM-016 | Scaffold the Npgsql migrations assembly | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | New QaAutomation.Migrations.Npgsql project + MigrationsAssembly wiring + Api ref + docker-compose.yml |
 
 ---
 
 ## Summary
-- **Total Tasks:** 15
+- **Total Tasks:** 16
 - **VERIFIED:** 3 (two setup guides + .env keys)
-- **CODE-COMPLETE:** 9 (PGM-001/002/003 plumbing · PGM-004/005/007/008/009/010 FTS abstraction + wiring)
+- **CODE-COMPLETE:** 10 (PGM-001/002/003 plumbing · 004/005/007/008/009/010 FTS · 016 migrations-assembly scaffold)
 - **NOT STARTED:** 3 (PGM-006 Npgsql migration · PGM-014 verify · PGM-015 feature doc)
 
 ---
 
 ## Log
+
+### 2026-07-28 (Migrations-assembly scaffold — PGM-016; raw-SQL audit clean)
+- **Audit:** swept all of `backend/src` for raw SQL — the ONLY provider-specific SQL is in the files already
+  handled (TextSearch/*, the `IsSqlite()`-gated `DatabaseInitializer` helpers). Every orchestrator/service is
+  pure LINQ/EF; `QaDbContext` has no `HasColumnType`/`HasDefaultValueSql`. So no other service code needed
+  changing — the Phase 2/3 refactor covered the full raw-SQL surface.
+- **PGM-016:** added `QaAutomation.Migrations.Npgsql` (dedicated migrations assembly — EF migrations can't
+  share the SQLite model snapshot): csproj (references Infrastructure; Npgsql flows transitively) +
+  `AssemblyMarker`; wired `MigrationsAssembly("QaAutomation.Migrations.Npgsql")` in the DI Npgsql branch AND
+  the design-time factory; Api now references the project so its DLL is loadable for `Migrate()`. SQLite keeps
+  the default migrations assembly (unchanged). Added a root `docker-compose.yml`; updated the Docker guide's
+  migration step to `dotnet sln add` + `dotnet ef migrations add` (no `--output-dir`).
+- **Correction:** on Postgres the `doc_chunks`/`test_case_index` tables are created by
+  `PostgresFtsSearch.EnsureSchema` at startup (outside EF), so PGM-006's migration covers only the EF
+  relational tables — PGM-006 updated to match.
+- **Net:** all compiler-independent work is done. Remaining = local only: `dotnet sln add` +
+  `dotnet ef migrations add` (PGM-006), then the B/C/D checklist below (build, module run, Azure).
 
 ### 2026-07-28 (Phase 2 + 3 — FTS abstraction + wiring)
 - **PGM-004/005** — new `Infrastructure/TextSearch/`: `ITextSearchProvider` (+ `DocChunkHit`), `SqliteFts5Search`
@@ -132,9 +150,9 @@ Do these on your machine, in order. Backend commands use your usual `dotnet` inv
 - [ ] **Run the app on SQLite** (no env change): `dotnet run --project src/QaAutomation.Api` + `npm run dev` in `client/` → open http://localhost:5173 and confirm it behaves exactly as before.
 
 ### B. Bring up PostgreSQL locally (Docker) — PGM-006 + PGM-014
-- [ ] **Start Postgres in Docker** (Step 1–2 of the Docker guide): `docker run … postgres:16` (or compose).
+- [ ] **Start Postgres in Docker**: `docker compose up -d` (compose file committed at repo root).
 - [ ] **Set `.env`**: `DATABASE_PROVIDER=postgres` + `POSTGRES_CONNECTION_STRING=Host=localhost;Port=5432;Database=qa;Username=qa;Password=qa`.
-- [ ] **PGM-006 — generate the Npgsql migration**: `DATABASE_PROVIDER=postgres dotnet ef migrations add InitialNpgsql --project src/QaAutomation.Infrastructure --startup-project src/QaAutomation.Api --output-dir Data/Migrations/Npgsql`. Confirm Postgres DDL (`integer`/`text`/`timestamp`, `GENERATED … AS IDENTITY`) and that the SQLite set is untouched. (If EF complains about the shared model snapshot, fall back to a dedicated per-provider migrations project — see solution.md Migrations.)
+- [ ] **PGM-006 — generate the Npgsql migration** (assembly already scaffolded): `dotnet sln add src/QaAutomation.Migrations.Npgsql` then `DATABASE_PROVIDER=postgres dotnet ef migrations add InitialNpgsql --project src/QaAutomation.Migrations.Npgsql --startup-project src/QaAutomation.Api`. Confirm Postgres DDL (`integer`/`text`/`timestamp`, `GENERATED … AS IDENTITY`) and that the SQLite set is untouched.
 - [ ] **Start the backend on Postgres** → confirm the schema + the `doc_chunks`/`test_case_index` tsvector/GIN tables are created on boot (no errors).
 
 ### C. Do a real run for a module / ticket (functional check on Postgres)

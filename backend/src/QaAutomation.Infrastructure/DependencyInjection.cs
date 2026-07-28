@@ -46,9 +46,11 @@ public static class DependencyInjection
         services.AddDbContext<QaDbContext>(o =>
         {
             if (provider == DatabaseProvider.Postgres)
-                // The Npgsql migrations set is generated locally (PGM-006). When both providers' migration
-                // sets live in this assembly, scope MigrationsAssembly/MigrationsHistoryTable per provider.
-                o.UseNpgsql(connectionString, npgsql => npgsql.EnableRetryOnFailure());
+                // Npgsql migrations live in their own assembly (they cannot share the SQLite model
+                // snapshot). Generate them locally (PGM-006); SQLite keeps the default assembly.
+                o.UseNpgsql(connectionString, npgsql => npgsql
+                    .EnableRetryOnFailure()
+                    .MigrationsAssembly("QaAutomation.Migrations.Npgsql"));
             else
                 o.UseSqlite(connectionString).AddInterceptors(SqliteBusyTimeoutInterceptor.Instance);
         });

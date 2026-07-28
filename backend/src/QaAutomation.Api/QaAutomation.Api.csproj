@@ -3,6 +3,9 @@
   <ItemGroup>
     <ProjectReference Include="..\QaAutomation.Core\QaAutomation.Core.csproj" />
     <ProjectReference Include="..\QaAutomation.Infrastructure\QaAutomation.Infrastructure.csproj" />
+    <!-- PostgreSQL migrations assembly — referenced so its DLL is present for Migrate() to load when
+         DATABASE_PROVIDER=postgres. Harmless (unused) on the default SQLite path. -->
+    <ProjectReference Include="..\QaAutomation.Migrations.Npgsql\QaAutomation.Migrations.Npgsql.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -123,15 +123,25 @@ or bug-pipeline behavior changes — data-layer only.
 
 ### PHASE 4 — MIGRATIONS
 
-#### PGM-006: Generate the Npgsql migration set
+#### PGM-006: Generate the Npgsql migration
 - **Status:** [ ]
 - **ID:** PGM-006
-- **Description:** solution.md Migrations. With `DATABASE_PROVIDER=postgres`, generate an Npgsql migration set in its own folder/namespace; include the real `doc_chunks`/`test_case_index` tables + `tsvector` columns + GIN indexes. Keep the SQLite set frozen. **Local only** (needs the .NET SDK). Fallback to a dedicated per-provider migrations project if the single-snapshot collision bites.
-- **File:** `backend/src/QaAutomation.Infrastructure/Data/Migrations/Npgsql/<ts>_InitialNpgsql.cs` (+ `.Designer.cs`, snapshot)
+- **Description:** solution.md Migrations. Generate the initial Npgsql migration into the scaffolded `QaAutomation.Migrations.Npgsql` project (PGM-016). Covers the **EF-modeled relational tables only** — the `doc_chunks`/`test_case_index` full-text tables are created outside EF by `PostgresFtsSearch.EnsureSchema` at startup, not by the migration. Keep the SQLite set frozen. **Local only** (needs the .NET SDK).
+- **File:** `backend/src/QaAutomation.Migrations.Npgsql/<ts>_InitialNpgsql.cs` (+ `.Designer.cs`, snapshot)
 - **Acceptance Criteria:**
-  - Command: `dotnet ef migrations add InitialNpgsql --project src/QaAutomation.Infrastructure --startup-project src/QaAutomation.Api --output-dir Data/Migrations/Npgsql`
-  - DDL uses Postgres types + `GENERATED … AS IDENTITY`; FTS tables + GIN indexes present
-  - Applies cleanly on a fresh Postgres; SQLite migrations untouched
+  - `dotnet sln add src/QaAutomation.Migrations.Npgsql` then `DATABASE_PROVIDER=postgres dotnet ef migrations add InitialNpgsql --project src/QaAutomation.Migrations.Npgsql --startup-project src/QaAutomation.Api`
+  - Generated DDL uses Postgres types (`integer`/`text`/`timestamp`, `GENERATED … AS IDENTITY`), not SQLite `INTEGER`/`TEXT`
+  - Applies cleanly on a fresh Postgres (on backend boot); SQLite migrations untouched
+
+#### PGM-016: Scaffold the Npgsql migrations assembly
+- **Status:** [~]
+- **ID:** PGM-016
+- **Description:** solution.md Migrations. Add a dedicated `QaAutomation.Migrations.Npgsql` project — EF migrations are provider-specific and cannot share the SQLite model snapshot, so the Npgsql set needs its own assembly. Wire `MigrationsAssembly("QaAutomation.Migrations.Npgsql")` in the DI Npgsql branch **and** the design-time factory; reference the project from the Api so its DLL loads at runtime for `Migrate()`. Also add a root `docker-compose.yml`.
+- **File:** `backend/src/QaAutomation.Migrations.Npgsql/*`, `.../DependencyInjection.cs`, `.../Data/QaDbContextFactory.cs`, `.../QaAutomation.Api.csproj`, `docker-compose.yml`
+- **Acceptance Criteria:**
+  - New classlib references Infrastructure (Npgsql provider flows transitively); MigrationsAssembly wired runtime + design-time; Api references it
+  - SQLite path unaffected (keeps the default migrations assembly)
+  - Reduces PGM-006 to `dotnet sln add` + `dotnet ef migrations add`
 
 ### PHASE 5 — CONFIG + DOCS
 

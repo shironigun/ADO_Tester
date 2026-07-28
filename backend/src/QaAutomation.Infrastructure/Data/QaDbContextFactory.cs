@@ -24,7 +24,7 @@ public sealed class QaDbContextFactory : IDesignTimeDbContextFactory<QaDbContext
             var cs = Environment.GetEnvironmentVariable("POSTGRES_CONNECTION_STRING")
                 ?? Environment.GetEnvironmentVariable("DATABASE_URL")
                 ?? "Host=localhost;Port=5432;Database=qa_designtime;Username=postgres;Password=postgres";
-            builder.UseNpgsql(cs);
+            builder.UseNpgsql(cs, n => n.MigrationsAssembly("QaAutomation.Migrations.Npgsql"));
         }
         else
         {

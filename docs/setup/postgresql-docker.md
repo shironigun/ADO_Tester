@@ -51,22 +51,9 @@ docker run --name adotester-postgres \
   -d postgres:16
 ```
 
-**Option B — `docker-compose.yml`** (save at the repo root, then `docker compose up -d`):
-```yaml
-services:
-  postgres:
-    image: postgres:16
-    container_name: adotester-postgres
-    environment:
-      POSTGRES_USER: qa
-      POSTGRES_PASSWORD: qa
-      POSTGRES_DB: qa
-    ports:
-      - "5432:5432"
-    volumes:
-      - adotester_pgdata:/var/lib/postgresql/data
-volumes:
-  adotester_pgdata:
+**Option B — `docker compose`** (a ready `docker-compose.yml` is committed at the repo root):
+```bash
+docker compose up -d      # start; docker compose down (keep data) / down -v (wipe)
 ```
 
 **Verify it's up:**
@@ -94,21 +81,27 @@ POSTGRES_CONNECTION_STRING=Host=localhost;Port=5432;Database=qa;Username=qa;Pass
 
 ## Step 4 — Create the PostgreSQL schema (EF migration)
 
-The Npgsql migration set lives in `Data/Migrations/Npgsql/`. If it hasn't been generated yet, generate it
-**with the Postgres provider selected** (from `backend/`, using your normal `dotnet` invocation — see the
-`dotnet-build-environment` note in `CLAUDE.md` if `dotnet` isn't on your PATH):
+Npgsql migrations live in their own project, **`src/QaAutomation.Migrations.Npgsql`** (already scaffolded
+and wired via `MigrationsAssembly`) — kept apart from the SQLite migrations because EF migrations are
+provider-specific and can't share one model snapshot. Generate the initial migration once, with the
+Postgres provider selected (from `backend/`, using your normal `dotnet` invocation — see the
+`dotnet-build-environment` note in `CLAUDE.md` if `dotnet` isn't on PATH):
 
 ```bash
-# provider is read from the environment
+# 1. Add the migrations project to the solution (one-time)
+dotnet sln add src/QaAutomation.Migrations.Npgsql
+
+# 2. Generate the initial Npgsql migration (provider read from the environment)
 DATABASE_PROVIDER=postgres \
 dotnet ef migrations add InitialNpgsql \
-  --project src/QaAutomation.Infrastructure \
-  --startup-project src/QaAutomation.Api \
-  --output-dir Data/Migrations/Npgsql
+  --project src/QaAutomation.Migrations.Npgsql \
+  --startup-project src/QaAutomation.Api
 ```
 
-You normally **don't** need `dotnet ef database update` — `DatabaseInitializer` applies migrations on
-startup. (You can run it explicitly if you prefer.)
+Confirm the generated DDL uses Postgres types (`integer`/`text`/`timestamp`, `GENERATED … AS IDENTITY`),
+**not** SQLite `INTEGER`/`TEXT`. You normally **don't** need `dotnet ef database update` —
+`DatabaseInitializer` applies migrations on startup and also creates the `tsvector`/GIN full-text tables.
+Run `database update` explicitly only if you prefer to migrate before boot.
 
 ---
 
