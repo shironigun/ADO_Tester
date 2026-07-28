@@ -79,6 +79,8 @@ public static class EventPhases
     public const string Analyze = "analyze";
     /// <summary>QA Loop — spec/test-case generators phase.</summary>
     public const string Generate = "generate";
+    /// <summary>Author Tests — post-generation duplicate check against the reference plan index.</summary>
+    public const string Dedup = "dedup";
 }
 
 /// <summary>Frozen <c>level</c> wire values.</summary>

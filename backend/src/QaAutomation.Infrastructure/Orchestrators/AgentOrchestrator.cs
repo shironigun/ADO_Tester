@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using QaAutomation.Core.Abstractions;
 using QaAutomation.Core.Agents;
+using QaAutomation.Core.Contracts;
 using QaAutomation.Core.Models;
 using QaAutomation.Infrastructure.Agents;
 using QaAutomation.Infrastructure.Data;
@@ -30,11 +31,14 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     private readonly CancellationRegistry _cancellations;
     private readonly IAzureDevOpsClient _ado;
     private readonly ILlmClientFactory _llmFactory;
+    private readonly ICodeContextService _codeContext;
+    private readonly IExistingTestsIndexService _dedupIndex;
     private readonly ILogger<AgentOrchestrator> _log;
 
     public AgentOrchestrator(
         IServiceScopeFactory scopeFactory, IEventBus bus, PipelineConcurrency concurrency,
         CancellationRegistry cancellations, IAzureDevOpsClient ado, ILlmClientFactory llmFactory,
+        ICodeContextService codeContext, IExistingTestsIndexService dedupIndex,
         ILogger<AgentOrchestrator> log)
     {
         _scopeFactory = scopeFactory;
@@ -43,6 +47,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         _cancellations = cancellations;
         _ado = ado;
         _llmFactory = llmFactory;
+        _codeContext = codeContext;
+        _dedupIndex = dedupIndex;
         _log = log;
     }
 
@@ -51,7 +57,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     // ── start (Analyst, then Tester if auto) ─────────────────────────────────
 
     public async Task<int> StartAsync(
-        int projectId, int workItemId, bool autoHandoff = true, int? batchId = null, CancellationToken cancellationToken = default)
+        int projectId, int workItemId, bool autoHandoff = true, AuthorRunContext? context = null,
+        int? batchId = null, CancellationToken cancellationToken = default)
     {
         var wi = await _ado.GetWorkItemAsync(workItemId, ct: cancellationToken);
 
@@ -68,6 +75,11 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 Status = SessionStatus.Analyzing,
                 CurrentActivity = "Fetched work item from Azure DevOps",
                 BatchId = batchId,
+                // Free-text guidance the Analyst uses; reference plan the Tester dedups against.
+                AdditionalContext = context?.AdditionalContext,
+                ReferenceTestPlanId = context?.ReferenceTestPlanId,
+                ReferenceTestSuiteId = context?.ReferenceTestSuiteId,
+                PlanNavigationHint = context?.PlanNavigationHint,
                 CreatedAt = now,
                 UpdatedAt = now,
             };
@@ -80,10 +92,40 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         return sessionId;
     }
 
-    public Task RunTesterAsync(int sessionId, CancellationToken cancellationToken = default)
+    public async Task RunTesterAsync(int sessionId, AuthorRunContext? context = null, CancellationToken cancellationToken = default)
     {
+        // Persist any gate-supplied context/reference plan first so the background rerun (own scope) reads it.
+        if (context is not null)
+            await ApplyRunContextAsync(sessionId, context, cancellationToken);
         Launch(sessionId, token => RerunTesterAsync(sessionId, token));
+    }
+
+    public Task RerunAnalystAsync(int sessionId, string feedback, CancellationToken cancellationToken = default)
+    {
+        Launch(sessionId, token => RerunAnalystInnerAsync(sessionId, feedback ?? "", token));
         return Task.CompletedTask;
+    }
+
+    public Task RefineTesterAsync(
+        int sessionId, string? overallFeedback, IReadOnlyList<TestFeedback> perTest, CancellationToken cancellationToken = default)
+    {
+        Launch(sessionId, token => RefineTesterInnerAsync(sessionId, overallFeedback, perTest ?? [], token));
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Persist gate-supplied Tester context + reference plan onto the session (best-effort).</summary>
+    private async Task ApplyRunContextAsync(int sessionId, AuthorRunContext context, CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+        var session = await db.TestSessions.FindAsync([sessionId], ct);
+        if (session is null) return;
+        if (!string.IsNullOrWhiteSpace(context.AdditionalContext)) session.TesterContext = context.AdditionalContext;
+        if (context.ReferenceTestPlanId is not null) session.ReferenceTestPlanId = context.ReferenceTestPlanId;
+        if (context.ReferenceTestSuiteId is not null) session.ReferenceTestSuiteId = context.ReferenceTestSuiteId;
+        if (!string.IsNullOrWhiteSpace(context.PlanNavigationHint)) session.PlanNavigationHint = context.PlanNavigationHint;
+        session.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
     }
 
     public Task PushToAdoAsync(
@@ -200,10 +242,31 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             Pub(key, EventKinds.Result, EventPhases.Retrieve, $"Retrieved {context.Count} knowledgebase chunk(s)",
                 EventLevels.Success, new() { ["chunks"] = context.Count, ["files"] = context.Select(h => h.FileName).ToList() });
 
+            // Phase 2 — Discover code context from the ADO repo.
+            await UpdateActivityAsync(db, session, "Discovering code context from ADO repository", ct);
+            Pub(key, EventKinds.Phase, EventPhases.Discover, "Discovering code context from repository");
+            try
+            {
+                var (_, codeCtx) = await _codeContext.DiscoverAsync(
+                    workItemId, wi, null, [], [], session.AdditionalContext, alwaysSearch: true, llm, key, ct);
+                session.CodeContext = string.IsNullOrEmpty(codeCtx) ? null : codeCtx;
+                session.UpdatedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync(ct);
+                Pub(key, EventKinds.Result, EventPhases.Discover,
+                    string.IsNullOrEmpty(codeCtx) ? "No code context found" : "Code context discovered",
+                    EventLevels.Success, new() { ["hasCode"] = !string.IsNullOrEmpty(codeCtx) });
+            }
+            catch (Exception discoverEx) when (discoverEx is not OperationCanceledException)
+            {
+                _log.LogWarning(discoverEx, "Code discovery failed for session {SessionId} — continuing without code context", sessionId);
+                Pub(key, EventKinds.System, EventPhases.Discover, $"Code discovery skipped: {discoverEx.Message}", EventLevels.Warn);
+            }
+
             await UpdateActivityAsync(db, session, $"Analyst — analyzing story (using {context.Count} KB chunks)", ct);
             Pub(key, EventKinds.Phase, EventPhases.Analyst, $"Analyst started ({context.Count} chunks)");
             var analysis = await RunStreamingAsync(db, session, "Analyst — analyzing story",
-                (p, c) => new AnalystAgent(llm).AnalyzeAsync(wi, context, p, EmitClosure(key, EventPhases.Analyst), c),
+                (p, c) => new AnalystAgent(llm).AnalyzeAsync(
+                    wi, context, session.AdditionalContext, session.CodeContext, p, EmitClosure(key, EventPhases.Analyst), c),
                 key, EventPhases.Analyst, ct);
             Pub(key, EventKinds.Result, EventPhases.Analyst,
                 $"Analyst produced: {analysis.Module} / {analysis.Feature} · " +
@@ -315,17 +378,73 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         QaDbContext db, TestSession session, AnalystOutput analysis, AdoWorkItem wi, string key, CancellationToken ct)
     {
         var llm = await _llmFactory.CreateAsync(ct);
+
+        // Phase 3 — Build existing-tests dedup block from the reference plan index (if configured).
+        string? existingTestsBlock = null;
+        if (session.ReferenceTestPlanId is not null)
+        {
+            try
+            {
+                await _dedupIndex.EnsureIndexAsync(
+                    session.ReferenceTestPlanId.Value, session.ReferenceTestSuiteId, forceRescan: false, ct);
+                existingTestsBlock = await _dedupIndex.BuildTesterContextAsync(
+                    session.ReferenceTestPlanId.Value, session.ReferenceTestSuiteId, analysis, 8192, ct);
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "Dedup index build failed for session {SessionId} — proceeding without it", session.Id);
+            }
+        }
+
         Pub(key, EventKinds.Phase, EventPhases.Tester, "Tester started — generating test cases in QA style");
         var generated = await RunStreamingAsync(db, session, "Tester — generating test cases",
-            (p, c) => new TesterAgent(llm).GenerateAsync(analysis, wi, p, EmitClosure(key, EventPhases.Tester), c),
+            (p, c) => new TesterAgent(llm).GenerateAsync(
+                analysis, wi, session.TesterContext, existingTestsBlock,
+                p, EmitClosure(key, EventPhases.Tester), c),
             key, EventPhases.Tester, ct);
+
+        // Post-gen dedup: similarity check against the full reference plan index.
+        IReadOnlyList<DedupResult> dedupResults = [];
+        if (session.ReferenceTestPlanId is not null && generated.Count > 0)
+        {
+            try
+            {
+                var toCheck = generated
+                    .Select(g => new GeneratedTestCase(g.Title, string.Join(" | ", g.Steps.Select(s => s.Action))))
+                    .ToList();
+                dedupResults = await _dedupIndex.FindDuplicatesAsync(
+                    session.ReferenceTestPlanId.Value, session.ReferenceTestSuiteId, toCheck, ct);
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "Post-gen dedup check failed for session {SessionId} — proceeding without filtering", session.Id);
+            }
+        }
+
+        var clearDupTitles = dedupResults.Where(d => d.IsClearDuplicate)
+            .Select(d => d.Title).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var filteredGenerated = generated.Where(g => !clearDupTitles.Contains(g.Title)).ToList();
+
+        if (dedupResults.Count > 0)
+        {
+            var skipped = dedupResults.Where(d => d.IsClearDuplicate).ToList();
+            var flagged = dedupResults.Where(d => !d.IsClearDuplicate).ToList();
+            Pub(key, EventKinds.Result, EventPhases.Dedup,
+                $"Dedup: skipped {skipped.Count} duplicate(s), flagged {flagged.Count} borderline",
+                EventLevels.Info,
+                new()
+                {
+                    ["skipped"] = skipped.Select(d => new { d.Title, d.MatchedTitle, d.MatchedAdoId }).ToList<object>(),
+                    ["flagged"] = flagged.Select(d => new { d.Title, d.MatchedTitle, d.MatchedAdoId }).ToList<object>(),
+                });
+        }
 
         // Clear any prior drafts (re-run) then insert the new ones — one transaction via SaveChanges.
         var existing = await db.TestCaseDrafts.Where(d => d.SessionId == session.Id).ToListAsync(ct);
         db.TestCaseDrafts.RemoveRange(existing);
-        for (var i = 0; i < generated.Count; i++)
+        for (var i = 0; i < filteredGenerated.Count; i++)
         {
-            var g = generated[i];
+            var g = filteredGenerated[i];
             db.TestCaseDrafts.Add(new TestCaseDraft
             {
                 SessionId = session.Id,
@@ -334,16 +453,243 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 StepsJson = JsonSerializer.Serialize(g.Steps.Select(st => new { action = st.Action, expected = st.Expected })),
                 SortOrder = i,
             });
-            Pub(key, EventKinds.Result, EventPhases.Tester, $"Test case {i + 1}/{generated.Count}: {g.Title}");
+            Pub(key, EventKinds.Result, EventPhases.Tester, $"Test case {i + 1}/{filteredGenerated.Count}: {g.Title}");
         }
 
         session.Status = SessionStatus.Drafted;
-        session.CurrentActivity = $"Drafted {generated.Count} test case(s) — awaiting review";
-        Pub(key, EventKinds.System, EventPhases.Tester, $"Drafted {generated.Count} test case(s) — awaiting review",
-            EventLevels.Success, new() { ["terminal"] = true, ["count"] = generated.Count });
+        session.CurrentActivity = $"Drafted {filteredGenerated.Count} test case(s) — awaiting review";
+        Pub(key, EventKinds.System, EventPhases.Tester, $"Drafted {filteredGenerated.Count} test case(s) — awaiting review",
+            EventLevels.Success, new() { ["terminal"] = true, ["count"] = filteredGenerated.Count });
         PersistLog(session, key);
         session.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
+    }
+
+    // ── refine loops (feedback-driven re-runs) ───────────────────────────────
+
+    /// <summary>Re-run the Analyst against its own prior output + reviewer feedback, improving/filling
+    /// gaps rather than starting over. Returns the session to AwaitingTester.</summary>
+    private async Task RerunAnalystInnerAsync(int sessionId, string feedback, CancellationToken ct)
+    {
+        var key = SessionKey(sessionId);
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+        var kb = scope.ServiceProvider.GetRequiredService<IKnowledgebaseService>();
+
+        var session = await db.TestSessions.FindAsync([sessionId], ct);
+        if (session is null)
+            return;
+
+        try
+        {
+            var llm = await _llmFactory.CreateAsync(ct);
+            if (string.IsNullOrEmpty(session.AnalysisJson))
+                throw new InvalidOperationException("Analyst analysis missing — run Analyst first.");
+            var prior = AnalystOutput.FromJson(JsonNode.Parse(session.AnalysisJson));
+
+            session.Status = SessionStatus.Analyzing;
+            session.CurrentActivity = "Analyst — refining analysis with your feedback";
+            session.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+
+            var wi = await _ado.GetWorkItemAsync(session.WorkItemId, ct: ct);
+            var query = $"{wi.Title} {wi.AcceptanceCriteria ?? ""}".Trim();
+            var context = await kb.SearchAsync(session.ProjectId, query, 8, ct);
+
+            Pub(key, EventKinds.Phase, EventPhases.Analyst, "Analyst refine started — applying your feedback");
+            var analysis = await RunStreamingAsync(db, session, "Analyst — refining analysis",
+                (p, c) => new AnalystAgent(llm).RefineAsync(
+                    prior, feedback, wi, context, session.AdditionalContext, session.CodeContext,
+                    p, EmitClosure(key, EventPhases.Analyst), c),
+                key, EventPhases.Analyst, ct);
+
+            session.AnalysisJson = analysis.ToJson();
+            session.Status = SessionStatus.AwaitingTester;
+            session.CurrentActivity = "Analyst refined — review, then run the Tester";
+            Pub(key, EventKinds.System, EventPhases.Analyst, "Analyst refined — awaiting manual Run Tester", data: Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            session.Status = SessionStatus.Cancelled;
+            session.CurrentActivity = "Cancelled by user";
+            Pub(key, EventKinds.System, text: "Cancelled by user", level: EventLevels.Warn, data: Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await SafeCommitAsync(db);
+            throw;
+        }
+        catch (Exception e)
+        {
+            _log.LogError(e, "Analyst refine failed for session {SessionId}", sessionId);
+            session.Status = SessionStatus.Failed;
+            session.ErrorMessage = e.Message;
+            session.CurrentActivity = $"Failed: {e.Message}";
+            Pub(key, EventKinds.Error, text: $"Failed: {e.Message}", level: EventLevels.Error, data: Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await SafeCommitAsync(db);
+        }
+    }
+
+    /// <summary>Feedback-driven Tester refine that MERGES into existing drafts (never a wholesale
+    /// regenerate): update flagged, add new, remove only explicitly-flagged non-pushed drafts, and
+    /// preserve everything else — pushed drafts are immutable.</summary>
+    private async Task RefineTesterInnerAsync(
+        int sessionId, string? overallFeedback, IReadOnlyList<TestFeedback> perTest, CancellationToken ct)
+    {
+        var key = SessionKey(sessionId);
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+
+        var session = await db.TestSessions.FindAsync([sessionId], ct);
+        if (session is null)
+            return;
+
+        try
+        {
+            var llm = await _llmFactory.CreateAsync(ct);
+            if (string.IsNullOrEmpty(session.AnalysisJson))
+                throw new InvalidOperationException("Analyst analysis missing — run Analyst first.");
+            var analysis = AnalystOutput.FromJson(JsonNode.Parse(session.AnalysisJson));
+
+            session.Status = SessionStatus.Drafting;
+            session.CurrentActivity = "Tester — refining test cases with your feedback";
+            session.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+
+            var wi = await _ado.GetWorkItemAsync(session.WorkItemId, ct: ct);
+
+            // Phase 3 — Build existing-tests dedup block from the reference plan index (if configured).
+            string? existingTestsBlock = null;
+            if (session.ReferenceTestPlanId is not null)
+            {
+                try
+                {
+                    existingTestsBlock = await _dedupIndex.BuildTesterContextAsync(
+                        session.ReferenceTestPlanId.Value, session.ReferenceTestSuiteId, analysis, 8192, ct);
+                }
+                catch (Exception ex)
+                {
+                    _log.LogWarning(ex, "Dedup index build failed for session {SessionId} refine — proceeding without it", session.Id);
+                }
+            }
+
+            var drafts = await db.TestCaseDrafts.Where(d => d.SessionId == sessionId).ToListAsync(ct);
+            var feedbackByDraft = perTest.Where(f => !f.Remove)
+                .GroupBy(f => f.DraftId).ToDictionary(g => g.Key, g => g.First().Feedback);
+            var removeIds = perTest.Where(f => f.Remove).Select(f => f.DraftId).ToHashSet();
+
+            // Only non-pushed drafts can be removed; pushed drafts are always kept.
+            var toRemove = drafts.Where(d => removeIds.Contains(d.Id) && d.Status != DraftStatus.Pushed).ToList();
+            var removedTitles = toRemove.Select(d => d.Title).ToList();
+
+            var existing = drafts
+                .Where(d => !toRemove.Contains(d))
+                .Select(d => new ExistingDraftForRefine(
+                    d.Id, d.Title, d.Preconditions, ParseSteps(d.StepsJson),
+                    d.Status.ToString(), d.Status == DraftStatus.Pushed,
+                    feedbackByDraft.TryGetValue(d.Id, out var fb) ? fb : null))
+                .ToList();
+
+            Pub(key, EventKinds.Phase, EventPhases.Tester, "Tester refine started — merging your feedback");
+            var refined = await RunStreamingAsync(db, session, "Tester — refining test cases",
+                (p, c) => new TesterAgent(llm).RefineAsync(
+                    analysis, wi, existing, removedTitles, overallFeedback, session.TesterContext,
+                    existingTestsBlock, p, EmitClosure(key, EventPhases.Tester), c),
+                key, EventPhases.Tester, ct);
+
+            ReconcileDrafts(db, session, drafts, toRemove, refined, key);
+            await db.SaveChangesAsync(ct);
+
+            var total = await db.TestCaseDrafts.CountAsync(d => d.SessionId == sessionId, ct);
+            session.Status = SessionStatus.Drafted;
+            session.CurrentActivity = $"Refined — {total} test case(s) — awaiting review";
+            Pub(key, EventKinds.System, EventPhases.Tester, $"Refined — {total} test case(s) — awaiting review",
+                EventLevels.Success, new() { ["terminal"] = true, ["count"] = total });
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            session.Status = SessionStatus.Cancelled;
+            session.CurrentActivity = "Cancelled by user";
+            Pub(key, EventKinds.System, text: "Cancelled by user", level: EventLevels.Warn, data: Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await SafeCommitAsync(db);
+            throw;
+        }
+        catch (Exception e)
+        {
+            _log.LogError(e, "Tester refine failed for session {SessionId}", sessionId);
+            session.Status = SessionStatus.Failed;
+            session.ErrorMessage = e.Message;
+            session.CurrentActivity = $"Failed: {e.Message}";
+            Pub(key, EventKinds.Error, text: $"Failed: {e.Message}", level: EventLevels.Error, data: Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await SafeCommitAsync(db);
+        }
+    }
+
+    /// <summary>Merge the Tester's refine output into the draft set. Removes flagged non-pushed drafts,
+    /// updates drafts whose <c>ref</c> matches (resetting Approved→Draft on a content change), and inserts
+    /// ref:"new" items. Drafts neither returned nor flagged are preserved unchanged. Pushed drafts are
+    /// never modified. Does not call SaveChanges (the caller commits).</summary>
+    private void ReconcileDrafts(
+        QaDbContext db, TestSession session, List<TestCaseDraft> current, List<TestCaseDraft> toRemove,
+        List<RefinedTestCase> refined, string key)
+    {
+        var removedIds = toRemove.Select(d => d.Id).ToHashSet();
+        if (toRemove.Count > 0)
+        {
+            db.TestCaseDrafts.RemoveRange(toRemove);
+            Pub(key, EventKinds.Result, EventPhases.Tester, $"Removed {toRemove.Count} test case(s) per feedback");
+        }
+
+        var byId = current.Where(d => !removedIds.Contains(d.Id)).ToDictionary(d => d.Id);
+        var maxSort = current.Count > 0 ? current.Max(d => d.SortOrder) : -1;
+        int updated = 0, added = 0;
+
+        foreach (var r in refined)
+        {
+            var stepsJson = JsonSerializer.Serialize(
+                r.Steps.Select(st => new { action = st.Action, expected = st.Expected }));
+
+            if (int.TryParse(r.Ref, out var refId))
+            {
+                if (removedIds.Contains(refId))
+                    continue;   // never re-add a test the tester removed
+                if (byId.TryGetValue(refId, out var draft))
+                {
+                    if (draft.Status == DraftStatus.Pushed)
+                        continue;   // pushed drafts are immutable
+                    var changed = draft.Title != r.Title || draft.StepsJson != stepsJson;
+                    draft.Title = r.Title;
+                    draft.StepsJson = stepsJson;
+                    if (changed && draft.Status == DraftStatus.Approved)
+                        draft.Status = DraftStatus.Draft;   // content changed → back to review
+                    updated++;
+                    continue;
+                }
+            }
+
+            db.TestCaseDrafts.Add(new TestCaseDraft
+            {
+                SessionId = session.Id,
+                Title = r.Title,
+                Preconditions = r.Preconditions,
+                StepsJson = stepsJson,
+                Status = DraftStatus.Draft,
+                SortOrder = ++maxSort,
+            });
+            added++;
+        }
+        Pub(key, EventKinds.Result, EventPhases.Tester, $"Refine merge: {updated} updated, {added} added");
     }
 
     private async Task PushAsync(int sessionId, int testPlanId, int testSuiteId, CancellationToken ct)

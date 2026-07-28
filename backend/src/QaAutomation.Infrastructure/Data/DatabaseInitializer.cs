@@ -22,6 +22,9 @@ public sealed class DatabaseInitializer
     private const string FtsBootstrapSql =
         "CREATE VIRTUAL TABLE IF NOT EXISTS doc_chunks USING fts5(content, project_id UNINDEXED, doc_id UNINDEXED)";
 
+    private const string FtsTestIndexBootstrapSql =
+        "CREATE VIRTUAL TABLE IF NOT EXISTS test_case_index USING fts5(title, steps_summary, scan_id UNINDEXED, entry_id UNINDEXED)";
+
     private static readonly string EfProductVersion =
         (typeof(DbContext).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
             ?.InformationalVersion ?? "8.0.11").Split('+')[0];
@@ -91,7 +94,11 @@ public sealed class DatabaseInitializer
             "Adopted existing Alembic database: recorded baseline {Baseline} as applied (no DDL ran).", baseline);
     }
 
-    private void EnsureFtsTable() => _db.Database.ExecuteSqlRaw(FtsBootstrapSql);
+    private void EnsureFtsTable()
+    {
+        _db.Database.ExecuteSqlRaw(FtsBootstrapSql);
+        _db.Database.ExecuteSqlRaw(FtsTestIndexBootstrapSql);
+    }
 
     private void SeedProject()
     {

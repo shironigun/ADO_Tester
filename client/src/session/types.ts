@@ -24,6 +24,12 @@ export interface SessionDetail {
   createdAt?: string
   updatedAt?: string
   drafts: AnyDraft[]
+  // author-tests context/refine (optional, tolerated)
+  additionalContext?: string | null
+  testerContext?: string | null
+  referenceTestPlanId?: number | null
+  referenceTestSuiteId?: number | null
+  planNavigationHint?: string | null
   // bug-only (optional, tolerated)
   actualBehavior?: string | null
   codeContext?: string | null

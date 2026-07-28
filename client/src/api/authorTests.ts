@@ -25,8 +25,17 @@ export async function searchWorkItems(q: string): Promise<WorkItemOption[]> {
   return data
 }
 
+export interface StartSessionBody {
+  workItemId: number
+  autoHandoff: boolean
+  additionalContext?: string
+  referenceTestPlanId?: number
+  referenceTestSuiteId?: number
+  planNavigationHint?: string
+}
+
 export async function startSession(
-  projectId: number, body: { workItemId: number; autoHandoff: boolean },
+  projectId: number, body: StartSessionBody,
 ): Promise<{ sessionId: number }> {
   const { data } = await api.post<{ sessionId: number }>(`/api/author-tests/${projectId}/start`, body)
   return data
@@ -63,8 +72,29 @@ export async function approveAllDrafts(sessionId: number): Promise<void> {
   await api.post(`/api/author-tests/sessions/${sessionId}/approve-all`)
 }
 
-export async function runTester(sessionId: number): Promise<void> {
-  await api.post(`/api/author-tests/sessions/${sessionId}/run-tester`)
+export interface RunTesterBody {
+  additionalContext?: string
+  referenceTestPlanId?: number
+  referenceTestSuiteId?: number
+  planNavigationHint?: string
+}
+
+export async function runTester(sessionId: number, body?: RunTesterBody): Promise<void> {
+  await api.post(`/api/author-tests/sessions/${sessionId}/run-tester`, body ?? {})
+}
+
+// Re-run the Analyst with feedback (improve/fill gaps in the existing analysis).
+export async function rerunAnalyst(sessionId: number, feedback: string): Promise<void> {
+  await api.post(`/api/author-tests/sessions/${sessionId}/rerun-analyst`, { feedback })
+}
+
+export interface TestFeedbackItem { draftId: number; feedback?: string; remove?: boolean }
+
+// Feedback-driven Tester refine (merge into existing drafts).
+export async function refineTester(
+  sessionId: number, body: { overallFeedback?: string; perTest: TestFeedbackItem[] },
+): Promise<void> {
+  await api.post(`/api/author-tests/sessions/${sessionId}/refine-tester`, body)
 }
 
 export async function cancelSession(sessionId: number): Promise<void> {
@@ -89,3 +119,23 @@ export async function saveAnalysis(sessionId: number, analysis: unknown): Promis
 }
 
 export const sessionStreamUrl = (id: number) => apiUrl(`/api/author-tests/sessions/${id}/stream`)
+
+export interface RescanPlanResponse { scanId: number; caseCount: number; scannedAt: string }
+export interface ScanStatusResponse { scanId: number | null; caseCount: number | null; scannedAt: string | null }
+
+export async function rescanPlan(planId: number, suiteId?: number): Promise<RescanPlanResponse> {
+  const { data } = await api.post<RescanPlanResponse>(
+    `/api/author-tests/plans/${planId}/rescan`,
+    null,
+    { params: suiteId !== undefined ? { suiteId } : {} },
+  )
+  return data
+}
+
+export async function getScanStatus(planId: number, suiteId?: number): Promise<ScanStatusResponse> {
+  const { data } = await api.get<ScanStatusResponse>(
+    `/api/author-tests/plans/${planId}/scan-status`,
+    { params: suiteId !== undefined ? { suiteId } : {} },
+  )
+  return data
+}

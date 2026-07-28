@@ -19,7 +19,7 @@ export function sessionIdentity(config: SessionModuleConfig, s: SessionSummary |
 const PHASE_LABEL: Record<string, string> = {
   fetch: 'FETCH', retrieve: 'KB', analyst: 'ANALYST', tester: 'TESTER',
   bugwriter: 'BUG WRITER', push: 'PUSH', summarize: 'SUMMARIZE',
-  discover: 'DISCOVER', 'code-verify': 'VERIFY',
+  discover: 'DISCOVER', 'code-verify': 'VERIFY', dedup: 'DEDUP',
 }
 
 function fmtClock(ts: number): string {

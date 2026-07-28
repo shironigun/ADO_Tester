@@ -26,6 +26,10 @@ public sealed class QaDbContext : DbContext
     public DbSet<Batch> Batches => Set<Batch>();
     public DbSet<ErrorLog> ErrorLogs => Set<ErrorLog>();
 
+    // ── Existing-test dedup DbSets ────────────────────────────────────────────
+    public DbSet<TestPlanScan> TestPlanScans => Set<TestPlanScan>();
+    public DbSet<ExistingTestCaseIndexEntry> ExistingTestCaseIndexEntries => Set<ExistingTestCaseIndexEntry>();
+
     // ── QA Loop DbSets ────────────────────────────────────────────────────────
     public DbSet<ApiTestSession> ApiTestSessions => Set<ApiTestSession>();
     public DbSet<ApiTestDraft> ApiTestDrafts => Set<ApiTestDraft>();
@@ -108,12 +112,47 @@ public sealed class QaDbContext : DbContext
             e.Property(x => x.AnalysisJson).HasColumnName("AnalysisJson");
             e.Property(x => x.ErrorMessage).HasColumnName("ErrorMessage");
             e.Property(x => x.EventLogJson).HasColumnName("EventLogJson");
+            // Author Tests enhancements (AuthorTestsContextAndIndex migration).
+            e.Property(x => x.AdditionalContext).HasColumnName("AdditionalContext");
+            e.Property(x => x.CodeContext).HasColumnName("CodeContext");
+            e.Property(x => x.TesterContext).HasColumnName("TesterContext");
+            e.Property(x => x.ReferenceTestPlanId).HasColumnName("ReferenceTestPlanId");
+            e.Property(x => x.ReferenceTestSuiteId).HasColumnName("ReferenceTestSuiteId");
+            e.Property(x => x.PlanNavigationHint).HasColumnName("PlanNavigationHint");
             e.Property(x => x.BatchId).HasColumnName("BatchId");
             e.Property(x => x.CreatedAt).HasColumnName("CreatedAt").IsRequired();
             e.Property(x => x.UpdatedAt).HasColumnName("UpdatedAt").IsRequired();
             // BatchId is a plain indexed int — NO FK constraint in the live DB (spec §5.3).
             e.HasIndex(x => x.BatchId).HasDatabaseName("ix_TestSessions_BatchId");
             e.HasMany(x => x.Drafts).WithOne().HasForeignKey(d => d.SessionId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        model.Entity<TestPlanScan>(e =>
+        {
+            e.ToTable("TestPlanScans");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("Id").ValueGeneratedOnAdd();
+            e.Property(x => x.PlanId).HasColumnName("PlanId").IsRequired();
+            e.Property(x => x.SuiteId).HasColumnName("SuiteId");
+            e.Property(x => x.ScannedAt).HasColumnName("ScannedAt").IsRequired();
+            e.Property(x => x.CaseCount).HasColumnName("CaseCount").IsRequired();
+            e.Property(x => x.TitlePatternSummary).HasColumnName("TitlePatternSummary");
+            e.HasIndex(x => new { x.PlanId, x.SuiteId }).HasDatabaseName("ix_TestPlanScans_PlanId_SuiteId");
+        });
+
+        model.Entity<ExistingTestCaseIndexEntry>(e =>
+        {
+            e.ToTable("ExistingTestCaseIndexEntries");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("Id").ValueGeneratedOnAdd();
+            e.Property(x => x.ScanId).HasColumnName("ScanId").IsRequired();
+            e.Property(x => x.AdoTestCaseId).HasColumnName("AdoTestCaseId").IsRequired();
+            e.Property(x => x.SuitePath).HasColumnName("SuitePath").IsRequired();
+            e.Property(x => x.Title).HasColumnName("Title").IsRequired();
+            e.Property(x => x.TitleSignature).HasColumnName("TitleSignature").IsRequired();
+            e.Property(x => x.StepsSummary).HasColumnName("StepsSummary");
+            e.Property(x => x.StepsHash).HasColumnName("StepsHash");
+            e.HasIndex(x => x.ScanId).HasDatabaseName("ix_ExistingTestCaseIndexEntries_ScanId");
         });
 
         model.Entity<TestCaseDraft>(e =>

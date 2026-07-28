@@ -5,7 +5,7 @@ export interface ConsoleEvent {
   ts: number
   sessionKey: string
   kind: 'phase' | 'token' | 'thinking' | 'system' | 'stat' | 'result' | 'error'
-  phase: 'fetch' | 'retrieve' | 'analyst' | 'tester' | 'bugwriter' | 'push' | 'summarize' | 'discover' | 'code-verify' | null
+  phase: 'fetch' | 'retrieve' | 'analyst' | 'tester' | 'bugwriter' | 'push' | 'summarize' | 'discover' | 'code-verify' | 'dedup' | null
   level: 'info' | 'success' | 'warn' | 'error'
   text: string
   data?: Record<string, unknown> | null
