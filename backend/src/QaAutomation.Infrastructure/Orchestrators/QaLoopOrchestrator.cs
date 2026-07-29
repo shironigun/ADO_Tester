@@ -249,7 +249,8 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
 
             var analysis = await new ModuleAnalyzerAgent(llm).AnalyzeInventoryAsync(
                 session.Module, source, existingCases,
-                fetchFile, emit: EmitClosure(key, EventPhases.Analyze, session.ActivityEnabled), ct: ct);
+                additionalContext: session.AdditionalContext,
+                fetchFile: fetchFile, emit: EmitClosure(key, EventPhases.Analyze, session.ActivityEnabled), ct: ct);
 
             // Pre-select: gap rows = selected; covered rows = not selected
             foreach (var row in analysis.Surface.Rows)

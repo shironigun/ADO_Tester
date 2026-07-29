@@ -62,10 +62,11 @@ public sealed class ModuleAnalyzerAgent
     /// fetches them via <paramref name="fetchFile"/> and re-invokes exactly once.</summary>
     public async Task<ModuleAnalysis> AnalyzeInventoryAsync(
         string module, string sourceBundle, IReadOnlyList<LinkedTestCase> existingCases,
+        string? additionalContext = null,
         Func<string, CancellationToken, Task<string?>>? fetchFile = null,
         StreamProgress? progress = null, Action<LlmEmit>? emit = null, CancellationToken ct = default)
     {
-        var prompt = BuildInventoryPrompt(module, sourceBundle, existingCases);
+        var prompt = BuildInventoryPrompt(module, sourceBundle, existingCases, additionalContext);
         var data = await JsonUtils.CompleteJsonAsync(
             _llm, AgentPrompts.ModuleAnalyzerSystem, prompt, '{', progress, emit,
             label: "ModuleAnalyzer", cancellationToken: ct);
@@ -207,7 +208,7 @@ public sealed class ModuleAnalyzerAgent
 
     // ── Prompt builders ───────────────────────────────────────────────────────
 
-    internal static string BuildInventoryPrompt(string module, string sourceBundle, IReadOnlyList<LinkedTestCase> existingCases)
+    internal static string BuildInventoryPrompt(string module, string sourceBundle, IReadOnlyList<LinkedTestCase> existingCases, string? additionalContext = null)
     {
         var lines = new List<string>
         {
@@ -221,6 +222,12 @@ public sealed class ModuleAnalyzerAgent
             foreach (var c in existingCases)
                 lines.Add($"- #{c.Id} [{c.Steps.Count} steps] {c.Title}");
         lines.Add("");
+        if (!string.IsNullOrWhiteSpace(additionalContext))
+        {
+            lines.Add("## Additional Context (from tester)");
+            lines.Add(additionalContext.Trim());
+            lines.Add("");
+        }
         lines.Add("## Module source code");
         lines.Add(sourceBundle);
         lines.Add("");
