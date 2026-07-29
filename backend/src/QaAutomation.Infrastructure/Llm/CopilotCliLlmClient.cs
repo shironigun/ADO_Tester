@@ -220,12 +220,8 @@ public sealed class CopilotCliLlmClient : ILlmClient
 
 
 
-        // Strip any bearer/API-key envs so the CLI always uses the subscription login.
-
-        psi.Environment.Remove("GITHUB_TOKEN");
-
-        psi.Environment.Remove("GH_TOKEN");
-
+        // Strip only the Copilot API key (not used); keep COPILOT_GITHUB_TOKEN, GH_TOKEN, and
+        // GITHUB_TOKEN so the CLI can authenticate via the GitHub token set in the environment.
         psi.Environment.Remove("COPILOT_API_KEY");
 
 
