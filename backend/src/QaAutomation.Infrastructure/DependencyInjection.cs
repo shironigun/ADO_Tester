@@ -24,6 +24,7 @@ using QaAutomation.Infrastructure.QaPipelines;
 using QaAutomation.Infrastructure.QaRuns;
 using QaAutomation.Infrastructure.Reports;
 using QaAutomation.Infrastructure.Settings;
+using QaAutomation.Infrastructure.TextSearch;
 
 namespace QaAutomation.Infrastructure;
 
@@ -33,12 +34,32 @@ namespace QaAutomation.Infrastructure;
 /// </summary>
 public static class DependencyInjection
 {
+    // Backward-compatible SQLite overload (tests + any legacy caller). Defaults the provider to SQLite.
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services, IConfiguration config, string sqliteConnectionString)
+        => services.AddInfrastructure(config, DatabaseProvider.Sqlite, sqliteConnectionString);
+
+    public static IServiceCollection AddInfrastructure(
+        this IServiceCollection services, IConfiguration config,
+        DatabaseProvider provider, string connectionString)
     {
-        services.AddDbContext<QaDbContext>(o => o
-            .UseSqlite(sqliteConnectionString)
-            .AddInterceptors(SqliteBusyTimeoutInterceptor.Instance));
+        services.AddDbContext<QaDbContext>(o =>
+        {
+            if (provider == DatabaseProvider.Postgres)
+                // Npgsql migrations live in their own assembly (they cannot share the SQLite model
+                // snapshot). Generate them locally (PGM-006); SQLite keeps the default assembly.
+                o.UseNpgsql(connectionString, npgsql => npgsql
+                    .EnableRetryOnFailure()
+                    .MigrationsAssembly("QaAutomation.Migrations.Npgsql"));
+            else
+                o.UseSqlite(connectionString).AddInterceptors(SqliteBusyTimeoutInterceptor.Instance);
+        });
+
+        // Full-text search provider — MUST match the DB provider (SQLite fts5/bm25 vs Postgres tsvector/ts_rank).
+        // Stateless singletons; they operate on whichever QaDbContext the caller passes.
+        services.AddSingleton<ITextSearchProvider>(
+            provider == DatabaseProvider.Postgres ? new PostgresFtsSearch() : new SqliteFts5Search());
+
         services.AddScoped<DatabaseInitializer>();
         services.AddScoped<LeadsScanSeeder>();
         services.AddScoped<SchemaExplorer.SchemaScanService>();   // DB Schema Explorer repo scanner (read-only)

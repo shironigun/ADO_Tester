@@ -1,13 +1,12 @@
-using System.Data;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using QaAutomation.Core.Abstractions;
 using QaAutomation.Core.Models;
 using QaAutomation.Infrastructure.Data;
+using QaAutomation.Infrastructure.TextSearch;
 
 namespace QaAutomation.Infrastructure.ExistingTests;
 
@@ -29,16 +28,16 @@ public sealed class ExistingTestsIndexService : IExistingTestsIndexService
         "how","where","who","user","test","check","ensure","confirm"
     };
 
-    [GeneratedRegex("[A-Za-z0-9_]+")]
-    private static partial Regex TokenRegex();
-
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IAzureDevOpsClient _ado;
+    private readonly ITextSearchProvider _textSearch;
 
-    public ExistingTestsIndexService(IServiceScopeFactory scopeFactory, IAzureDevOpsClient ado)
+    public ExistingTestsIndexService(
+        IServiceScopeFactory scopeFactory, IAzureDevOpsClient ado, ITextSearchProvider textSearch)
     {
         _scopeFactory = scopeFactory;
         _ado = ado;
+        _textSearch = textSearch;
     }
 
     public async Task<TestPlanScan> EnsureIndexAsync(int planId, int? suiteId, bool forceRescan, CancellationToken ct)
@@ -90,8 +89,7 @@ public sealed class ExistingTestsIndexService : IExistingTestsIndexService
             db.TestPlanScans.RemoveRange(oldScans);
             await db.SaveChangesAsync(ct);
             foreach (var sid in oldIds)
-                await db.Database.ExecuteSqlRawAsync(
-                    "DELETE FROM test_case_index WHERE scan_id = {0}", [sid], ct);
+                await _textSearch.DeleteTestCasesForScanAsync(db, sid, ct);
         }
 
         // Insert new scan.
@@ -119,13 +117,11 @@ public sealed class ExistingTestsIndexService : IExistingTestsIndexService
         }
         await db.SaveChangesAsync(ct);
 
-        // Populate FTS5.
+        // Populate the full-text index (provider-specific store).
         var entries = await db.ExistingTestCaseIndexEntries
             .Where(e => e.ScanId == scan.Id).ToListAsync(ct);
         foreach (var e in entries)
-            await db.Database.ExecuteSqlRawAsync(
-                "INSERT INTO test_case_index(title, steps_summary, scan_id, entry_id) VALUES ({0},{1},{2},{3})",
-                [e.Title, e.StepsSummary ?? "", scan.Id, e.Id], ct);
+            await _textSearch.IndexTestCaseAsync(db, scan.Id, e.Id, e.Title, e.StepsSummary ?? "", ct);
 
         return scan;
     }
@@ -167,27 +163,23 @@ public sealed class ExistingTestsIndexService : IExistingTestsIndexService
         foreach (var e in entries)
             sb.AppendLine($"- [{e.AdoTestCaseId}] {e.Title}");
 
-        // FTS-ranked full steps for the most relevant cases.
+        // Provider-ranked full steps for the most feature-relevant cases (SQLite rank / Postgres ts_rank).
         if (analysis is not null)
         {
             var feature = $"{analysis.Module} {analysis.Feature}";
-            var matchExpr = BuildMatchExpression(feature);
-            if (matchExpr is not null)
+            var relevant = await _textSearch.SearchTestCaseEntryIdsAsync(db, scan.Id, feature, 10, ct);
+            if (relevant.Count > 0)
             {
-                var relevant = await GetFtsEntryIdsAsync(db, scan.Id, matchExpr, 10, ct);
-                if (relevant.Count > 0)
+                var byId = entries.ToDictionary(e => e.Id);
+                sb.AppendLine();
+                sb.AppendLine("### Most relevant existing cases (full steps):");
+                foreach (var eid in relevant)
                 {
-                    var byId = entries.ToDictionary(e => e.Id);
+                    if (!byId.TryGetValue(eid, out var r)) continue;
+                    sb.AppendLine($"#### [{r.AdoTestCaseId}] {r.Title}");
+                    if (!string.IsNullOrEmpty(r.StepsSummary))
+                        sb.AppendLine(r.StepsSummary);
                     sb.AppendLine();
-                    sb.AppendLine("### Most relevant existing cases (full steps):");
-                    foreach (var eid in relevant)
-                    {
-                        if (!byId.TryGetValue(eid, out var r)) continue;
-                        sb.AppendLine($"#### [{r.AdoTestCaseId}] {r.Title}");
-                        if (!string.IsNullOrEmpty(r.StepsSummary))
-                            sb.AppendLine(r.StepsSummary);
-                        sb.AppendLine();
-                    }
                 }
             }
         }
@@ -247,50 +239,6 @@ public sealed class ExistingTestsIndexService : IExistingTestsIndexService
         }
 
         return results;
-    }
-
-    private static async Task<List<int>> GetFtsEntryIdsAsync(
-        QaDbContext db, int scanId, string matchExpr, int top, CancellationToken ct)
-    {
-        var conn = (SqliteConnection)db.Database.GetDbConnection();
-        var mustClose = conn.State != ConnectionState.Open;
-        if (mustClose) await conn.OpenAsync(ct);
-        try
-        {
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText =
-                """
-                SELECT entry_id
-                FROM test_case_index
-                WHERE test_case_index MATCH $q AND scan_id = $sid
-                ORDER BY rank
-                LIMIT $top
-                """;
-            cmd.Parameters.Add(new SqliteParameter("$q", matchExpr));
-            cmd.Parameters.Add(new SqliteParameter("$sid", scanId));
-            cmd.Parameters.Add(new SqliteParameter("$top", top));
-            var ids = new List<int>();
-            await using var reader = await cmd.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
-                ids.Add(Convert.ToInt32(reader.GetValue(0)));
-            return ids;
-        }
-        catch { return []; }
-        finally { if (mustClose) await conn.CloseAsync(); }
-    }
-
-    private static string? BuildMatchExpression(string query)
-    {
-        var seen = new HashSet<string>();
-        var unique = new List<string>();
-        foreach (Match m in TokenRegex().Matches(query))
-        {
-            var token = m.Value;
-            if (token.Length <= 1) continue;
-            if (seen.Add(token)) unique.Add(token);
-            if (unique.Count >= 20) break;
-        }
-        return unique.Count == 0 ? null : string.Join(" OR ", unique.Select(t => $"\"{t}\""));
     }
 
     private static string NormalizeTitle(string title)
