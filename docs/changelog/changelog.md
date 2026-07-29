@@ -6,6 +6,13 @@ Newest entries first.
 
 ## 2026-07-29
 
+### feat(qa-runs): Cancel + delete for QA Loop run entries
+Each run entry on the QA Runs board can now be cancelled while in-flight and deleted once terminal.
+- **Backend:** `POST /api/qaloop/runs/{runId}/cancel` — signals a run-scoped `CancellationToken` (new `RunCancellationRegistry` singleton, keyed by run id so it can't collide with session ids) that kills the Playwright child process; `RunExecutionService` then marks the run `Cancelled`. Orphaned runs (no live token) are flipped to `Cancelled` directly. Rejects a terminal run with 409.
+- **Backend:** `DELETE /api/qaloop/runs/{runId}` — removes the run row + its `TestFailure` records and best-effort deletes the on-disk artifact directory (`IPlaywrightRunner.DeleteRunArtifacts`). Refuses an in-flight run with 409 (cancel first).
+- The `Start` background task now runs under the registered token (previously uncancellable). Existing cancel plumbing (`PlaywrightRunner` process-tree kill, `ExecuteAsync` `OperationCanceledException` handler) was already in place — only the token wiring + endpoints were missing.
+- **Frontend:** QA Runs table row shows a **Cancel** button (in-flight) or **Delete** button (terminal); a Cancel-run button also appears in the run drawer; delete goes through a confirmation dialog. Verified end-to-end against PostgreSQL (start → terminal → cancel-guard 409 → delete 204 → gone) plus the browser delete flow.
+
 ### feat(qlv2): QA Loop v2 Slab 2 — UI Testing Phase (COMPLETE)
 All 8 tasks (QLV2-201..208) VERIFIED. See [`docs/features/qa-loop-ui-phase.md`](features/qa-loop-ui-phase.md) for details.
 - **DB:** 4 new columns — `ApiTestSessions.HasUiPhase/UiStatus`; `ApiTestDrafts.DraftKind/Bucket`. `ApiDraftKind` + `ApiUiStatus` enums. SQLite + Npgsql migrations applied.

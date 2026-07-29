@@ -15,9 +15,14 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Single data root: <backend>/data — the API project sits at <backend>/src/QaAutomation.Api, so
 // ../../data resolves to the backend's own data folder (name-independent). Holds the SQLite DB, KB
-// uploads, and report HTML, so everything lives under one folder. Override the DB via Storage:DatabasePath
-// (env: Storage__DatabasePath); relative overrides resolve against the content root.
-var dataDir = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data"));
+// uploads, and report HTML, so everything lives under one folder. For containerized/hosted deploys
+// (where ../../data doesn't map to a mounted volume) set Storage__DataDirectory to an absolute path
+// (e.g. /app/data); a relative override resolves against the content root. Override the DB file via
+// Storage:DatabasePath (env: Storage__DatabasePath); relative overrides resolve against the content root.
+var configuredDataDir = builder.Configuration["Storage:DataDirectory"];
+var dataDir = string.IsNullOrWhiteSpace(configuredDataDir)
+    ? Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data"))
+    : Path.GetFullPath(configuredDataDir, builder.Environment.ContentRootPath);
 var configuredDbPath = builder.Configuration["Storage:DatabasePath"];
 var dbPath = string.IsNullOrWhiteSpace(configuredDbPath)
     ? Path.Combine(dataDir, "qa.db")

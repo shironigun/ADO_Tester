@@ -14,6 +14,8 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import OpenInFullIcon from '@mui/icons-material/OpenInFull'
 import CloseFullscreenIcon from '@mui/icons-material/CloseFullscreen'
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty'
+import StopCircleIcon from '@mui/icons-material/StopCircle'
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined'
 import AgentConsole from '../components/AgentConsole'
 import { useQuery } from '@tanstack/react-query'
 import PageHeader from '../components/PageHeader'
@@ -25,6 +27,7 @@ import type { WorkItemOption } from '../session/types'
 import type { ConsoleEvent } from '../hooks/useEventStream'
 import {
   startRun, listRunsPage, getRunDetail, triage, fileBugs, runStreamUrl, getRunFacets, getRunImpact,
+  cancelRun, deleteRun,
   type TestRunSummary, type TestRunDetail, type TestFailureDto, type RunImpactTest,
 } from '../api/qaRuns'
 import { PROJECT_ID } from '../config/env'
@@ -283,6 +286,7 @@ function RunDrawer({ run, adoBaseUrl, onClose }: { run: TestRunSummary; adoBaseU
   const [storyOpts, setStoryOpts] = useState<WorkItemOption[]>([])
   const [triaging, setTriaging] = useState(false)
   const [filing, setFiling] = useState(false)
+  const [canceling, setCanceling] = useState(false)
   const [error, setError] = useState('')
   const [fullscreen, setFullscreen] = useState(false)
   const [fileDialogOpen, setFileDialogOpen] = useState(false)
@@ -309,6 +313,12 @@ function RunDrawer({ run, adoBaseUrl, onClose }: { run: TestRunSummary; adoBaseU
     try { await fileBugs(run.id, { failureIds: [...selectedIds], storyId: story?.id }); detailQ.refetch(); setSelectedIds(new Set()) }
     catch (err) { setError(axiosMessage(err)) }
     finally { setFiling(false) }
+  }
+  async function doCancel() {
+    setCanceling(true); setError('')
+    try { await cancelRun(run.id); detailQ.refetch() }
+    catch (err) { setError(axiosMessage(err)) }
+    finally { setCanceling(false) }
   }
 
   const failures = detail?.failures ?? []
@@ -357,6 +367,14 @@ function RunDrawer({ run, adoBaseUrl, onClose }: { run: TestRunSummary; adoBaseU
           </Stack>
           <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: 'wrap' }}>
             {adoRunUrl && <Button size="small" startIcon={<OpenInNewIcon />} href={adoRunUrl} target="_blank" rel="noopener">ADO Test Run</Button>}
+            {/* Cancel a still-running run — kills the Playwright process and marks it Cancelled. */}
+            {isInFlight && (
+              <Button size="small" color="warning" variant="outlined" disabled={canceling}
+                startIcon={canceling ? <CircularProgress size={14} /> : <StopCircleIcon />}
+                onClick={doCancel}>
+                Cancel run
+              </Button>
+            )}
             {/* Gate on liveStatus (from fresh detail poll) — not the stale run prop — so the
                 buttons appear as soon as the run finishes without waiting for the list to refresh. */}
             {!isInFlight && !detailQ.isLoading && (
@@ -513,6 +531,9 @@ export default function QaRunsPage() {
   const [launchError, setLaunchError] = useState('')
   const [page, setPage]       = useState(0)
   const [selectedRun, setSelectedRun] = useState<TestRunSummary | null>(null)
+  const [busyRunId, setBusyRunId] = useState<number | null>(null)
+  const [rowError, setRowError] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState<TestRunSummary | null>(null)
 
   const facetsQ = useQuery({ queryKey: ['qa-run-facets'], queryFn: getRunFacets })
   const facets = facetsQ.data
@@ -541,6 +562,27 @@ export default function QaRunsPage() {
       runsQ.refetch()
     } catch (err) { setLaunchError(axiosMessage(err)) }
     finally { setLaunching(false) }
+  }
+
+  async function doCancelRow(id: number) {
+    setBusyRunId(id); setRowError('')
+    try { await cancelRun(id); runsQ.refetch() }
+    catch (err) { setRowError(axiosMessage(err)) }
+    finally { setBusyRunId(null) }
+  }
+
+  async function doDeleteConfirmed() {
+    const target = confirmDelete
+    if (!target) return
+    setBusyRunId(target.id); setRowError('')
+    try {
+      await deleteRun(target.id)
+      if (selectedRun?.id === target.id) setSelectedRun(null)  // close drawer if the deleted run is open
+      setConfirmDelete(null)
+      runsQ.refetch()
+    }
+    catch (err) { setRowError(axiosMessage(err)) }
+    finally { setBusyRunId(null) }
   }
 
   return (
@@ -583,6 +625,7 @@ export default function QaRunsPage() {
         </Card>
 
         {/* History */}
+        {rowError && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setRowError('')}>{rowError}</Alert>}
         {runs.length === 0 && !runsQ.isLoading
           ? <EmptyState icon={<PlayArrowIcon />} title="No runs yet" hint="Launch a run above." />
           : (
@@ -611,8 +654,31 @@ export default function QaRunsPage() {
                     <TableCell align="right">{r.failed > 0 ? <Chip size="small" label={r.failed} color="error" /> : r.failed}</TableCell>
                     <TableCell>{fmtDuration(r.durationMs)}</TableCell>
                     <TableCell>{fmtDate(r.startedAt)}</TableCell>
-                    <TableCell>
-                      {r.failed > 0 && <Tooltip title="View failures"><BugReportIcon fontSize="small" color="error" /></Tooltip>}
+                    {/* stopPropagation so clicking an action doesn't also open the run drawer */}
+                    <TableCell align="right" onClick={e => e.stopPropagation()}>
+                      <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end', alignItems: 'center' }}>
+                        {r.failed > 0 && <Tooltip title="Has failures"><BugReportIcon fontSize="small" color="error" /></Tooltip>}
+                        {IN_FLIGHT.includes(r.status)
+                          ? (
+                            <Tooltip title="Cancel run">
+                              <span>
+                                <IconButton size="small" color="warning" disabled={busyRunId === r.id}
+                                  onClick={() => doCancelRow(r.id)}>
+                                  {busyRunId === r.id ? <CircularProgress size={16} /> : <StopCircleIcon fontSize="small" />}
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          ) : (
+                            <Tooltip title="Delete run">
+                              <span>
+                                <IconButton size="small" disabled={busyRunId === r.id}
+                                  onClick={() => setConfirmDelete(r)}>
+                                  <DeleteOutlineIcon fontSize="small" />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          )}
+                      </Stack>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -629,6 +695,24 @@ export default function QaRunsPage() {
         )}
       </Box>
       {selectedRun && <RunDrawer run={selectedRun} adoBaseUrl={facets?.adoBaseUrl} onClose={() => setSelectedRun(null)} />}
+
+      <Dialog open={confirmDelete !== null} onClose={() => busyRunId === null && setConfirmDelete(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Delete run #{confirmDelete?.id}?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            This permanently removes the run, its failure records, and its report/artifacts from disk.
+            Any bugs already filed to ADO are unaffected. This cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button disabled={busyRunId !== null} onClick={() => setConfirmDelete(null)}>Cancel</Button>
+          <Button variant="contained" color="error" disabled={busyRunId !== null}
+            startIcon={busyRunId !== null ? <CircularProgress size={16} /> : <DeleteOutlineIcon />}
+            onClick={doDeleteConfirmed}>
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }

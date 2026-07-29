@@ -92,6 +92,17 @@ export async function getRunDetail(id: number): Promise<TestRunDetail> {
   return data
 }
 
+// Cancel an in-flight (Queued/Running) run — kills the Playwright child process and marks it Cancelled.
+export async function cancelRun(id: number): Promise<{ cancelled: boolean }> {
+  const { data } = await api.post<{ cancelled: boolean }>(`/api/qaloop/runs/${id}/cancel`)
+  return data
+}
+
+// Delete a terminal run (row + failures + on-disk artifacts). 409s if the run is still in-flight.
+export async function deleteRun(id: number): Promise<void> {
+  await api.delete(`/api/qaloop/runs/${id}`)
+}
+
 export async function triage(runId: number): Promise<{ triagedCount: number; realBugCount: number; failures: TestFailureDto[] }> {
   const { data } = await api.post(`/api/qaloop/runs/${runId}/triage`)
   return data

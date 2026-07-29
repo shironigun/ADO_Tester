@@ -6,9 +6,10 @@ namespace QaAutomation.Infrastructure.Orchestrators;
 /// Per-session cancellation tokens for in-flight background pipelines (spec B5 — replaces the Python
 /// <c>dict[int, asyncio.Task]</c> registry with <c>ConcurrentDictionary&lt;int, CancellationTokenSource&gt;</c>).
 /// A token registered before the pipeline awaits the concurrency gate also cancels a still-queued child.
-/// Singleton.
+/// Singleton. Not sealed so a distinct keyspace (e.g. <see cref="RunCancellationRegistry"/>) can be a
+/// separate singleton instance without sharing this one's session-keyed dictionary.
 /// </summary>
-public sealed class CancellationRegistry
+public class CancellationRegistry
 {
     private readonly ConcurrentDictionary<int, CancellationTokenSource> _registry = new();
 

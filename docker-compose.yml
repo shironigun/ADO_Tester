@@ -1,29 +1,71 @@
-# Local PostgreSQL for ADO_Tester development (dual-provider migration).
-# Usage:
-#   docker compose up -d          # start Postgres on localhost:5432
-#   docker compose down           # stop (data kept in the named volume)
-#   docker compose down -v        # stop AND wipe the data volume
-# Then set in .env:
-#   DATABASE_PROVIDER=postgres
-#   POSTGRES_CONNECTION_STRING=Host=localhost;Port=5432;Database=qa;Username=qa;Password=qa
-# SQLite stays the default when DATABASE_PROVIDER is unset. See docs/setup/postgresql-docker.md.
+# ADO_Tester full-stack deployment: PostgreSQL + .NET backend + React frontend.
+#
+#   docker compose up -d --build      # build images and start the stack
+#   docker compose logs -f backend    # tail backend logs
+#   docker compose down               # stop (data kept in named volumes)
+#   docker compose down -v            # stop AND wipe DB + KB/reports + Claude login
+#
+# Open the app at  http://localhost:8080  (frontend → proxies /api → backend → postgres).
+#
+# Secrets/config come from the repo-root .env (ADOACCESS_PAT, ADO_ORGANIZATION, prompt
+# identity, provider keys, …). Copy .env.example → .env first. The DB settings below OVERRIDE
+# whatever .env says, so the app always targets the postgres container here.
+#
+# LLM provider: the default is the Claude CLI (subscription login, no API key). After the first
+# `docker compose up`, authenticate ONCE — see docs/setup/docker-deploy.md:
+#   docker compose exec backend claude      # follow the prompt, open the URL in a new browser tab
 services:
   postgres:
     image: postgres:16
     container_name: adotester-postgres
     environment:
-      POSTGRES_USER: qa
-      POSTGRES_PASSWORD: qa
-      POSTGRES_DB: qa
+      POSTGRES_USER: ${POSTGRES_USER:-qa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-qa}
+      POSTGRES_DB: ${POSTGRES_DB:-qa}
     ports:
       - "5432:5432"
     volumes:
       - adotester_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U qa -d qa"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-qa} -d ${POSTGRES_DB:-qa}"]
       interval: 5s
       timeout: 3s
       retries: 10
 
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: adotester-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Pull ADO PAT, org/project, prompt identity and provider keys from the repo-root .env …
+    env_file:
+      - .env
+    # … then force the DB target at the container postgres (wins over .env).
+    environment:
+      DATABASE_PROVIDER: postgres
+      POSTGRES_CONNECTION_STRING: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-qa};Username=${POSTGRES_USER:-qa};Password=${POSTGRES_PASSWORD:-qa}"
+      ASPNETCORE_ENVIRONMENT: Production
+    volumes:
+      - adotester_data:/app/data        # SQLite (unused on pg) + KB uploads + generated reports
+      - adotester_claude:/home/appuser  # persisted Claude CLI subscription login
+    # Backend is reachable in-network as http://backend:8080. Host-mapped for Swagger/debugging.
+    ports:
+      - "5250:8080"
+
+  frontend:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: adotester-frontend
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
 volumes:
   adotester_pgdata:
+  adotester_data:
+  adotester_claude:

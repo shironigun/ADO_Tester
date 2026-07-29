@@ -9,6 +9,7 @@ using QaAutomation.Core.Contracts;
 using QaAutomation.Core.Models;
 using QaAutomation.Infrastructure.Agents;
 using QaAutomation.Infrastructure.Data;
+using QaAutomation.Infrastructure.Orchestrators;
 using QaAutomation.Infrastructure.QaRuns;
 
 namespace QaAutomation.Api.Controllers;
@@ -28,16 +29,18 @@ public sealed class QaRunsController : ControllerBase
     private readonly ITeamsNotifier _teams;
     private readonly RunExecutionService _runExec;
     private readonly IPlaywrightRunner _runner;
+    private readonly RunCancellationRegistry _runCancel;
     private readonly ILogger<QaRunsController> _log;
 
     public QaRunsController(
         IServiceScopeFactory scopeFactory, IEventBus bus, IAzureDevOpsClient ado, ILlmClientFactory llmFactory,
         IResultsIngestService ingest, QaDbContext db, IOptions<QaLoopOptions> opts,
         IOptions<AzureDevOpsOptions> adoOpts, ITeamsNotifier teams, RunExecutionService runExec,
-        IPlaywrightRunner runner, ILogger<QaRunsController> log)
+        IPlaywrightRunner runner, RunCancellationRegistry runCancel, ILogger<QaRunsController> log)
     {
         _runExec = runExec;
         _runner = runner;
+        _runCancel = runCancel;
         _scopeFactory = scopeFactory;
         _bus = bus;
         _ado = ado;
@@ -90,13 +93,20 @@ public sealed class QaRunsController : ControllerBase
         await _db.SaveChangesAsync(ct);
 
         var runId = run.Id;
+        // Register a cancellation source keyed by run id so POST {runId}/cancel can signal this
+        // execution (which kills the Playwright child process — see PlaywrightRunner.SpawnAsync).
+        var cts = _runCancel.Register(runId);
         _ = Task.Run(async () =>
         {
             try
             {
                 using var scope = _scopeFactory.CreateScope();
                 var svc = scope.ServiceProvider.GetRequiredService<RunExecutionService>();
-                await svc.ExecuteAsync(runId);
+                await svc.ExecuteAsync(runId, cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // ExecuteAsync already set Status=Cancelled before rethrowing — nothing to do.
             }
             catch (Exception e)
             {
@@ -115,6 +125,10 @@ public sealed class QaRunsController : ControllerBase
                     }
                 }
                 catch { /* best-effort status update */ }
+            }
+            finally
+            {
+                _runCancel.Remove(runId);
             }
         });
 
@@ -153,6 +167,56 @@ public sealed class QaRunsController : ControllerBase
             if (run is null) return StatusCode(404, new { detail = "Run not found." });
             var failures = await _db.TestFailures.Where(f => f.RunId == runId).ToListAsync(ct);
             return Ok(TestRunDetail.From(run, failures));
+        }
+        catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
+    }
+
+    /// <summary>Cancel an in-flight run. Signals the registered token (which kills the Playwright child
+    /// process; ExecuteAsync then marks the run Cancelled). If no live token exists — e.g. the run was
+    /// orphaned by a backend restart — the row is marked Cancelled directly so it can't stay stuck.</summary>
+    [HttpPost("{runId:int}/cancel")]
+    public async Task<IActionResult> Cancel(int runId, CancellationToken ct)
+    {
+        try
+        {
+            var run = await _db.TestRuns.FindAsync([runId], ct);
+            if (run is null) return StatusCode(404, new { detail = "Run not found." });
+            if (run.Status is not (TestRunStatus.Queued or TestRunStatus.Running))
+                return StatusCode(409, new { detail = $"Run is {run.Status} — only a Queued or Running run can be cancelled." });
+
+            var signalled = _runCancel.Cancel(runId);
+            if (!signalled)
+            {
+                // No live execution to signal (orphaned run) — flip the status ourselves.
+                run.Status = TestRunStatus.Cancelled;
+                run.ErrorMessage = "Cancelled by user.";
+                run.FinishedAt = DateTime.UtcNow;
+                await _db.SaveChangesAsync(ct);
+            }
+            return Ok(new CancelResponse { Cancelled = true });
+        }
+        catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
+    }
+
+    /// <summary>Delete a terminal run row plus its failure records and on-disk artifacts. Refuses an
+    /// in-flight run (cancel it first) so we never delete a row whose background task is still writing.</summary>
+    [HttpDelete("{runId:int}")]
+    public async Task<IActionResult> Delete(int runId, CancellationToken ct)
+    {
+        try
+        {
+            var run = await _db.TestRuns.FindAsync([runId], ct);
+            if (run is null) return StatusCode(404, new { detail = "Run not found." });
+            if (run.Status is TestRunStatus.Queued or TestRunStatus.Running)
+                return StatusCode(409, new { detail = "Cancel the run before deleting it." });
+
+            var failures = await _db.TestFailures.Where(f => f.RunId == runId).ToListAsync(ct);
+            _db.TestFailures.RemoveRange(failures);
+            _db.TestRuns.Remove(run);
+            await _db.SaveChangesAsync(ct);
+
+            _runner.DeleteRunArtifacts(runId);   // best-effort disk cleanup (never throws)
+            return NoContent();
         }
         catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
     }

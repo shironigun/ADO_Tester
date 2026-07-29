@@ -145,6 +145,7 @@ public static class DependencyInjection
         services.AddSingleton<IEventBus, EventBus>();
         services.AddSingleton<PipelineConcurrency>();
         services.AddSingleton<CancellationRegistry>();
+        services.AddSingleton<RunCancellationRegistry>();
         services.AddSingleton<ICodeContextService, CodeContextService>();
         services.AddSingleton<IExistingTestsIndexService, ExistingTestsIndexService>();
         services.AddSingleton<IAgentOrchestrator, AgentOrchestrator>();

@@ -1,0 +1,10 @@
+# Build artifacts & local state — never send these into the build context.
+**/bin/
+**/obj/
+data/
+_recovered/
+.venv/
+**/*.user
+.vs/
+Dockerfile
+.dockerignore

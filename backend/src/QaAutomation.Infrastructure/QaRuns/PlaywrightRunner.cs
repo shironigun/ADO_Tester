@@ -172,6 +172,22 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
         return await GenerateAllureReportAsync(runDir, spec, eventKey, ct);
     }
 
+    /// <summary>Best-effort recursive delete of the run's artifact directory (<c>{runsDir}/{runId}</c>).
+    /// Swallows all IO errors — a run row must still be deletable even if its files are gone or locked.</summary>
+    public void DeleteRunArtifacts(int runId)
+    {
+        try
+        {
+            var runDir = Path.Combine(_runsDir, runId.ToString());
+            if (Directory.Exists(runDir))
+                Directory.Delete(runDir, recursive: true);
+        }
+        catch (Exception e)
+        {
+            _log.LogWarning(e, "Failed to delete artifact directory for run {RunId}", runId);
+        }
+    }
+
     // ── Runtime provisioning (once) ──────────────────────────────────────────
 
     private async Task EnsureRuntimeAsync(string eventKey, CancellationToken ct)

@@ -75,4 +75,9 @@ public interface IPlaywrightRunner
     /// allure-results (no Playwright execution, no ADO writes). Null when no results exist.</summary>
     Task<string?> RebuildReportAsync(PlaywrightRunSpec spec, string eventKey,
         CancellationToken ct = default);
+
+    /// <summary>Best-effort delete of a run's on-disk artifact directory (junit, results, allure-results,
+    /// the generated report, test-output). Called when a run row is deleted so nothing is orphaned on disk.
+    /// Never throws — a missing or locked directory is logged and ignored.</summary>
+    void DeleteRunArtifacts(int runId);
 }
