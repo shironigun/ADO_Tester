@@ -106,6 +106,50 @@ public sealed class ModuleAnalyzerAgent
         return ParseAnalysis(module, root, existingCases);
     }
 
+    /// <summary>Refine an existing inventory + surface matrix from reviewer feedback.
+    /// Re-invokes the LLM with the prior outputs + feedback, returning an improved <see cref="ModuleAnalysis"/>.
+    /// System prompt is unchanged (frozen-prompt guardrail).</summary>
+    public async Task<ModuleAnalysis> RefineInventoryAsync(
+        string module, InventoryDoc priorInventory, SurfaceMatrix priorSurface, string feedback,
+        IReadOnlyList<LinkedTestCase> existingCases, string? additionalContext = null,
+        Func<string, CancellationToken, Task<string?>>? fetchFile = null,
+        StreamProgress? progress = null, Action<LlmEmit>? emit = null, CancellationToken ct = default)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"## Refine the **{module}** module analysis.");
+        sb.AppendLine();
+        sb.AppendLine("## Prior inventory JSON");
+        sb.AppendLine(System.Text.Json.JsonSerializer.Serialize(priorInventory));
+        sb.AppendLine();
+        sb.AppendLine("## Prior surfaceMatrix JSON");
+        sb.AppendLine(System.Text.Json.JsonSerializer.Serialize(priorSurface));
+        sb.AppendLine();
+        if (!string.IsNullOrWhiteSpace(additionalContext))
+        {
+            sb.AppendLine("## Additional Context (from tester)");
+            sb.AppendLine(additionalContext.Trim());
+            sb.AppendLine();
+        }
+        sb.AppendLine("## Reviewer Feedback (refine, do NOT restart)");
+        sb.AppendLine(feedback.Trim());
+        sb.AppendLine();
+        sb.AppendLine($"## Existing ADO test cases ({existingCases.Count}) — id, step count, title:");
+        if (existingCases.Count == 0)
+            sb.AppendLine("(none — every surface is a coverage gap)");
+        else
+            foreach (var c in existingCases)
+                sb.AppendLine($"- #{c.Id} [{c.Steps.Count} steps] {c.Title}");
+        sb.AppendLine();
+        sb.AppendLine("Output the improved inventory + surfaceMatrix JSON now.");
+
+        var data = await JsonUtils.CompleteJsonAsync(
+            _llm, AgentPrompts.ModuleAnalyzerSystem, sb.ToString(), '{', progress, emit,
+            label: "ModuleAnalyzer(refine)", cancellationToken: ct);
+        if (data is not JsonObject root)
+            throw new AgentException("Module analyzer refine did not return a JSON object.");
+        return ParseAnalysis(module, root, existingCases);
+    }
+
     // ── Parsers ───────────────────────────────────────────────────────────────
 
     private static ModuleAnalysis ParseAnalysis(
