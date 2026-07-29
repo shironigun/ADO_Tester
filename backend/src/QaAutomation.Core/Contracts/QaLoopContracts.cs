@@ -23,6 +23,8 @@ public sealed class ScanStartRequest
     public int? TestPlanId { get; set; }
     public int? TestSuiteId { get; set; }
     public bool AutoHandoff { get; set; } = false;
+    /// <summary>Free-text at scan start — steers the Analyzer and generators (what to focus on / skip).</summary>
+    public string? AdditionalContext { get; set; }
 }
 
 public sealed class ScanStartResponse
@@ -119,6 +121,26 @@ public sealed class ApiSessionList
     public IReadOnlyList<ApiSessionSummary> Items { get; set; } = [];
 }
 
+/// <summary>Request body for POST /sessions/{id}/rerun-analyze.</summary>
+public sealed class RerunAnalyzeRequest { public string Feedback { get; set; } = ""; }
+
+/// <summary>Per-draft feedback entry for RefineDraftsRequest.</summary>
+public sealed class ApiDraftFeedback { public int DraftId { get; set; }  public string? Feedback { get; set; }  public bool Remove { get; set; } }
+
+/// <summary>Request body for POST /sessions/{id}/refine-drafts.</summary>
+public sealed class RefineDraftsRequest
+{
+    public string? OverallFeedback { get; set; }
+    public List<ApiDraftFeedback> PerDraft { get; set; } = [];
+}
+
+/// <summary>Request body for POST /sessions/{id}/generate-drafts.</summary>
+public sealed class GenerateDraftsRequest
+{
+    /// <summary>Free-text at the Analyze→Generate gate — steers all three generator agents.</summary>
+    public string? GenerateContext { get; set; }
+}
+
 public sealed class ApiSessionDetail
 {
     public int Id { get; set; }
@@ -136,6 +158,9 @@ public sealed class ApiSessionDetail
     public ApiSessionStatus Status { get; set; }
     public string? InventoryJson { get; set; }
     public string? AnalysisJson { get; set; }
+    public string? AdditionalContext { get; set; }
+    public string? GenerateContext { get; set; }
+    public string? LastFeedback { get; set; }
     public string? EventLogJson { get; set; }
     public string? ErrorMessage { get; set; }
     public bool AutoHandoff { get; set; }
@@ -152,6 +177,7 @@ public sealed class ApiSessionDetail
         FrontendModule = s.FrontendModule, FrontendPath = s.FrontendPath, SourceDirsJson = s.SourceDirsJson,
         Status = s.Status,
         InventoryJson = s.InventoryJson, AnalysisJson = s.AnalysisJson, EventLogJson = s.EventLogJson,
+        AdditionalContext = s.AdditionalContext, GenerateContext = s.GenerateContext, LastFeedback = s.LastFeedback,
         ErrorMessage = s.ErrorMessage, AutoHandoff = s.AutoHandoff, ActivityEnabled = s.ActivityEnabled,
         CreatedAt = s.CreatedAt, UpdatedAt = s.UpdatedAt,
         Drafts = drafts.OrderBy(d => d.SortOrder).Select(ApiTestDraftDto.From).ToList(),

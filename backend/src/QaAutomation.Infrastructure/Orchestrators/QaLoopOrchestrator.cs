@@ -160,6 +160,170 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
         return Task.CompletedTask;
     }
 
+    // ── QLV2-107: RefineDrafts ───────────────────────────────────────────────
+
+    public Task RefineDraftsAsync(int sessionId, string? overallFeedback, IReadOnlyList<Core.Contracts.ApiDraftFeedback> perDraft, CancellationToken cancellationToken = default)
+    {
+        Launch(sessionId, ct => RefineDraftsInnerAsync(sessionId, overallFeedback, perDraft, ct));
+        return Task.CompletedTask;
+    }
+
+    private async Task RefineDraftsInnerAsync(int sessionId, string? overallFeedback, IReadOnlyList<Core.Contracts.ApiDraftFeedback> perDraft, CancellationToken ct)
+    {
+        var key = SessionKey(sessionId);
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+        var session = await db.ApiTestSessions.Include(s => s.Drafts).FirstOrDefaultAsync(s => s.Id == sessionId, ct);
+        if (session is null) return;
+
+        try
+        {
+            var llm = await _llmFactory.CreateAsync(ct);
+            var inventory = session.InventoryJson is { Length: > 0 }
+                ? JsonSerializer.Deserialize<InventoryDoc>(session.InventoryJson)
+                  ?? throw new InvalidOperationException("InventoryJson deserialization returned null.")
+                : throw new InvalidOperationException("InventoryJson missing — run Analyze first.");
+
+            session.Status = ApiSessionStatus.Drafting;
+            if (!string.IsNullOrWhiteSpace(overallFeedback)) session.LastFeedback = overallFeedback;
+            session.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+            Pub(key, EventKinds.Phase, EventPhases.Generate, "Refining drafts with feedback");
+
+            var feedbackById = perDraft
+                .Where(f => !string.IsNullOrWhiteSpace(f.Feedback))
+                .ToDictionary(f => f.DraftId, f => f.Feedback!);
+            var removeIds = perDraft
+                .Where(f => f.Remove)
+                .Select(f => f.DraftId)
+                .ToHashSet();
+
+            // Only refine Draft/Rejected rows that have per-test feedback; skip Approved + Pushed
+            var mutableStatuses = new[] { ApiDraftStatus.Draft, ApiDraftStatus.Rejected };
+            var targetedIds = feedbackById.Keys
+                .Where(id => session.Drafts.Any(d => d.Id == id && mutableStatuses.Contains(d.Status)))
+                .ToHashSet();
+
+            var now = DateTime.UtcNow;
+            foreach (var draft in session.Drafts.Where(d => targetedIds.Contains(d.Id)))
+            {
+                var draftFeedback = feedbackById[draft.Id];
+                var combined = string.IsNullOrWhiteSpace(overallFeedback)
+                    ? draftFeedback
+                    : $"{draftFeedback}\n\nOverall: {overallFeedback}";
+                var priorSteps = ParseSteps(draft.StepsJson);
+                GeneratedSpec? refined = null;
+                try
+                {
+                    refined = draft.Level switch
+                    {
+                        TestLevel.Contract => await RefineSingle(
+                            () => MatchRouteForDraft(draft, inventory),
+                            route => new ContractGeneratorAgent(llm).RefineAsync(
+                                session.Module, route, draft.SpecCode, priorSteps, combined,
+                                extraContext: session.GenerateContext,
+                                emit: EmitClosure(key, EventPhases.Generate, session.ActivityEnabled), ct: ct)),
+                        TestLevel.Endpoint => await RefineSingleMulti(
+                            () => MatchRouteForDraft(draft, inventory),
+                            route => new EndpointGeneratorAgent(llm).RefineAsync(
+                                session.Module, route, draft.SpecCode, priorSteps, combined,
+                                extraContext: session.GenerateContext,
+                                emit: EmitClosure(key, EventPhases.Generate, session.ActivityEnabled), ct: ct),
+                            draft.CaseIndex ?? 0),
+                        TestLevel.Workflow => await RefineSingle(
+                            () => MatchWorkflowForDraft(draft, inventory),
+                            wf => new WorkflowGeneratorAgent(llm).RefineAsync(
+                                session.Module, wf, inventory, draft.SpecCode, priorSteps, combined,
+                                extraContext: session.GenerateContext,
+                                emit: EmitClosure(key, EventPhases.Generate, session.ActivityEnabled), ct: ct)),
+                        _ => null,
+                    };
+                }
+                catch (Exception ex)
+                {
+                    _log.LogWarning(ex, "Refine failed for draft {DraftId} — leaving unchanged", draft.Id);
+                    continue;
+                }
+                if (refined is null) continue;
+
+                // Update in place
+                draft.Title = refined.TestCase?.Title ?? refined.Title;
+                draft.SpecCode = refined.SpecCode;
+                draft.StepsJson = refined.TestCase is not null
+                    ? JsonSerializer.Serialize(refined.TestCase.Steps.Select(s => new { action = s.Action, expected = s.Expected }))
+                    : draft.StepsJson;
+                if (refined.SchemaJson is not null) draft.SchemaJson = refined.SchemaJson;
+                // Rewrite disk spec (case 0 or single)
+                if (draft.SpecFilePath is not null && (draft.CaseIndex is null or 0))
+                    try { File.WriteAllText(draft.SpecFilePath, refined.SpecCode); } catch (Exception ex) { _log.LogWarning(ex, "Spec rewrite failed for draft {DraftId}", draft.Id); }
+                draft.UpdatedAt = now;
+                Pub(key, EventKinds.Result, EventPhases.Generate, $"Refined: {draft.Title}");
+            }
+
+            // Remove flagged Draft/Rejected rows (never Approved/Pushed)
+            var toRemove = session.Drafts
+                .Where(d => removeIds.Contains(d.Id) && mutableStatuses.Contains(d.Status))
+                .ToList();
+            db.ApiTestDrafts.RemoveRange(toRemove);
+
+            await db.SaveChangesAsync(ct);
+            session.Status = ApiSessionStatus.Drafted;
+            Pub(key, EventKinds.System, text: "Refine complete", data: Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = now;
+            await db.SaveChangesAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            session.Status = ApiSessionStatus.Cancelled;
+            Pub(key, EventKinds.System, text: "Cancelled by user", level: EventLevels.Warn, data: Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await SafeCommitAsync(db);
+            throw;
+        }
+        catch (Exception e)
+        {
+            _log.LogError(e, "QA Loop refine-drafts failed for session {SessionId}", sessionId);
+            session.Status = ApiSessionStatus.Failed;
+            session.ErrorMessage = e.Message;
+            Pub(key, EventKinds.Error, text: $"Failed: {e.Message}", level: EventLevels.Error, data: Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await SafeCommitAsync(db);
+        }
+    }
+
+    private static RouteInfo? MatchRouteForDraft(ApiTestDraft draft, InventoryDoc inventory)
+    {
+        if (draft.SourceRoutesJson is null) return inventory.Routes.FirstOrDefault();
+        var sources = JsonSerializer.Deserialize<List<string>>(draft.SourceRoutesJson) ?? [];
+        return inventory.Routes.FirstOrDefault(r =>
+            sources.Any(s => string.Equals(s, $"{r.Method} {r.Route}", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static WorkflowInfo? MatchWorkflowForDraft(ApiTestDraft draft, InventoryDoc inventory)
+    {
+        if (draft.SourceRoutesJson is null) return inventory.Workflows.FirstOrDefault();
+        var sources = JsonSerializer.Deserialize<List<string>>(draft.SourceRoutesJson) ?? [];
+        return inventory.Workflows.FirstOrDefault(w =>
+            w.Steps.Any(s => sources.Any(src => string.Equals(src, s.Endpoint, StringComparison.OrdinalIgnoreCase))));
+    }
+
+    private static async Task<GeneratedSpec?> RefineSingle<T>(Func<T?> resolve, Func<T, Task<GeneratedSpec>> refine) where T : class
+    {
+        var item = resolve();
+        return item is null ? null : await refine(item);
+    }
+
+    private static async Task<GeneratedSpec?> RefineSingleMulti(Func<RouteInfo?> resolve, Func<RouteInfo, Task<List<GeneratedSpec>>> refine, int caseIndex)
+    {
+        var route = resolve();
+        if (route is null) return null;
+        var specs = await refine(route);
+        return caseIndex < specs.Count ? specs[caseIndex] : specs.FirstOrDefault();
+    }
+
     /// <summary>Synchronous per-row push. Idempotent: re-push returns if already Pushed.</summary>
     public async Task<ApiTestDraft> PushDraftAsync(int draftId, int testPlanId, int testSuiteId,
         int? storyId = null, CancellationToken cancellationToken = default)

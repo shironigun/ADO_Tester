@@ -35,6 +35,12 @@ public interface IQaLoopOrchestrator
     /// </summary>
     Task RerunAnalyzeAsync(int sessionId, string feedback, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Merges per-draft feedback into existing drafts. Targeted Draft/Rejected rows are refined in place;
+    /// flagged rows are removed; Approved + Pushed rows are never touched.
+    /// </summary>
+    Task RefineDraftsAsync(int sessionId, string? overallFeedback, IReadOnlyList<Core.Contracts.ApiDraftFeedback> perDraft, CancellationToken cancellationToken = default);
+
     /// <summary>Signals the background pipeline for the given session to stop.</summary>
     bool Cancel(int sessionId);
 }
