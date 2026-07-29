@@ -3,7 +3,7 @@
 #   docker compose up -d --build      # build images and start the stack
 #   docker compose logs -f backend    # tail backend logs
 #   docker compose down               # stop (data kept in named volumes)
-#   docker compose down -v            # stop AND wipe DB + KB/reports + Claude login
+#   docker compose down -v            # stop AND wipe DB + KB/reports + Claude/Copilot login
 #
 # Open the app at  http://localhost:8080  (frontend → proxies /api → backend → postgres).
 #
@@ -11,9 +11,13 @@
 # identity, provider keys, …). Copy .env.example → .env first. The DB settings below OVERRIDE
 # whatever .env says, so the app always targets the postgres container here.
 #
-# LLM provider: the default is the Claude CLI (subscription login, no API key). After the first
-# `docker compose up`, authenticate ONCE — see docs/setup/docker-deploy.md:
-#   docker compose exec backend claude      # follow the prompt, open the URL in a new browser tab
+# LLM providers: two CLI providers are installed in the backend image (no API key needed).
+#
+#   Claude CLI (default) — authenticate once after first `docker compose up`:
+#     docker compose exec backend claude      # follow the prompt, open the URL in a new browser tab
+#
+#   GitHub Copilot CLI — authenticate once, then switch provider in the app AppBar:
+#     docker compose exec backend copilot auth login   # follow the device-flow prompt
 services:
   postgres:
     image: postgres:16
@@ -50,7 +54,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
     volumes:
       - adotester_data:/app/data        # SQLite (unused on pg) + KB uploads + generated reports
-      - adotester_claude:/home/appuser  # persisted Claude CLI subscription login
+      - adotester_claude:/home/appuser  # persisted Claude CLI + GitHub Copilot CLI subscription logins
     # Backend is reachable in-network as http://backend:8080. Host-mapped for Swagger/debugging.
     ports:
       - "5250:8080"

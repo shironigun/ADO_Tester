@@ -5,7 +5,7 @@ Runs the whole app as three containers on one machine:
 | Service    | Image (built from) | Container port | Host port | Role |
 | ---------- | ------------------ | -------------- | --------- | ---- |
 | `frontend` | `client/Dockerfile` (nginx) | 80 | **8080** | Serves the SPA, reverse-proxies `/api` → backend |
-| `backend`  | `backend/Dockerfile` (.NET 8 + Claude CLI) | 8080 | 5250 | The API / agent pipelines |
+| `backend`  | `backend/Dockerfile` (.NET 8 + Claude CLI + Copilot CLI) | 8080 | 5250 | The API / agent pipelines |
 | `postgres` | `postgres:16` | 5432 | 5432 | Database |
 
 The browser only talks to the **frontend** origin, so requests are same-origin (no CORS). You open
@@ -26,9 +26,9 @@ The browser only talks to the **frontend** origin, so requests are same-origin (
 docker compose up -d --build
 ```
 
-First build compiles the .NET API and the Vite bundle and installs the Claude CLI into the backend
-image, so it takes a few minutes. Postgres comes up first (compose waits for its healthcheck), then the
-backend migrates/creates the schema on start, then the frontend.
+First build compiles the .NET API and the Vite bundle and installs the Claude CLI and the GitHub
+Copilot CLI into the backend image, so it takes a few minutes. Postgres comes up first (compose waits
+for its healthcheck), then the backend migrates/creates the schema on start, then the frontend.
 
 Check everything is healthy:
 
@@ -64,7 +64,23 @@ Verify from the app: **Diagnostics** page → the Claude CLI provider should sho
 > (Anthropic / Azure OpenAI / an OpenAI-compatible gateway) — set that provider's key in `.env` and
 > restart the backend (`docker compose restart backend`).
 
-## 4. Everyday commands
+## 4. Log in to GitHub Copilot CLI (one time, optional) — no API key needed
+
+The **GitHub Copilot CLI** is also installed in the backend image. You only need this if you want to
+use the **CopilotCli** provider (switchable in the AppBar). It uses your **GitHub Copilot subscription**.
+
+```powershell
+docker compose exec backend copilot auth login
+```
+
+- Follow the device-flow prompt: visit the printed URL, enter the code, and approve in GitHub.
+- Credentials are stored under `$HOME/.config/github-copilot` inside the container and persist on the
+  same `adotester_claude` volume as the Claude login.
+
+Verify: `docker compose exec backend copilot --version`. Then switch the provider in the app AppBar to
+**CopilotCli** and run a generation.
+
+## 5. Everyday commands
 
 ```powershell
 docker compose logs -f backend            # tail backend logs
@@ -74,16 +90,16 @@ docker compose down                       # stop; DB + KB/reports + Claude login
 docker compose down -v                    # stop AND wipe all volumes (fresh start)
 ```
 
-## 5. Data & persistence
+## 6. Data & persistence
 
 Three named volumes survive `docker compose down` (removed only by `down -v`):
 
 - `adotester_pgdata` — PostgreSQL data.
 - `adotester_data` — mounted at `/app/data`: KB uploads and generated report HTML (SQLite too, though
   unused when on Postgres).
-- `adotester_claude` — mounted at `/home/appuser`: the Claude CLI subscription login.
+- `adotester_claude` — mounted at `/home/appuser`: Claude CLI **and** GitHub Copilot CLI subscription logins.
 
-## 6. Configuration reference
+## 7. Configuration reference
 
 `docker-compose.yml` loads the repo-root `.env` into the backend container (`env_file`) and then
 overrides the database settings so the app always targets the bundled Postgres:
@@ -96,13 +112,14 @@ POSTGRES_CONNECTION_STRING: Host=postgres;Port=5432;Database=qa;Username=qa;Pass
 Override the DB name/user/password by exporting `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD`
 before `docker compose up` (they flow into both the Postgres container and the connection string).
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 | Symptom | Fix |
 | --- | --- |
 | `env file .env not found` | Create it: `Copy-Item .env.example .env`, then fill in `ADOACCESS_PAT`. |
 | Frontend loads but every call 502s | Backend isn't up yet or crashed — `docker compose logs backend`. It waits for Postgres to be healthy first. |
 | LLM calls fail with "Claude CLI not found" / auth error | Run the login in step 3; confirm `docker compose exec backend claude --version` works and the `adotester_claude` volume is mounted. |
+| LLM calls fail with "Copilot CLI not found" / auth error | Run the login in step 4; confirm `docker compose exec backend copilot --version` works. |
 | LLM calls fail with "Invalid API key" | A real/placeholder `ANTHROPIC_API_KEY` in `.env` shouldn't matter (the CLI child strips it), but if you switched the provider to Anthropic, set a valid key or switch back to Claude CLI. |
 | Live agent console shows nothing (SSE) | Confirm you're hitting the app via the **frontend** (`:8080`), not the backend directly — nginx is configured to stream `/api` without buffering. |
 | Port 8080/5250/5432 already in use | Change the left-hand host port in `docker-compose.yml` (e.g. `"8090:80"`). |

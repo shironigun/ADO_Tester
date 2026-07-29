@@ -35,12 +35,12 @@ RUN apt-get update \
 
 # Node.js 20 pulled from the official Node image. aspnet:8.0 and node:20 share the
 # Debian "bookworm" base, so the copied runtime is ABI-compatible. Then install the
-# Claude CLI globally (lands on PATH as /usr/local/bin/claude).
+# Claude CLI and GitHub Copilot CLI globally (land on PATH under /usr/local/bin).
 COPY --from=node:20-bookworm-slim /usr/local/bin/node             /usr/local/bin/node
 COPY --from=node:20-bookworm-slim /usr/local/lib/node_modules     /usr/local/lib/node_modules
 RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
-    && npm install -g @anthropic-ai/claude-code \
+    && npm install -g @anthropic-ai/claude-code @github/copilot \
     && npm cache clean --force
 
 # HOME must be stable + writable so the Claude CLI can persist its subscription
@@ -50,6 +50,7 @@ RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 # the mounted data volume (see Program.cs).
 ENV HOME=/home/appuser \
     CLAUDE_CLI_PATH=claude \
+    COPILOT_CLI_PATH=copilot \
     Storage__DataDirectory=/app/data \
     ASPNETCORE_URLS=http://+:8080 \
     ASPNETCORE_ENVIRONMENT=Production
