@@ -29,6 +29,12 @@ public interface IQaLoopOrchestrator
     Task<Core.Models.ApiTestDraft> PushDraftAsync(int draftId, int testPlanId, int testSuiteId,
         int? storyId = null, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Re-runs the Analyzer on the existing inventory + surface with reviewer feedback,
+    /// improving the analysis in place. Session returns to AwaitingReview.
+    /// </summary>
+    Task RerunAnalyzeAsync(int sessionId, string feedback, CancellationToken cancellationToken = default);
+
     /// <summary>Signals the background pipeline for the given session to stop.</summary>
     bool Cancel(int sessionId);
 }

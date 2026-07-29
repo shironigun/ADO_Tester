@@ -74,6 +74,83 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
         return Task.CompletedTask;
     }
 
+    // ── QLV2-106: RerunAnalyze ───────────────────────────────────────────────
+
+    public Task RerunAnalyzeAsync(int sessionId, string feedback, CancellationToken cancellationToken = default)
+    {
+        Launch(sessionId, ct => RerunAnalyzeInnerAsync(sessionId, feedback, ct));
+        return Task.CompletedTask;
+    }
+
+    private async Task RerunAnalyzeInnerAsync(int sessionId, string feedback, CancellationToken ct)
+    {
+        var key = SessionKey(sessionId);
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+
+        var session = await db.ApiTestSessions.FindAsync([sessionId], ct);
+        if (session is null) return;
+
+        try
+        {
+            var llm = await _llmFactory.CreateAsync(ct);
+
+            var priorInventory = session.InventoryJson is { Length: > 0 }
+                ? JsonSerializer.Deserialize<InventoryDoc>(session.InventoryJson)
+                  ?? throw new InvalidOperationException("InventoryJson deserialization returned null.")
+                : throw new InvalidOperationException("InventoryJson missing — run Analyze first.");
+            var priorSurface = session.AnalysisJson is { Length: > 0 }
+                ? JsonSerializer.Deserialize<SurfaceMatrix>(session.AnalysisJson)
+                  ?? throw new InvalidOperationException("AnalysisJson deserialization returned null.")
+                : throw new InvalidOperationException("AnalysisJson missing — run Analyze first.");
+
+            session.Status = ApiSessionStatus.Analyzing;
+            session.LastFeedback = feedback;
+            session.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+
+            Pub(key, EventKinds.Phase, EventPhases.Analyze, "Module analyzer refine started");
+
+            var existingCases = await _ado.GetLinkedTestCasesAsync(session.WorkItemId ?? 0, ct);
+            var analysis = await new ModuleAnalyzerAgent(llm).RefineInventoryAsync(
+                session.Module, priorInventory, priorSurface, feedback, existingCases,
+                additionalContext: session.AdditionalContext,
+                emit: EmitClosure(key, EventPhases.Analyze, session.ActivityEnabled), ct: ct);
+
+            // Re-apply gap-selected default
+            foreach (var row in analysis.Surface.Rows)
+                row.Selected = row.Status == "gap";
+
+            session.InventoryJson = JsonSerializer.Serialize(analysis.Inventory);
+            session.AnalysisJson = JsonSerializer.Serialize(analysis.Surface);
+            session.Status = ApiSessionStatus.AwaitingReview;
+            Pub(key, EventKinds.System, EventPhases.Analyze,
+                "Analyzer refine done — awaiting surface review", data: Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            session.Status = ApiSessionStatus.Cancelled;
+            Pub(key, EventKinds.System, text: "Cancelled by user", level: EventLevels.Warn, data: Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await SafeCommitAsync(db);
+            throw;
+        }
+        catch (Exception e)
+        {
+            _log.LogError(e, "QA Loop rerun-analyze failed for session {SessionId}", sessionId);
+            session.Status = ApiSessionStatus.Failed;
+            session.ErrorMessage = e.Message;
+            Pub(key, EventKinds.Error, text: $"Failed: {e.Message}", level: EventLevels.Error, data: Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await SafeCommitAsync(db);
+        }
+    }
+
     // ── QAL-023: Push / PushDraft ────────────────────────────────────────────
 
     public Task PushAllAsync(int sessionId, int testPlanId, int testSuiteId, int? storyId = null,
