@@ -404,7 +404,8 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
             allTasks.Add(Gated(async () =>
             {
                 var spec = await new ContractGeneratorAgent(llm).GenerateAsync(
-                    session.Module, route, emit: EmitClosure(key, EventPhases.Generate, session.ActivityEnabled), ct: ct);
+                    session.Module, route, extraContext: session.GenerateContext,
+                    emit: EmitClosure(key, EventPhases.Generate, session.ActivityEnabled), ct: ct);
                 return new List<GeneratedSpec> { spec };
             }));
         }
@@ -414,7 +415,8 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
             var route = r;
             allTasks.Add(Gated(async () =>
                 (List<GeneratedSpec>?) await new EndpointGeneratorAgent(llm).GenerateAsync(
-                    session.Module, route, emit: EmitClosure(key, EventPhases.Generate, session.ActivityEnabled), ct: ct)));
+                    session.Module, route, extraContext: session.GenerateContext,
+                    emit: EmitClosure(key, EventPhases.Generate, session.ActivityEnabled), ct: ct)));
         }
 
         foreach (var w in workflowItems)
@@ -423,7 +425,8 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
             allTasks.Add(Gated(async () =>
             {
                 var spec = await new WorkflowGeneratorAgent(llm).GenerateAsync(
-                    session.Module, workflow, analysis.Inventory, emit: EmitClosure(key, EventPhases.Generate, session.ActivityEnabled), ct: ct);
+                    session.Module, workflow, analysis.Inventory, extraContext: session.GenerateContext,
+                    emit: EmitClosure(key, EventPhases.Generate, session.ActivityEnabled), ct: ct);
                 return new List<GeneratedSpec> { spec };
             }));
         }
