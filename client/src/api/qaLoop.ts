@@ -21,6 +21,7 @@ export interface ScanStartRequest {
   testPlanId?: number
   testSuiteId?: number
   autoHandoff?: boolean
+  additionalContext?: string
 }
 
 // A product frontend module discovered from the SPA route file (QaLoopController /frontend-modules).
@@ -66,6 +67,9 @@ export interface ApiSessionDetail extends SessionDetail {
   testSuiteId?: number | null
   inventoryJson?: string | null
   activityEnabled: boolean
+  additionalContext?: string | null
+  generateContext?: string | null
+  lastFeedback?: string | null
 }
 
 export interface ApiTestDraftDto {
@@ -124,8 +128,25 @@ export async function saveAnalysis(id: number, module: string, rows: SurfaceRow[
   await api.patch(`/api/qaloop/sessions/${id}/analysis`, { module, rows })
 }
 
-export async function generateDrafts(id: number): Promise<void> {
-  await api.post(`/api/qaloop/sessions/${id}/generate-drafts`)
+export async function generateDrafts(id: number, generateContext?: string): Promise<void> {
+  await api.post(`/api/qaloop/sessions/${id}/generate-drafts`, generateContext ? { generateContext } : {})
+}
+
+export async function rerunAnalyze(id: number, feedback: string): Promise<void> {
+  await api.post(`/api/qaloop/sessions/${id}/rerun-analyze`, { feedback })
+}
+
+export interface ApiDraftFeedback {
+  draftId: number
+  feedback?: string
+  remove?: boolean
+}
+
+export async function refineDrafts(
+  id: number,
+  req: { overallFeedback?: string; perDraft: ApiDraftFeedback[] },
+): Promise<void> {
+  await api.post(`/api/qaloop/sessions/${id}/refine-drafts`, req)
 }
 
 /** Skip-null PATCH — omit keys to leave them unchanged. No sessionId in the route: drafts are
