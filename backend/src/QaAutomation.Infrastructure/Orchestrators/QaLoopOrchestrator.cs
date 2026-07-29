@@ -353,6 +353,94 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
         }
     }
 
+    // ── QLV2-206: HealSpecs ──────────────────────────────────────────────────
+
+    public Task HealSpecsAsync(int sessionId, int[] draftIds, CancellationToken cancellationToken = default)
+    {
+        Launch(sessionId, ct => HealSpecsInnerAsync(sessionId, draftIds, ct));
+        return Task.CompletedTask;
+    }
+
+    private async Task HealSpecsInnerAsync(int sessionId, int[] draftIds, CancellationToken ct)
+    {
+        var key = SessionKey(sessionId);
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+        var playwright = scope.ServiceProvider.GetRequiredService<IPlaywrightAgentService>();
+        var session = await db.ApiTestSessions.FindAsync([sessionId], ct);
+        if (session is null) return;
+
+        try
+        {
+            Pub(key, EventKinds.Phase, "ui-heal", $"Healing {draftIds.Length} spec(s)");
+
+            var drafts = await db.ApiTestDrafts
+                .Where(d => d.SessionId == sessionId
+                    && draftIds.Contains(d.Id)
+                    && d.DraftKind == ApiDraftKind.UiScript)
+                .OrderBy(d => d.SortOrder)
+                .ToListAsync(ct);
+
+            var healed = 0;
+            for (var i = 0; i < drafts.Count; i++)
+            {
+                var draft = drafts[i];
+                Pub(key, EventKinds.Result, "ui-heal",
+                    $"{i + 1}/{drafts.Count}: healing — {draft.Title}");
+
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(draft.SpecFilePath))
+                        throw new InvalidOperationException("Draft has no SpecFilePath — cannot heal.");
+
+                    var progress = new Progress<string>(msg =>
+                        Pub(key, "stream", "ui-heal", msg));
+
+                    await playwright.HealAsync(
+                        draft.SpecFilePath, draft.ErrorMessage ?? "", progress, ct);
+
+                    draft.SpecCode = File.Exists(draft.SpecFilePath)
+                        ? await File.ReadAllTextAsync(draft.SpecFilePath, ct)
+                        : draft.SpecCode;
+                    draft.Status = ApiDraftStatus.Draft;
+                    draft.ErrorMessage = null;
+                    draft.UpdatedAt = DateTime.UtcNow;
+                    await db.SaveChangesAsync(ct);
+                    healed++;
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    _log.LogWarning(ex, "Heal failed for draft {Id} '{Title}' — skipping", draft.Id, draft.Title);
+                    Pub(key, EventKinds.Error, "ui-heal",
+                        $"Heal failed for '{draft.Title}': {ex.Message}", EventLevels.Warn);
+                }
+            }
+
+            Pub(key, EventKinds.System, "ui-heal",
+                $"Heal complete ({healed}/{drafts.Count}) — specs reset to Draft", data: Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            Pub(key, EventKinds.System, text: "Cancelled by user", level: EventLevels.Warn, data: Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await SafeCommitAsync(db);
+            throw;
+        }
+        catch (Exception e)
+        {
+            _log.LogError(e, "QA Loop UI spec healing failed for session {SessionId}", sessionId);
+            Pub(key, EventKinds.Error, text: $"Failed: {e.Message}", level: EventLevels.Error, data: Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await SafeCommitAsync(db);
+        }
+    }
+
     // ── QAL-023: Push / PushDraft ────────────────────────────────────────────
 
     public Task PushAllAsync(int sessionId, int testPlanId, int testSuiteId, int? storyId = null,

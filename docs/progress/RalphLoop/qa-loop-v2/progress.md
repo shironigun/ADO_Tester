@@ -107,6 +107,13 @@
   no bucket suites created for API-only pushes). `QaLoopAdoStub.GetTestSuitesAsync` returns empty list (was
   NotImplementedException) for cleaner suite-creation tests. 160/160 tests green.
 
+- **QLV2-206** — `HealSpecsRequest { DraftIds: int[] }` added to contracts. `IQaLoopOrchestrator.HealSpecsAsync`
+  added. `QaLoopOrchestrator.HealSpecsAsync/InnerAsync`: loads UiScript drafts by ID+sessionId; calls
+  `IPlaywrightAgentService.HealAsync(draft.SpecFilePath, draft.ErrorMessage ?? "")` per draft; reads file
+  back → updates `SpecCode`; clears `ErrorMessage`; resets `Status=Draft`. Individual failures log+skip
+  (batch continues). `QaLoopController` += `POST sessions/{id}/heal-specs` (202, requires non-empty draftIds).
+  160/160 tests pass.
+
 - **Environment blocker for backend build/test.** This remote Linux container has **only Node/npm** (v22)
   — **no .NET SDK**, and the network policy **denies** the dotnet build hosts (`builds.dotnet.microsoft.com`
   → 403 on CONNECT; allowlist is npm/pypi/crates/go registries only, no Microsoft dotnet host). The repo's

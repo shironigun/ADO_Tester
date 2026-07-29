@@ -53,6 +53,13 @@ public interface IQaLoopOrchestrator
     /// </summary>
     Task GenerateUiScriptsAsync(int sessionId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Heals the selected UiScript drafts by running the Playwright healer agent on each spec.
+    /// The spec file is overwritten in place; SpecCode is updated; Status is reset to Draft.
+    /// Individual heal failures are logged and skipped (batch continues).
+    /// </summary>
+    Task HealSpecsAsync(int sessionId, int[] draftIds, CancellationToken cancellationToken = default);
+
     /// <summary>Signals the background pipeline for the given session to stop.</summary>
     bool Cancel(int sessionId);
 }

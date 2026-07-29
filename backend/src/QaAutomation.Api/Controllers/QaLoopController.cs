@@ -301,6 +301,21 @@ public sealed class QaLoopController : ControllerBase
         catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
     }
 
+    [HttpPost("sessions/{sessionId:int}/heal-specs")]
+    public async Task<IActionResult> HealSpecs(
+        int sessionId, [FromBody] HealSpecsRequest req, CancellationToken ct)
+    {
+        if (req.DraftIds is not { Length: > 0 })
+            return StatusCode(400, new { detail = "draftIds must be a non-empty array." });
+        try
+        {
+            await _orchestrator.HealSpecsAsync(sessionId, req.DraftIds, ct);
+            return StatusCode(202, new AcceptedResponse { Started = true });
+        }
+        catch (InvalidOperationException e) { return StatusCode(404, new { detail = e.Message }); }
+        catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
+    }
+
     [HttpPost("sessions/{sessionId:int}/cancel")]
     public IActionResult Cancel(int sessionId)
         => Ok(new CancelResponse { Cancelled = _orchestrator.Cancel(sessionId) });

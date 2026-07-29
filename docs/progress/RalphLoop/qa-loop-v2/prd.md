@@ -96,7 +96,7 @@ Acceptance-criteria shorthand: **B** = `dotnet build` clean · **T** = `dotnet t
   bucket-child suite. **AC:** B/T; golden test for UI ADO suite-tree write; capture config is off for
   API runs (no regression).
 
-- [ ] **QLV2-206** — Heal action: `IPlaywrightAgentService.HealAsync(specFilePath, failureMessage)` runs
+- [x] **QLV2-206** — Heal action: `IPlaywrightAgentService.HealAsync(specFilePath, failureMessage)` runs
   the healer agent on a spec and overwrites it; `QaLoopOrchestrator.HealSpecsAsync(sessionId, int[]
   draftIds)` batch-heals (heals each `UiScript` draft → resets status to `Draft` so user can re-review);
   `IQaLoopOrchestrator` entry; controller `POST sessions/{id}/heal-specs` (202). **AC:** B/T; endpoint

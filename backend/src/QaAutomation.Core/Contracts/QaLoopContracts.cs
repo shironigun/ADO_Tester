@@ -147,6 +147,13 @@ public sealed class GenerateDraftsRequest
 /// <summary>Request body for POST /sessions/{id}/author-ui-cases (currently empty — params come from session).</summary>
 public sealed class AuthorUiCasesRequest { }
 
+/// <summary>Request body for POST /sessions/{id}/heal-specs.</summary>
+public sealed class HealSpecsRequest
+{
+    /// <summary>IDs of the UiScript drafts to heal. Each draft's ErrorMessage is used as the failure input.</summary>
+    public int[] DraftIds { get; set; } = [];
+}
+
 public sealed class ApiSessionDetail
 {
     public int Id { get; set; }
