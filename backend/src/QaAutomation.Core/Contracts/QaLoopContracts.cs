@@ -81,6 +81,8 @@ public sealed class ApiTestDraftDto
     public ApiDraftStatus Status { get; set; }
     public int? AdoTestCaseId { get; set; }
     public int SortOrder { get; set; }
+    public string? DraftKind { get; init; }
+    public string? Bucket { get; init; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
@@ -91,6 +93,7 @@ public sealed class ApiTestDraftDto
         SchemaJson = d.SchemaJson, SpecCode = d.SpecCode, SpecFilePath = d.SpecFilePath,
         Tags = d.Tags, SourceRoutesJson = d.SourceRoutesJson, ErrorMessage = d.ErrorMessage,
         Status = d.Status, AdoTestCaseId = d.AdoTestCaseId, SortOrder = d.SortOrder,
+        DraftKind = d.DraftKind?.ToWire(), Bucket = d.Bucket,
         CreatedAt = d.CreatedAt, UpdatedAt = d.UpdatedAt,
     };
 }
@@ -141,6 +144,9 @@ public sealed class GenerateDraftsRequest
     public string? GenerateContext { get; set; }
 }
 
+/// <summary>Request body for POST /sessions/{id}/author-ui-cases (currently empty — params come from session).</summary>
+public sealed class AuthorUiCasesRequest { }
+
 public sealed class ApiSessionDetail
 {
     public int Id { get; set; }
@@ -161,6 +167,8 @@ public sealed class ApiSessionDetail
     public string? AdditionalContext { get; set; }
     public string? GenerateContext { get; set; }
     public string? LastFeedback { get; set; }
+    public bool HasUiPhase { get; set; }
+    public string? UiStatus { get; set; }
     public string? EventLogJson { get; set; }
     public string? ErrorMessage { get; set; }
     public bool AutoHandoff { get; set; }
@@ -178,6 +186,7 @@ public sealed class ApiSessionDetail
         Status = s.Status,
         InventoryJson = s.InventoryJson, AnalysisJson = s.AnalysisJson, EventLogJson = s.EventLogJson,
         AdditionalContext = s.AdditionalContext, GenerateContext = s.GenerateContext, LastFeedback = s.LastFeedback,
+        HasUiPhase = s.HasUiPhase, UiStatus = s.UiStatus?.ToString(),
         ErrorMessage = s.ErrorMessage, AutoHandoff = s.AutoHandoff, ActivityEnabled = s.ActivityEnabled,
         CreatedAt = s.CreatedAt, UpdatedAt = s.UpdatedAt,
         Drafts = drafts.OrderBy(d => d.SortOrder).Select(ApiTestDraftDto.From).ToList(),

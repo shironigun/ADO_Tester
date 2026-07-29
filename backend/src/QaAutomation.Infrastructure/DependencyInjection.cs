@@ -20,6 +20,7 @@ using QaAutomation.Infrastructure.Notifications;
 using QaAutomation.Infrastructure.CodeContext;
 using QaAutomation.Infrastructure.ExistingTests;
 using QaAutomation.Infrastructure.Orchestrators;
+using QaAutomation.Infrastructure.QaLoop;
 using QaAutomation.Infrastructure.QaPipelines;
 using QaAutomation.Infrastructure.QaRuns;
 using QaAutomation.Infrastructure.Reports;
@@ -287,6 +288,10 @@ public static class DependencyInjection
                 o.FrontendRepo = Env("QALOOP_FRONTEND_REPO") ?? o.FrontendRepo;
                 o.FrontendRoot = Env("QALOOP_FRONTEND_ROOT") ?? o.FrontendRoot;
                 o.FrontendBaseUrl = Env("QALOOP_FRONTEND_BASE_URL") ?? o.FrontendBaseUrl;
+                o.AppUrl           = Env("AUTOMATION_APP_URL")           ?? o.AppUrl;
+                o.AppUsername      = Env("AUTOMATION_APP_USERNAME")      ?? o.AppUsername;
+                o.AppPassword      = Env("AUTOMATION_APP_PASSWORD")      ?? o.AppPassword;
+                o.PlaywrightRoot   = Env("AUTOMATION_PLAYWRIGHT_ROOT")   ?? o.PlaywrightRoot;
             })
             .PostConfigure<RuntimeSettings>((o, rt) =>
             {
@@ -300,6 +305,9 @@ public static class DependencyInjection
                 o.FrontendRepo = rt.Get("qaloop.frontend_repo") ?? o.FrontendRepo;
                 o.FrontendRoot = rt.Get("qaloop.frontend_root") ?? o.FrontendRoot;
                 o.FrontendBaseUrl = rt.Get("qaloop.frontend_base_url") ?? o.FrontendBaseUrl;
+                o.AppUrl      = rt.Get("qaloop.app_url")      ?? o.AppUrl;
+                o.AppUsername = rt.Get("qaloop.app_username") ?? o.AppUsername;
+                o.AppPassword = rt.Get("qaloop.app_password") ?? o.AppPassword;
             });
 
         // Automation target + pre-run auth (single base URL for all DMS; bearer minted per run).
@@ -316,6 +324,7 @@ public static class DependencyInjection
         services.AddSingleton<IAutomationAuthenticator, AutomationAuthenticator>();
 
         services.AddSingleton<IQaLoopOrchestrator, QaLoopOrchestrator>();
+        services.AddScoped<IPlaywrightAgentService, PlaywrightAgentService>();
         services.AddSingleton<AllureEnricher>();
         services.AddSingleton<IPlaywrightRunner, PlaywrightRunner>();
         services.AddScoped<RunExecutionService>();

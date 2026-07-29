@@ -41,6 +41,18 @@ public interface IQaLoopOrchestrator
     /// </summary>
     Task RefineDraftsAsync(int sessionId, string? overallFeedback, IReadOnlyList<Core.Contracts.ApiDraftFeedback> perDraft, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Runs the UI test-case authoring agent for the session. Transitions UiStatus:
+    /// Authoring → AwaitingReview; persists ApiTestDraft rows with DraftKind=UiCase.
+    /// </summary>
+    Task AuthorUiCasesAsync(int sessionId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Spawns the Playwright MCP agent for each Approved UiCase draft; writes a .ui.spec.ts per case;
+    /// inserts a sibling UiScript draft with SpecCode/SpecFilePath set; transitions UiStatus=Drafted.
+    /// </summary>
+    Task GenerateUiScriptsAsync(int sessionId, CancellationToken cancellationToken = default);
+
     /// <summary>Signals the background pipeline for the given session to stop.</summary>
     bool Cancel(int sessionId);
 }

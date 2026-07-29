@@ -65,6 +65,14 @@ public sealed class QaDbContext : DbContext
         var dmsProfileConverter = new ValueConverter<DmsProfile, string>(
             v => v.ToWire(), v => QaLoopEnumExtensions.ToDmsProfile(v));
 
+        // UI phase nullable enum converters (QLV2-201)
+        var draftKindConverter = new ValueConverter<ApiDraftKind?, string?>(
+            v => v.HasValue ? v.Value.ToWire() : null,
+            s => s != null ? UiPhaseEnumExtensions.ToApiDraftKind(s) : (ApiDraftKind?)null);
+        var uiStatusConverter = new ValueConverter<ApiUiStatus?, string?>(
+            v => v.HasValue ? v.Value.ToString() : null,
+            s => s != null ? Enum.Parse<ApiUiStatus>(s) : (ApiUiStatus?)null);
+
         model.Entity<Project>(e =>
         {
             e.ToTable("Projects");
@@ -290,6 +298,8 @@ public sealed class QaDbContext : DbContext
             e.Property(x => x.ErrorMessage).HasColumnName("ErrorMessage");
             e.Property(x => x.AutoHandoff).HasColumnName("AutoHandoff").IsRequired();
             e.Property(x => x.ActivityEnabled).HasColumnName("ActivityEnabled").IsRequired().HasDefaultValue(true);
+            e.Property(x => x.HasUiPhase).HasColumnName("HasUiPhase").IsRequired().HasDefaultValue(false);
+            e.Property(x => x.UiStatus).HasColumnName("UiStatus").HasConversion(uiStatusConverter);
             e.Property(x => x.CreatedAt).HasColumnName("CreatedAt").IsRequired();
             e.Property(x => x.UpdatedAt).HasColumnName("UpdatedAt").IsRequired();
             e.HasIndex(x => new { x.ProjectId, x.CreatedAt }).HasDatabaseName("ix_ApiTestSessions_ProjectId_CreatedAt");
@@ -317,6 +327,8 @@ public sealed class QaDbContext : DbContext
             e.Property(x => x.Status).HasColumnName("Status").HasConversion<string>().IsRequired();
             e.Property(x => x.AdoTestCaseId).HasColumnName("AdoTestCaseId");
             e.Property(x => x.SortOrder).HasColumnName("SortOrder").IsRequired();
+            e.Property(x => x.DraftKind).HasColumnName("DraftKind").HasConversion(draftKindConverter);
+            e.Property(x => x.Bucket).HasColumnName("Bucket");
             e.Property(x => x.CreatedAt).HasColumnName("CreatedAt").IsRequired();
             e.Property(x => x.UpdatedAt).HasColumnName("UpdatedAt").IsRequired();
             e.HasIndex(x => x.SessionId).HasDatabaseName("ix_ApiTestDrafts_SessionId");

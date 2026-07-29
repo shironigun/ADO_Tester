@@ -93,9 +93,14 @@ public static class QaLoopEnumExtensions
         TestLevel.Contract => "contract", TestLevel.Endpoint => "endpoint",
         TestLevel.Workflow => "workflow", _ => "ui",
     };
-    /// <summary>The on-disk scripts subfolder for a level (plural of <see cref="ToWire"/>) — single
-    /// source of truth shared by where generated specs are written and where the runner looks for them.</summary>
-    public static string ToDirName(this TestLevel v) => v.ToWire() + "s";
+    /// <summary>The on-disk scripts subfolder for a level — single source of truth shared by where
+    /// generated specs are written and where the runner looks for them. UI uses "ui" (not "uis") because
+    /// UI specs live under {module}/ui/{bucket}/; the bucket sub-path is handled by the orchestrator.</summary>
+    public static string ToDirName(this TestLevel v) => v switch
+    {
+        TestLevel.Ui => "ui",
+        _            => v.ToWire() + "s",
+    };
     public static TestLevel ToTestLevel(string s) => s switch
     {
         "contract" => TestLevel.Contract, "endpoint" => TestLevel.Endpoint,
@@ -127,5 +132,44 @@ public static class QaLoopEnumExtensions
     {
         "ideal" => DmsProfile.Ideal, "infinity" => DmsProfile.Infinity,
         "aspen" => DmsProfile.Aspen, _ => DmsProfile.Quantum,
+    };
+}
+
+// ── UI phase enums (Slab 2, QLV2-201) ────────────────────────────────────────
+
+// Wire-string enum — stored as [EnumMember] Value (snake_case), NOT the C# member name.
+public enum ApiDraftKind
+{
+    [EnumMember(Value = "api_case")]   ApiCase,
+    [EnumMember(Value = "ui_case")]    UiCase,
+    [EnumMember(Value = "ui_script")]  UiScript,
+}
+
+// Exact-name enum — stored as the C# member name via HasConversion<string>() (no [EnumMember] needed).
+public enum ApiUiStatus
+{
+    Authoring,       // agents generating UI test cases
+    AwaitingReview,  // cases ready for human review / bucket assignment
+    Drafting,        // Playwright MCP agents generating .ui.spec.ts scripts
+    Drafted,         // scripts ready for human review / approve
+    Pushing,
+    Done,
+    Failed,
+    Cancelled,
+}
+
+public static class UiPhaseEnumExtensions
+{
+    public static string ToWire(this ApiDraftKind v) => v switch
+    {
+        ApiDraftKind.UiCase   => "ui_case",
+        ApiDraftKind.UiScript => "ui_script",
+        _                     => "api_case",
+    };
+    public static ApiDraftKind ToApiDraftKind(string s) => s switch
+    {
+        "ui_case"   => ApiDraftKind.UiCase,
+        "ui_script" => ApiDraftKind.UiScript,
+        _           => ApiDraftKind.ApiCase,
     };
 }

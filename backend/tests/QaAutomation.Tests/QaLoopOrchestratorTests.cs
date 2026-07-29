@@ -301,6 +301,52 @@ public sealed class QaLoopOrchestratorTests
         Assert.Single(h.Ado.SuiteAdds);
     }
 
+    // ── QLV2-205: UI bucket suite routing ────────────────────────────────────
+
+    [Fact]
+    public async Task Push_routes_UiScript_draft_to_bucket_sub_suite_not_level_suite()
+    {
+        // Golden test: a UiScript draft with Bucket=smoke must land in a Smoke sub-suite
+        // under the Ui level suite, not in the root suite (testSuiteId=20).
+        using var h = Harness.Create(new StubLlmClient());
+
+        var sid = await h.SeedSessionAsync(module: "Deals", workItemId: null);
+        await h.SeedUiScriptDraftAsync(sid, "[<tcId-pending>] Smoke: verify dashboard loads", bucket: "smoke");
+
+        await h.Orchestrator.PushAllAsync(sid, testPlanId: 10, testSuiteId: 20, storyId: null);
+        await h.WaitForTerminalAsync(sid, ApiSessionStatus.Done);
+
+        Assert.Single(h.Ado.CreatedTestCases);
+
+        // Suite tree: Deals (module) → Ui (level) → Smoke/Regression/E2E (buckets).
+        // Suites are allocated from NextSuiteId=900_000 in creation order.
+        Assert.Contains(h.Ado.CreatedSuites, s => s.Name == "Smoke");
+        var smokeIdx = h.Ado.CreatedSuites.FindIndex(s => s.Name == "Smoke");
+        var smokeId = 900_000 + smokeIdx;
+
+        // The test case must go to the Smoke bucket suite, not the root (20) or the Ui level suite.
+        var add = Assert.Single(h.Ado.SuiteAdds);
+        Assert.Equal(smokeId, add.SuiteId);
+        Assert.NotEqual(20, add.SuiteId);
+    }
+
+    [Fact]
+    public async Task Push_api_drafts_do_not_get_bucket_routing()
+    {
+        // API-level drafts (no DraftKind set) must still go to their level suite — no regression.
+        using var h = Harness.Create(new StubLlmClient());
+
+        var sid = await h.SeedSessionAsync(module: "Deals", workItemId: null);
+        await h.SeedDraftAsync(sid, "[<tcId-pending>] Contract GET /deals", ApiDraftStatus.Approved);
+
+        await h.Orchestrator.PushAllAsync(sid, testPlanId: 10, testSuiteId: 20, storyId: null);
+        await h.WaitForTerminalAsync(sid, ApiSessionStatus.Done);
+
+        Assert.Single(h.Ado.CreatedTestCases);
+        // No bucket suites should have been created (Smoke/Regression/E2E are UI-only)
+        Assert.DoesNotContain(h.Ado.CreatedSuites, s => s.Name is "Smoke" or "Regression" or "E2E");
+    }
+
     // ── QLV2-112: refine-merge and analyzer-refine ────────────────────────────
 
     [Fact]
@@ -442,6 +488,29 @@ public sealed class QaLoopOrchestratorTests
             await db.SaveChangesAsync();
         }
 
+        public async Task<int> SeedUiScriptDraftAsync(int sessionId, string title, string bucket)
+        {
+            using var scope = Provider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+            var draft = new ApiTestDraft
+            {
+                SessionId = sessionId,
+                Title = title,
+                Preconditions = "",
+                StepsJson = "[{\"action\":\"open app\",\"expected\":\"dashboard visible\"}]",
+                Status = ApiDraftStatus.Approved,
+                Level = TestLevel.Ui,
+                DraftKind = ApiDraftKind.UiScript,
+                Bucket = bucket,
+                SpecFilePath = null,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+            db.ApiTestDrafts.Add(draft);
+            await db.SaveChangesAsync();
+            return draft.Id;
+        }
+
         public async Task<int> SeedDraftAsync(
             int sessionId, string title, ApiDraftStatus status, int? adoId = null,
             int? caseIndex = null, string? specFilePath = null, string? sourceRoutes = null)
@@ -565,7 +634,8 @@ public sealed class QaLoopOrchestratorTests
             => Task.FromResult<IReadOnlyList<LinkedTestCase>>([]);
         public Task<(IReadOnlyList<AdoWorkItem> Items, bool Truncated)> GetChildWorkItemsAsync(int parentId, bool recursive = true, int maxDepth = 5, int maxNodes = 500, int maxLeaves = 200, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<AdoTestPlan>> GetTestPlansAsync(CancellationToken ct = default) => throw new NotImplementedException();
-        public Task<IReadOnlyList<AdoTestSuite>> GetTestSuitesAsync(int planId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<AdoTestSuite>> GetTestSuitesAsync(int planId, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<AdoTestSuite>>([]);
         public Task<IReadOnlyList<ReportTicket>> GetTicketsInRangeAsync(DateTime fromUtc, DateTime toUtc, IReadOnlyList<string> boards, IReadOnlyList<string>? types = null, IReadOnlyList<string>? dateFields = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<TicketComment>> GetWorkItemCommentsAsync(int workItemId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<TimelineEvent>> GetWorkItemUpdatesAsync(int workItemId, CancellationToken ct = default) => throw new NotImplementedException();

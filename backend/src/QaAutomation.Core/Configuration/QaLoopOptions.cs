@@ -37,6 +37,23 @@ public sealed class QaLoopOptions
     /// Set via QALOOP_FRONTEND_BASE_URL / qaloop.frontend_base_url.</summary>
     public string FrontendBaseUrl { get; set; } = "";
 
+    // ── UI phase Playwright framework root (Slab 2, QLV2-204) ──────────────
+    /// <summary>Absolute path to the Playwright framework root (where package.json, .mcp.json, and
+    /// .claude/agents/ live). Claude CLI spawns with this as cwd so it loads the MCP config and
+    /// per-project agent definitions. Set via AUTOMATION_PLAYWRIGHT_ROOT.</summary>
+    public string PlaywrightRoot { get; set; } = "";
+
+    // ── UI phase app auth (Slab 2, QLV2-202) ────────────────────────────────
+    /// <summary>Base URL of the app under test for Playwright UI phase (e.g. "https://ideal.targetcrm.local").
+    /// Set via AUTOMATION_APP_URL / qaloop.app_url.</summary>
+    public string AppUrl { get; set; } = "";
+    /// <summary>Browser-login username for Playwright global-setup storageState.
+    /// Set via AUTOMATION_APP_USERNAME / qaloop.app_username.</summary>
+    public string AppUsername { get; set; } = "";
+    /// <summary>Browser-login password for Playwright global-setup storageState (treated as secret).
+    /// Set via AUTOMATION_APP_PASSWORD / qaloop.app_password.</summary>
+    public string AppPassword { get; set; } = "";
+
     // ── Derived repo-relative source paths for the QA-Loop scanners ──────────────
     // All derive from FrontendRoot (the SPA src root) so the product-repo layout is configured in one
     // place (QALOOP_FRONTEND_ROOT). Empty FrontendRoot → bare relative fallbacks (unconfigured no-op).

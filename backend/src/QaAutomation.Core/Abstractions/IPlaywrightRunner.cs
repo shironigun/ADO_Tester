@@ -27,6 +27,9 @@ public sealed class PlaywrightRunSpec
     public string? ImpactAnalysisJson { get; init; }
     /// <summary>When false, Playwright stdout/stderr is not streamed to the event bus (QAL-060).</summary>
     public bool ActivityEnabled { get; init; } = true;
+    /// <summary>When true, injects screenshot:'only-on-failure' and trace:'on-first-retry' into the
+    /// playwright.config.ts. Set for UI-phase runs (DraftKind=UiScript); always false for API runs.</summary>
+    public bool EnableCapture { get; init; } = false;
 }
 
 /// <summary>Outcome of a Playwright run.</summary>

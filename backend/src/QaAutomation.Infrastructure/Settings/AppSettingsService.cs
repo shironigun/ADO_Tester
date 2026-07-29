@@ -35,10 +35,11 @@ public sealed class AppSettingsService : IAppSettingsService
         "qaloop.frontend_repo", "qaloop.frontend_root", "qaloop.frontend_base_url",
         "qaloop.default_repository", "qaloop.default_branch",
         "qaloop.default_plan_id", "qaloop.default_suite_id",
+        "qaloop.app_url", "qaloop.app_username", "qaloop.app_password",
     ];
 
     public static readonly IReadOnlySet<string> SecretKeys =
-        new HashSet<string> { "ado.pat", "anthropic.api_key", "azure_openai.api_key", "openai.api_key", "teams.webhook_url" };
+        new HashSet<string> { "ado.pat", "anthropic.api_key", "azure_openai.api_key", "openai.api_key", "teams.webhook_url", "qaloop.app_password" };
 
     /// <summary>The option-backed keys whose effective value lives in the typed options (DB-or-env).</summary>
     private static readonly IReadOnlySet<string> OptionKeys = new HashSet<string>
@@ -52,6 +53,7 @@ public sealed class AppSettingsService : IAppSettingsService
         "teams.webhook_url", "teams.template",
         "qaloop.poll_interval_minutes", "qaloop.report_provider", "qaloop.activity_enabled",
         "qaloop.frontend_repo", "qaloop.frontend_root", "qaloop.frontend_base_url",
+        "qaloop.app_url", "qaloop.app_username", "qaloop.app_password",
     };
 
     // Static defaults for the non-option keys when unset (frozen env-default map).
@@ -242,6 +244,9 @@ public sealed class AppSettingsService : IAppSettingsService
         "qaloop.frontend_repo" => _qaLoop.CurrentValue.FrontendRepo,
         "qaloop.frontend_root" => _qaLoop.CurrentValue.FrontendRoot,
         "qaloop.frontend_base_url" => _qaLoop.CurrentValue.FrontendBaseUrl,
+        "qaloop.app_url"           => _qaLoop.CurrentValue.AppUrl,
+        "qaloop.app_username"      => _qaLoop.CurrentValue.AppUsername,
+        "qaloop.app_password"      => _qaLoop.CurrentValue.AppPassword,
         _ => "",
     };
 }

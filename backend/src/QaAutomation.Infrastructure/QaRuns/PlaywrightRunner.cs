@@ -259,6 +259,8 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
             ? $"\n  testMatch: [{string.Join(", ", spec.SpecFilePaths.Select(p => $"'{EscPath(p)}'"))}],"
             : "";
 
+        var captureOpts = spec.EnableCapture ? ", screenshot: 'only-on-failure', trace: 'on-first-retry'" : "";
+
         var config = $$"""
             import { defineConfig } from '@playwright/test';
             import path from 'path';
@@ -274,7 +276,7 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
               workers: Number(process.env.AUTOMATION_WORKERS ?? '6'),
               retries: 0,
               reporter: [['junit', { outputFile: 'junit.xml' }], ['json', { outputFile: 'results.json' }], ['allure-playwright', { resultsDir: 'allure-results' }]{{htmlReporter}}],
-              use: { baseURL: process.env.BASE_URL ?? 'http://localhost' },
+              use: { baseURL: process.env.BASE_URL ?? 'http://localhost'{{captureOpts}} },
               projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
             });
             """;

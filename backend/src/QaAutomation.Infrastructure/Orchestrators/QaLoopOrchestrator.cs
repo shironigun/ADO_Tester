@@ -151,6 +151,208 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
         }
     }
 
+    // ── QLV2-203: AuthorUiCases ──────────────────────────────────────────────
+
+    public Task AuthorUiCasesAsync(int sessionId, CancellationToken cancellationToken = default)
+    {
+        Launch(sessionId, ct => AuthorUiCasesInnerAsync(sessionId, ct));
+        return Task.CompletedTask;
+    }
+
+    private async Task AuthorUiCasesInnerAsync(int sessionId, CancellationToken ct)
+    {
+        var key = SessionKey(sessionId);
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+        var session = await db.ApiTestSessions.FindAsync([sessionId], ct);
+        if (session is null) return;
+
+        try
+        {
+            var llm = await _llmFactory.CreateAsync(ct);
+            var inventory = session.InventoryJson is { Length: > 0 }
+                ? JsonSerializer.Deserialize<InventoryDoc>(session.InventoryJson)
+                  ?? throw new InvalidOperationException("InventoryJson deserialization returned null.")
+                : throw new InvalidOperationException("InventoryJson missing — run Analyze first.");
+
+            session.UiStatus = ApiUiStatus.Authoring;
+            session.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+            Pub(key, EventKinds.Phase, "ui-author", "UI test-case authoring started");
+
+            var cases = await new UiCaseAuthorAgent(llm).AuthorCasesAsync(
+                session.Module, inventory, session.AdditionalContext,
+                emit: EmitClosure(key, "ui-author", session.ActivityEnabled), ct: ct);
+
+            var now = DateTime.UtcNow;
+            for (var i = 0; i < cases.Count; i++)
+            {
+                var c = cases[i];
+                db.ApiTestDrafts.Add(new ApiTestDraft
+                {
+                    SessionId = sessionId,
+                    Level = TestLevel.Ui,
+                    DraftKind = ApiDraftKind.UiCase,
+                    Bucket = c.Bucket,
+                    Title = c.Title,
+                    Preconditions = c.Preconditions,
+                    StepsJson = c.StepsJson,
+                    SpecCode = "",
+                    Status = ApiDraftStatus.Draft,
+                    SortOrder = i,
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                });
+            }
+
+            session.UiStatus = ApiUiStatus.AwaitingReview;
+            Pub(key, EventKinds.System, "ui-author",
+                $"UI cases authored ({cases.Count}) — awaiting review", data: Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            session.UiStatus = ApiUiStatus.Cancelled;
+            Pub(key, EventKinds.System, text: "Cancelled by user", level: EventLevels.Warn, data: Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await SafeCommitAsync(db);
+            throw;
+        }
+        catch (Exception e)
+        {
+            _log.LogError(e, "QA Loop UI authoring failed for session {SessionId}", sessionId);
+            session.UiStatus = ApiUiStatus.Failed;
+            session.ErrorMessage = e.Message;
+            Pub(key, EventKinds.Error, text: $"Failed: {e.Message}", level: EventLevels.Error, data: Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await SafeCommitAsync(db);
+        }
+    }
+
+    // ── QLV2-204: GenerateUiScripts ──────────────────────────────────────────
+
+    public Task GenerateUiScriptsAsync(int sessionId, CancellationToken cancellationToken = default)
+    {
+        Launch(sessionId, ct => GenerateUiScriptsInnerAsync(sessionId, ct));
+        return Task.CompletedTask;
+    }
+
+    private async Task GenerateUiScriptsInnerAsync(int sessionId, CancellationToken ct)
+    {
+        var key = SessionKey(sessionId);
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+        var playwright = scope.ServiceProvider.GetRequiredService<IPlaywrightAgentService>();
+        var session = await db.ApiTestSessions.FindAsync([sessionId], ct);
+        if (session is null) return;
+
+        try
+        {
+            session.UiStatus = ApiUiStatus.Drafting;
+            session.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+            Pub(key, EventKinds.Phase, "ui-script", "Playwright script generation started");
+
+            var cases = await db.ApiTestDrafts
+                .Where(d => d.SessionId == sessionId
+                    && d.DraftKind == ApiDraftKind.UiCase
+                    && d.Status == ApiDraftStatus.Approved)
+                .OrderBy(d => d.SortOrder)
+                .ToListAsync(ct);
+
+            if (cases.Count == 0)
+            {
+                session.UiStatus = ApiUiStatus.Failed;
+                session.ErrorMessage = "No approved UI cases to generate scripts for.";
+                Pub(key, EventKinds.Error, "ui-script",
+                    "No approved UI cases found", EventLevels.Error, Terminal());
+                PersistLog(session, key);
+                session.UpdatedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync(ct);
+                return;
+            }
+
+            var now = DateTime.UtcNow;
+            var sortBase = cases.Max(d => d.SortOrder) + 1;
+            var generated = 0;
+
+            for (var i = 0; i < cases.Count; i++)
+            {
+                var uiCase = cases[i];
+                Pub(key, EventKinds.Result, "ui-script",
+                    $"{i + 1}/{cases.Count}: generating script — {uiCase.Title}");
+
+                try
+                {
+                    var progress = new Progress<string>(msg =>
+                        Pub(key, "stream", "ui-script", msg));
+
+                    var specPath = await playwright.GenerateScriptAsync(
+                        uiCase.Title, uiCase.StepsJson, uiCase.Bucket ?? "regression",
+                        uiCase.Id, progress, ct);
+
+                    var specCode = File.Exists(specPath) ? await File.ReadAllTextAsync(specPath, ct) : "";
+
+                    db.ApiTestDrafts.Add(new ApiTestDraft
+                    {
+                        SessionId = sessionId,
+                        Level = TestLevel.Ui,
+                        DraftKind = ApiDraftKind.UiScript,
+                        Bucket = uiCase.Bucket,
+                        Title = uiCase.Title,
+                        Preconditions = uiCase.Preconditions,
+                        StepsJson = uiCase.StepsJson,
+                        SpecCode = specCode,
+                        SpecFilePath = specPath,
+                        Status = ApiDraftStatus.Draft,
+                        SortOrder = sortBase + i,
+                        CreatedAt = now,
+                        UpdatedAt = now,
+                    });
+                    generated++;
+                    await db.SaveChangesAsync(ct);
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    _log.LogWarning(ex, "Script gen failed for case '{Title}' — skipping", uiCase.Title);
+                    Pub(key, EventKinds.Error, "ui-script",
+                        $"Script gen failed for '{uiCase.Title}': {ex.Message}", EventLevels.Warn);
+                }
+            }
+
+            session.UiStatus = ApiUiStatus.Drafted;
+            Pub(key, EventKinds.System, "ui-script",
+                $"UI scripts generated ({generated}/{cases.Count}) — awaiting review", data: Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            session.UiStatus = ApiUiStatus.Cancelled;
+            Pub(key, EventKinds.System, text: "Cancelled by user", level: EventLevels.Warn, data: Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await SafeCommitAsync(db);
+            throw;
+        }
+        catch (Exception e)
+        {
+            _log.LogError(e, "QA Loop UI script generation failed for session {SessionId}", sessionId);
+            session.UiStatus = ApiUiStatus.Failed;
+            session.ErrorMessage = e.Message;
+            Pub(key, EventKinds.Error, text: $"Failed: {e.Message}", level: EventLevels.Error, data: Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await SafeCommitAsync(db);
+        }
+    }
+
     // ── QAL-023: Push / PushDraft ────────────────────────────────────────────
 
     public Task PushAllAsync(int sessionId, int testPlanId, int testSuiteId, int? storyId = null,
@@ -343,7 +545,18 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
         var tcId = await _ado.CreateTestCaseAsync(draft.Title, draft.Preconditions, steps, cancellationToken);
         var levelSuites = await EnsureLevelSuitesAsync(
             testPlanId, testSuiteId, session.Module, new[] { draft.Level }, sessionKey: null, cancellationToken);
-        var targetSuiteId = levelSuites.TryGetValue(draft.Level, out var lsid) ? lsid : testSuiteId;
+
+        int targetSuiteId;
+        if (draft.DraftKind == ApiDraftKind.UiScript && draft.Bucket is not null)
+        {
+            IReadOnlyList<AdoTestSuite>? planSuites = null;
+            try { planSuites = await _ado.GetTestSuitesAsync(testPlanId, cancellationToken); } catch { }
+            var uiLevelId = levelSuites.TryGetValue(TestLevel.Ui, out var lsid2) ? lsid2 : testSuiteId;
+            var buckets = await EnsureUiBucketSuitesAsync(testPlanId, uiLevelId, planSuites, sessionKey: null, cancellationToken);
+            targetSuiteId = buckets.TryGetValue(draft.Bucket, out var bsid) ? bsid : uiLevelId;
+        }
+        else
+            targetSuiteId = levelSuites.TryGetValue(draft.Level, out var lsid) ? lsid : testSuiteId;
         await _ado.AddTestCaseToSuiteAsync(testPlanId, targetSuiteId, tcId, cancellationToken);
 
         var workItemId = storyId ?? session.WorkItemId;
@@ -735,6 +948,16 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
             var levelSuiteIds = await EnsureLevelSuitesAsync(
                 testPlanId, testSuiteId, session.Module, drafts.Select(d => d.Level).Distinct(), key, ct);
 
+            // For UiScript drafts, ensure Smoke/Regression/E2E bucket sub-suites under the Ui level suite.
+            Dictionary<string, int> bucketSuiteIds = new(StringComparer.OrdinalIgnoreCase);
+            var uiScriptDrafts = drafts.Where(d => d.DraftKind == ApiDraftKind.UiScript).ToList();
+            if (uiScriptDrafts.Count > 0 && levelSuiteIds.TryGetValue(TestLevel.Ui, out var uiLevelSuiteId))
+            {
+                IReadOnlyList<AdoTestSuite>? planSuites = null;
+                try { planSuites = await _ado.GetTestSuitesAsync(testPlanId, ct); } catch { }
+                bucketSuiteIds = await EnsureUiBucketSuitesAsync(testPlanId, uiLevelSuiteId, planSuites, key, ct);
+            }
+
             var pushed = 0;
             for (var i = 0; i < drafts.Count; i++)
             {
@@ -744,7 +967,13 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
 
                 var steps = ParseSteps(draft.StepsJson);
                 var tcId = await _ado.CreateTestCaseAsync(draft.Title, draft.Preconditions, steps, ct);
-                var targetSuite = levelSuiteIds.TryGetValue(draft.Level, out var lsid) ? lsid : testSuiteId;
+                int targetSuite;
+                if (draft.DraftKind == ApiDraftKind.UiScript
+                    && draft.Bucket is not null
+                    && bucketSuiteIds.TryGetValue(draft.Bucket, out var bsid))
+                    targetSuite = bsid;
+                else
+                    targetSuite = levelSuiteIds.TryGetValue(draft.Level, out var lsid) ? lsid : testSuiteId;
                 await _ado.AddTestCaseToSuiteAsync(testPlanId, targetSuite, tcId, ct);
 
                 var workItemId = storyId ?? session.WorkItemId;
@@ -1067,6 +1296,40 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
             {
                 _log.LogWarning(ex, "Could not ensure {Name} sub-suite under {LevelParent}; falling back to parent", name, levelParent);
                 map[level] = parentSuiteId;
+            }
+        }
+        return map;
+    }
+
+    /// <summary>Ensures Smoke/Regression/E2E sub-suites exist under the given UI level suite.
+    /// Returns a case-insensitive map from bucket key ("smoke"/"regression"/"e2e") → suite id.
+    /// Any sub-suite that fails to create falls back to <paramref name="uiSuiteId"/>.</summary>
+    private async Task<Dictionary<string, int>> EnsureUiBucketSuitesAsync(
+        int planId, int uiSuiteId, IReadOnlyList<AdoTestSuite>? allSuites, string? sessionKey, CancellationToken ct)
+    {
+        var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var buckets = new[] { ("Smoke", "smoke"), ("Regression", "regression"), ("E2E", "e2e") };
+        foreach (var (displayName, bucketKey) in buckets)
+        {
+            try
+            {
+                var existing = allSuites?.FirstOrDefault(s =>
+                    s.ParentId == uiSuiteId && string.Equals(s.Name, displayName, StringComparison.OrdinalIgnoreCase));
+                if (existing is not null)
+                {
+                    map[bucketKey] = existing.Id;
+                    continue;
+                }
+                var newId = await _ado.CreateStaticTestSuiteAsync(planId, uiSuiteId, displayName, ct);
+                map[bucketKey] = newId;
+                if (sessionKey is not null)
+                    Pub(sessionKey, EventKinds.Result, EventPhases.Push,
+                        $"Created '{displayName}' bucket suite (#{newId}) under UI suite {uiSuiteId}");
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "Could not ensure {Name} bucket suite under {UiSuiteId}; falling back to UI suite", displayName, uiSuiteId);
+                map[bucketKey] = uiSuiteId;
             }
         }
         return map;

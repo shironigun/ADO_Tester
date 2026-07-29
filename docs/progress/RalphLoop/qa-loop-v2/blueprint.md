@@ -110,28 +110,270 @@ it; refine a level → only targeted drafts change, Approved/Pushed untouched.
 
 ---
 
-## SLAB 2 — UI testing phase  *(outline — expand when reached)*
+## SLAB 2 — UI testing phase  *(detailed)*
 
-Locked design in `solution.md` → Slab 2. Expected file-level work:
-- **Data:** `ApiTestDraft` gains `Bucket` (smoke/regression/e2e; UI only) + an artifact-type marker
-  (manual-case vs generated-script); a `TestType`/phase marker on `ApiTestSession` (API vs UI phase).
-  Extend `ToDirName`/path logic so UI writes `{module}/ui/{bucket}/{slug}.ui.spec.ts`.
-- **Settings:** `qaloop.app_url`, `qaloop.app_username`, `qaloop.app_password` (secret) — two-layer wiring
-  + `AppSettingsService`. Playwright global-setup that mints `storageState` under framework `fixtures/`.
-- **UI authoring:** reuse Analyst→Tester agents (no code discovery) driven by module + Slab-1 free-text;
-  emit manual UI cases with a proposed bucket; human review/approve; Slab-1 merge-refine applies.
-- **Playwright agents harness:** one-time `npx playwright init-agents --loop=claude` into the framework
-  root (`.claude/agents/{planner,generator,healer}.md` + `.mcp.json`); a new **agentic Claude-CLI+MCP**
-  invocation path (distinct from `ILlmClient`; cwd = framework root; NOT the QAL-069 llm-scratch
-  isolation) that runs planner→generator per approved case → verified `.ui.spec.ts` (`[<tcId-pending>]
-  @<bucket>`). Human review/approve scripts.
-- **Execution:** UI as the 4th level in `PlaywrightRunner`/`RunExecutionService`; capture ON for UI
-  (`trace:'on-first-retry'`, `screenshot:'only-on-failure'`); ADO push resolves/creates a "UI" suite with
-  smoke/regression/e2e child suites (extend the existing `EnsureLevelSuitesAsync` at
-  `QaLoopOrchestrator.cs:103`).
-- **Failure triage:** reuse QA Runs triage/file-bugs; add a batch **Heal** action (spawn the healer agent
-  via MCP on multi-selected/all failed specs → re-emit → re-approve) alongside the existing Draft-bugs
-  path. Healer never auto-fires.
+Pattern source: Slab 1 orchestrator methods (`RerunAnalyzeInnerAsync`, `RefineDraftsInnerAsync`);
+background-task-with-own-scope pattern; `AgentOrchestrator.RunAnalystInnerAsync` for agent styling.
+Verification: use story **177540** with Anthropic provider model **`claude-haiku-4-5-20251001`** for all
+manual test runs.
+
+---
+
+### QLV2-201: Data layer
+
+#### 1. `backend/src/QaAutomation.Core/Models/Enums.cs`
+
+Add after `QaLoopEnumExtensions`:
+
+```csharp
+// ── UI phase enums (Slab 2, QLV2-201) ────────────────────────────────────────
+
+public enum ApiDraftKind
+{
+    [EnumMember(Value = "api_case")]   ApiCase,
+    [EnumMember(Value = "ui_case")]    UiCase,
+    [EnumMember(Value = "ui_script")]  UiScript,
+}
+
+public enum ApiUiStatus
+{
+    Authoring, AwaitingReview, Drafting, Drafted, Pushing, Done, Failed, Cancelled,
+}
+
+public static class UiPhaseEnumExtensions
+{
+    public static string ToWire(this ApiDraftKind v) => v switch
+    {
+        ApiDraftKind.UiCase   => "ui_case",
+        ApiDraftKind.UiScript => "ui_script",
+        _                     => "api_case",
+    };
+    public static ApiDraftKind ToApiDraftKind(string s) => s switch
+    {
+        "ui_case"   => ApiDraftKind.UiCase,
+        "ui_script" => ApiDraftKind.UiScript,
+        _           => ApiDraftKind.ApiCase,
+    };
+}
+```
+
+Also fix `ToDirName` in `QaLoopEnumExtensions` (Ui was "uis", change to "ui"):
+```csharp
+public static string ToDirName(this TestLevel v) => v switch
+{
+    TestLevel.Ui => "ui",
+    _            => v.ToWire() + "s",
+};
+```
+
+#### 2. `backend/src/QaAutomation.Core/Models/ApiTestSession.cs`
+
+Add to `ApiTestSession` after `ActivityEnabled`:
+```csharp
+public bool HasUiPhase { get; set; }
+public ApiUiStatus? UiStatus { get; set; }
+```
+
+Add to `ApiTestDraft` after `SortOrder`:
+```csharp
+public ApiDraftKind? DraftKind { get; set; }
+public string? Bucket { get; set; }
+```
+
+#### 3. `backend/src/QaAutomation.Infrastructure/Data/QaDbContext.cs`
+
+After `dmsProfileConverter`, add:
+```csharp
+var draftKindConverter = new ValueConverter<ApiDraftKind?, string?>(
+    v => v.HasValue ? v.Value.ToWire() : null,
+    s => s != null ? UiPhaseEnumExtensions.ToApiDraftKind(s) : (ApiDraftKind?)null);
+var uiStatusConverter = new ValueConverter<ApiUiStatus?, string?>(
+    v => v.HasValue ? v.Value.ToString() : null,
+    s => s != null ? Enum.Parse<ApiUiStatus>(s) : (ApiUiStatus?)null);
+```
+
+In `ApiTestSession` entity block after `ActivityEnabled`:
+```csharp
+e.Property(x => x.HasUiPhase).HasColumnName("HasUiPhase").IsRequired().HasDefaultValue(false);
+e.Property(x => x.UiStatus).HasColumnName("UiStatus").HasConversion(uiStatusConverter);
+```
+
+In `ApiTestDraft` entity block after `SortOrder`:
+```csharp
+e.Property(x => x.DraftKind).HasColumnName("DraftKind").HasConversion(draftKindConverter);
+e.Property(x => x.Bucket).HasColumnName("Bucket");
+```
+
+#### 4. Migration command
+
+```powershell
+dotnet ef migrations add AddQaLoopUiPhase `
+  --project src\QaAutomation.Infrastructure --startup-project src\QaAutomation.Api
+```
+
+---
+
+### QLV2-202: Settings + global-setup scaffold
+
+#### 1. `QaLoopOptions.cs` — add after `FrontendBaseUrl`
+
+```csharp
+public string AppUrl      { get; set; } = "";
+public string AppUsername { get; set; } = "";
+public string AppPassword { get; set; } = "";
+```
+
+#### 2. `DependencyInjection.cs` — `PostConfigure<RuntimeSettings>` for QaLoopOptions
+
+```csharp
+o.AppUrl      = rt.Get("qaloop.app_url")      ?? o.AppUrl;
+o.AppUsername = rt.Get("qaloop.app_username")  ?? o.AppUsername;
+o.AppPassword = rt.Get("qaloop.app_password")  ?? o.AppPassword;
+```
+
+#### 3. `AppSettingsService.cs` — add three new `KnownKey` entries
+
+```csharp
+new("qaloop.app_url",      "QA Loop UI: base URL of the app under test"),
+new("qaloop.app_username", "QA Loop UI: browser-login username"),
+new("qaloop.app_password", "QA Loop UI: browser-login password", IsSecret: true),
+```
+
+#### 4. `scripts/fixtures/auth.setup.ts` — scaffold
+
+Reads `AUTOMATION_APP_URL` / `_USERNAME` / `_PASSWORD` env vars; headless Chromium login;
+saves `storageState.json` to the same `fixtures/` dir. Exits gracefully if any env var is missing.
+
+---
+
+### QLV2-203: UI test-case authoring
+
+#### 1. Embed `ui_case_author_system.txt`
+
+Create `backend/src/QaAutomation.Infrastructure/Agents/Prompts/ui_case_author_system.txt`.
+Mark as EmbeddedResource. Add `AgentPrompts.UiCaseAuthorSystem` static property in `AgentPrompts.cs`.
+
+System prompt tone: you are a QA analyst generating manual UI test cases for a web module. For each
+user flow in the inventory, emit a JSON array of `{title, preconditions, steps:[{action,expected}], bucket}`
+objects. Bucket must be one of "smoke" / "regression" / "e2e". Follow the existing house style (no code,
+numbered steps, concrete expected results). Emit only the JSON array.
+
+#### 2. New `UiCaseAuthorAgent.cs`
+
+`Infrastructure/Agents/UiCaseAuthorAgent.cs` — `AuthorCasesAsync(module, inventory, additionalContext?, …) → List<UiCaseDraft>`.
+Parses `[` root (JsonArray). Each element: extract `title`/`preconditions`/`steps`/`bucket`.
+Throws `AgentException` on bad shape (same as other agents).
+
+#### 3. `QaLoopOrchestrator` — `AuthorUiCasesAsync` + inner
+
+Set `UiStatus=Authoring` → `AuthorUiCasesAsync` → insert `ApiTestDraft` rows (`Level=Ui`, `DraftKind=UiCase`,
+`Bucket`, `StepsJson`, `SpecCode=""`, `Status=Draft`) → `UiStatus=AwaitingReview`.
+
+#### 4. `IQaLoopOrchestrator` entry + `QaLoopContracts` + controller
+
+Add `Task AuthorUiCasesAsync(int sessionId, CancellationToken ct = default)`.
+`ApiSessionDetail` += `HasUiPhase`, `UiStatus`.
+Controller: `POST sessions/{id}/author-ui-cases` → 202.
+
+---
+
+### QLV2-204: Playwright agents harness
+
+#### 1. One-time init (documented setup step)
+
+```bash
+cd scripts && npx playwright init-agents --loop=claude
+```
+Commits `.claude/agents/` + `.mcp.json` to the repo.
+
+#### 2. `IPlaywrightAgentService` / `PlaywrightAgentService`
+
+`Core/Abstractions/IPlaywrightAgentService.cs`:
+```csharp
+Task<string> GenerateScriptAsync(string caseTitle, string stepsJson, string bucket,
+    int tcIdPending, IProgress<string>? progress, CancellationToken ct);
+Task HealAsync(string specFilePath, string failureMessage,
+    IProgress<string>? progress, CancellationToken ct);
+```
+
+`Infrastructure/QaLoop/PlaywrightAgentService.cs` — spawns `claude --output-format stream-json` with
+cwd = scripts root; reads stdout for the generated file path. Register as scoped.
+
+#### 3. `QaLoopOrchestrator.GenerateUiScriptsAsync` + inner
+
+For each Approved `UiCase` draft (sequential): call service → create `UiScript` draft sibling with
+`SpecCode`/`SpecFilePath`/`DraftKind=UiScript`/`Status=Draft`. Sets `UiStatus=UiDrafted` on completion.
+
+Add to `IQaLoopOrchestrator` + controller `POST sessions/{id}/generate-ui-scripts` → 202.
+
+---
+
+### QLV2-205: Execution
+
+#### 1. `PlaywrightRunner` — `EnableCapture` flag
+
+`RunPlaywrightAsync(…, bool enableCapture = false)`: when true injects
+`trace:'on-first-retry', screenshot:'only-on-failure'` into config. API runs always false.
+
+#### 2. `RunExecutionService` — include `UiScript` drafts
+
+Include drafts with `DraftKind=UiScript` or null in spec-paths; pass `enableCapture:true` for any run
+that contains UI-level specs.
+
+#### 3. `EnsureLevelSuitesAsync` — UI suite tree
+
+Resolve/create "UI" parent suite → "UI – Smoke" / "UI – Regression" / "UI – E2E" child suites.
+Return `Dictionary<string, int>` bucket → suite id.
+
+#### 4. ADO push — route `UiScript` to bucket suite
+
+`PushAllAsync`/`PushDraftAsync`: for `DraftKind=UiScript` use bucket suite id. Tags: `@ui @<bucket>`.
+Add golden test for UI Test Case write + suite linkage.
+
+---
+
+### QLV2-206: Heal action
+
+#### 1. `IPlaywrightAgentService.HealAsync` (already declared in QLV2-204)
+
+Spawns healer agent (from `.claude/agents/healer.md`) in agentic mode; feeds spec path + failure message;
+healer rewrites spec in place; backend reads file back → updates `SpecCode`.
+
+#### 2. `QaLoopOrchestrator.HealSpecsAsync` + inner
+
+Load each `UiScript` draft; call `HealAsync`; update `SpecCode` + set `Status=Draft`.
+
+Add to `IQaLoopOrchestrator` + controller `POST sessions/{id}/heal-specs` body `{draftIds:int[]}` → 202.
+
+---
+
+### QLV2-207: Frontend
+
+#### 1. `client/src/api/qaLoop.ts`
+
+- `ScanStartRequest += hasUiPhase?: boolean`
+- `ApiSessionDetail += hasUiPhase: boolean, uiStatus?: string | null`
+- `ApiTestDraftDto += draftKind?: string | null, bucket?: string | null`
+- Add `authorUiCases(id)`, `generateUiScripts(id)`, `healSpecs(id, draftIds: number[])`.
+
+#### 2. `client/src/session/configs/qaLoop.tsx`
+
+- Scan form: UI phase `<Switch>` toggle.
+- UI authoring step (shown when `hasUiPhase && uiStatus matches Authoring/AwaitingReview`): case list
+  with bucket chip + override dropdown + per-case approve/reject + "Author UI Cases" button.
+- Script-gen step (UiDrafting/UiDrafted): spec viewer + approve + "Generate UI Scripts" button.
+- QA Runs triage: "Heal selected" multi-select → `healSpecs`.
+
+---
+
+### QLV2-208: Tests + docs
+
+`QaLoopOrchestratorTests.cs` — three new tests:
+1. `AuthorUiCases_creates_UiCase_drafts_with_bucket`
+2. `GenerateUiScripts_creates_UiScript_drafts`
+3. `HealSpecs_resets_status_to_Draft`
+
+Feature doc: `docs/features/qa-loop-ui-phase.md` + `docs/changelog/` entry.
 
 ## SLAB 3 — Scripts Board module  *(outline — expand when reached)*
 

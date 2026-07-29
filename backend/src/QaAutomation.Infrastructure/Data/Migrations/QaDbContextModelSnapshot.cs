@@ -28,6 +28,10 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                         .HasColumnType("INTEGER")
                         .HasColumnName("AdoTestCaseId");
 
+                    b.Property<string>("Bucket")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Bucket");
+
                     b.Property<int?>("CaseIndex")
                         .HasColumnType("INTEGER")
                         .HasColumnName("CaseIndex");
@@ -35,6 +39,10 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT")
                         .HasColumnName("CreatedAt");
+
+                    b.Property<string>("DraftKind")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("DraftKind");
 
                     b.Property<string>("ErrorMessage")
                         .HasColumnType("TEXT")
@@ -157,6 +165,12 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                     b.Property<string>("GenerateContext")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("HasUiPhase")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false)
+                        .HasColumnName("HasUiPhase");
+
                     b.Property<string>("InventoryJson")
                         .HasColumnType("TEXT")
                         .HasColumnName("InventoryJson");
@@ -193,6 +207,10 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                     b.Property<int?>("TestSuiteId")
                         .HasColumnType("INTEGER")
                         .HasColumnName("TestSuiteId");
+
+                    b.Property<string>("UiStatus")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("UiStatus");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT")

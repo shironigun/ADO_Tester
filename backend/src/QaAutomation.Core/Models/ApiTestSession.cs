@@ -38,6 +38,10 @@ public sealed class ApiTestSession
     public bool AutoHandoff { get; set; }
     /// <summary>Captures qaloop.activity_enabled at row creation; false suppresses verbose streaming.</summary>
     public bool ActivityEnabled { get; set; } = true;
+    /// <summary>When true, this session runs the UI testing phase (Slab 2) after the API phase.</summary>
+    public bool HasUiPhase { get; set; }
+    /// <summary>Tracks the UI phase pipeline status. Null when HasUiPhase is false or UI phase not yet started.</summary>
+    public ApiUiStatus? UiStatus { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
@@ -70,6 +74,10 @@ public sealed class ApiTestDraft
     public ApiDraftStatus Status { get; set; } = ApiDraftStatus.Draft;
     public int? AdoTestCaseId { get; set; }
     public int SortOrder { get; set; }
+    /// <summary>Draft kind — null = legacy API case; UiCase = manual UI test case; UiScript = Playwright spec.</summary>
+    public ApiDraftKind? DraftKind { get; set; }
+    /// <summary>UI test bucket: "smoke" | "regression" | "e2e". Null for API drafts.</summary>
+    public string? Bucket { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }

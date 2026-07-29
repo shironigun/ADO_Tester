@@ -277,6 +277,30 @@ public sealed class QaLoopController : ControllerBase
         catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
     }
 
+    [HttpPost("sessions/{sessionId:int}/author-ui-cases")]
+    public async Task<IActionResult> AuthorUiCases(int sessionId, CancellationToken ct)
+    {
+        try
+        {
+            await _orchestrator.AuthorUiCasesAsync(sessionId, ct);
+            return StatusCode(202, new AcceptedResponse { Started = true });
+        }
+        catch (InvalidOperationException e) { return StatusCode(404, new { detail = e.Message }); }
+        catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
+    }
+
+    [HttpPost("sessions/{sessionId:int}/generate-ui-scripts")]
+    public async Task<IActionResult> GenerateUiScripts(int sessionId, CancellationToken ct)
+    {
+        try
+        {
+            await _orchestrator.GenerateUiScriptsAsync(sessionId, ct);
+            return StatusCode(202, new AcceptedResponse { Started = true });
+        }
+        catch (InvalidOperationException e) { return StatusCode(404, new { detail = e.Message }); }
+        catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
+    }
+
     [HttpPost("sessions/{sessionId:int}/cancel")]
     public IActionResult Cancel(int sessionId)
         => Ok(new CancelResponse { Cancelled = _orchestrator.Cancel(sessionId) });

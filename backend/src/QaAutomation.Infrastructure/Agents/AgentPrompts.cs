@@ -57,6 +57,11 @@ internal static class AgentPrompts
     /// <summary>Impact analyzer: changed files + inventory → impacted draft ids (JSON).</summary>
     public static string ImpactAnalyzerSystem { get; } = Load("impact_analyzer_system.txt");
 
+    // ── UI phase prompts (Slab 2, QLV2-203) ──────────────────────────────────
+
+    /// <summary>UI case author: module inventory → manual browser test cases with bucket assignments (JSON array).</summary>
+    public static string UiCaseAuthorSystem { get; } = Load("ui_case_author_system.txt");
+
     private static string Load(string fileName)
     {
         var asm = typeof(AgentPrompts).Assembly;

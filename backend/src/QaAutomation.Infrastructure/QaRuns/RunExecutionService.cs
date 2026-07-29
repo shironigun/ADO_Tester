@@ -128,6 +128,7 @@ public sealed class RunExecutionService
                 AdoTestRunId      = adoTestRunId,
                 ImpactAnalysisJson = run.ImpactAnalysisJson,
                 ActivityEnabled   = run.ActivityEnabled,
+                EnableCapture     = drafts.Any(d => d.Level == TestLevel.Ui),
             };
             var result = await _runner.RunAsync(spec, eventKey, ct);
 
