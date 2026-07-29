@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import {
   Alert, Autocomplete, Box, Button, Card, CardContent, Checkbox, Chip, CircularProgress,
-  IconButton, LinearProgress, Stack, Tab, Table, TableBody, TableCell, TableHead, TableRow,
-  Tabs, TextField, Tooltip, Typography,
+  FormControlLabel, IconButton, LinearProgress, Stack, Switch, Tab, Table, TableBody,
+  TableCell, TableHead, TableRow, Tabs, TextField, Tooltip, Typography,
 } from '@mui/material'
 import CheckIcon from '@mui/icons-material/Check'
 import CloseIcon from '@mui/icons-material/Close'
@@ -28,7 +28,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility'
 import {
   startScan, listSessionsPage, getSessionDetail, saveAnalysis, generateDrafts, patchDraft,
   approveAllDrafts, pushSession, updateSessionPlan, cancelSession, deleteSession, sessionStreamUrl, listFrontendModules, LEVEL_NAMES,
-  rerunAnalyze, refineDrafts,
+  rerunAnalyze, refineDrafts, authorUiCases, generateUiScripts, healSpecs,
   type ApiSessionDetail, type ApiTestDraftDto, type ScanStartRequest, type SurfaceRow,
   type FrontendModule, type ApiDraftFeedback,
 } from '../../api/qaLoop'
@@ -85,6 +85,7 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
   const [branchesLoading, setBranchesLoading] = useState(false)
   const [loading, setLoading]         = useState(false)
   const [additionalContext, setAdditionalContext] = useState('')
+  const [hasUiPhase, setHasUiPhase]   = useState(false)
 
   // Load saved defaults from Settings and pre-populate fields on mount.
   useEffect(() => {
@@ -163,6 +164,7 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
         workItemId: story?.id ?? undefined,
         autoHandoff: true,
         additionalContext: additionalContext.trim() || undefined,
+        hasUiPhase: hasUiPhase || undefined,
       }
       const { sessionId } = await startScan(PROJECT_ID, req)
       onStarted(sessionId)
@@ -228,6 +230,10 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
           label="Additional context (optional)" size="small" multiline minRows={2}
           value={additionalContext} onChange={e => setAdditionalContext(e.target.value)}
           helperText="What to focus on, what to skip, or any scope notes for the analyzer"
+        />
+        <FormControlLabel
+          control={<Switch checked={hasUiPhase} onChange={e => setHasUiPhase(e.target.checked)} size="small" />}
+          label={<Typography variant="body2">Include UI phase (Playwright)</Typography>}
         />
         <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
           <Button onClick={onClose} disabled={loading}>Cancel</Button>
@@ -645,13 +651,171 @@ function PushPanel({ session, refetch }: { session: ApiSessionDetail; refetch: (
   )
 }
 
+// ── UI Phase panel ────────────────────────────────────────────────────────────
+
+const BUCKET_COLORS: Record<string, 'success' | 'warning' | 'error' | 'info'> = {
+  smoke: 'success', regression: 'warning', e2e: 'info',
+}
+
+function UiPhasePanel({ session, refetch, onError }: { session: ApiSessionDetail; refetch: () => void; onError: (e: unknown, msg: string) => void }) {
+  const drafts = (session.drafts ?? []) as unknown as ApiTestDraftDto[]
+  const uiCases   = drafts.filter(d => d.draftKind === 'ui_case')
+  const uiScripts = drafts.filter(d => d.draftKind === 'ui_script')
+
+  const [authoring, setAuthoring]     = useState(false)
+  const [generating, setGenerating]   = useState(false)
+  const [healPending, setHealPending] = useState<Set<number>>(new Set())
+  const [healing, setHealing]         = useState(false)
+  const [openSpecId, setOpenSpecId]   = useState<number | null>(null)
+
+  const uiStatus = session.uiStatus ?? null
+
+  async function doAuthorUiCases() {
+    setAuthoring(true)
+    try { await authorUiCases(session.id); refetch() }
+    catch (e) { onError(e, 'Failed to author UI cases') }
+    finally { setAuthoring(false) }
+  }
+
+  async function doGenerateUiScripts() {
+    setGenerating(true)
+    try { await generateUiScripts(session.id); refetch() }
+    catch (e) { onError(e, 'Failed to generate UI scripts') }
+    finally { setGenerating(false) }
+  }
+
+  async function doHealSelected() {
+    const ids = Array.from(healPending)
+    if (ids.length === 0) return
+    setHealing(true)
+    try { await healSpecs(session.id, ids); setHealPending(new Set()); refetch() }
+    catch (e) { onError(e, 'Failed to heal specs') }
+    finally { setHealing(false) }
+  }
+
+  async function doApproveCase(id: number) {
+    try { await patchDraft(id, { status: 'Approved' }); refetch() } catch { /* ignore */ }
+  }
+
+  return (
+    <Stack spacing={2}>
+      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+        <Typography variant="subtitle2">UI Phase</Typography>
+        {uiStatus && <Chip size="small" label={uiStatus} variant="outlined" />}
+      </Stack>
+
+      {/* Author step */}
+      {(!uiStatus || uiStatus === 'Authoring') && (
+        <Box>
+          {uiStatus === 'Authoring'
+            ? <LinearProgress />
+            : <Button variant="outlined" size="small" onClick={doAuthorUiCases} disabled={authoring}
+                startIcon={authoring ? <CircularProgress size={14} /> : undefined}>
+                Author UI Cases
+              </Button>}
+        </Box>
+      )}
+
+      {/* Review UI cases */}
+      {uiStatus === 'AwaitingReview' && uiCases.length > 0 && (
+        <Stack spacing={1}>
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+            <Typography variant="body2">{uiCases.length} UI case{uiCases.length !== 1 ? 's' : ''} to review</Typography>
+            <Box sx={{ flex: 1 }} />
+            <Button size="small" variant="outlined" onClick={doGenerateUiScripts} disabled={generating
+              || !uiCases.some(d => d.status === 'Approved')}
+              startIcon={generating ? <CircularProgress size={14} /> : undefined}>
+              {generating ? 'Generating scripts…' : 'Generate UI Scripts'}
+            </Button>
+          </Stack>
+          {uiCases.map(d => (
+            <Card key={d.id} variant="outlined">
+              <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
+                <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                  <StatusChip value={d.status} kind="draft" />
+                  {d.bucket && (
+                    <Chip size="small" label={d.bucket} color={BUCKET_COLORS[d.bucket] ?? 'default'} />
+                  )}
+                  <Typography variant="body2" sx={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {d.title}
+                  </Typography>
+                  {d.status !== 'Approved' && (
+                    <Tooltip title="Approve for script generation">
+                      <IconButton size="small" color="success" onClick={() => doApproveCase(d.id)}>
+                        <CheckIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  )}
+                </Stack>
+              </CardContent>
+            </Card>
+          ))}
+        </Stack>
+      )}
+
+      {/* UI scripts (Drafting / Drafted) */}
+      {(uiStatus === 'Drafting' || uiStatus === 'Drafted') && (
+        <Stack spacing={1}>
+          {uiStatus === 'Drafting' && <LinearProgress />}
+          {uiScripts.length > 0 && (
+            <>
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                <Typography variant="body2">{uiScripts.length} UI script{uiScripts.length !== 1 ? 's' : ''}</Typography>
+                <Box sx={{ flex: 1 }} />
+                {healPending.size > 0 && (
+                  <Button size="small" variant="outlined" color="warning" disabled={healing}
+                    onClick={doHealSelected}
+                    startIcon={healing ? <CircularProgress size={14} /> : undefined}>
+                    {healing ? 'Healing…' : `Heal selected (${healPending.size})`}
+                  </Button>
+                )}
+              </Stack>
+              {uiScripts.map(d => (
+                <Card key={d.id} variant="outlined">
+                  <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
+                    <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                      <Checkbox size="small"
+                        checked={healPending.has(d.id)}
+                        onChange={e => setHealPending(prev => {
+                          const s = new Set(prev); if (e.target.checked) s.add(d.id); else s.delete(d.id); return s
+                        })} />
+                      <StatusChip value={d.status} kind="draft" />
+                      {d.bucket && <Chip size="small" label={d.bucket} color={BUCKET_COLORS[d.bucket] ?? 'default'} />}
+                      <Typography variant="body2" sx={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {d.title}
+                      </Typography>
+                      {d.specCode && (
+                        <Button size="small" variant="outlined" startIcon={<VisibilityIcon />}
+                          onClick={() => setOpenSpecId(openSpecId === d.id ? null : d.id)}>
+                          Spec
+                        </Button>
+                      )}
+                    </Stack>
+                    {openSpecId === d.id && d.specCode && (
+                      <Box component="pre" sx={{ mt: 1, p: 1, bgcolor: 'background.default',
+                        borderRadius: 1, overflow: 'auto', fontSize: '0.75rem', fontFamily: 'monospace',
+                        maxHeight: 320, border: '1px solid', borderColor: 'divider' }}>
+                        {d.specCode}
+                      </Box>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+            </>
+          )}
+        </Stack>
+      )}
+    </Stack>
+  )
+}
+
 // ── Detail body ───────────────────────────────────────────────────────────────
 
 export function QaLoopDetailBody({ session, refetch, onError, fullScreen }: DetailBodyProps) {
   const s = session as ApiSessionDetail
   const live = !['Done', 'Failed', 'Cancelled'].includes(s.status)
   const stepIdx = activeStepIndex(s.status, s.currentActivity)
-  const [tab, setTab] = useState<'detail' | 'coverage' | 'drafts' | 'push'>('detail')
+  const [tab, setTab] = useState<'detail' | 'coverage' | 'drafts' | 'ui' | 'push'>('detail')
   const [generateCtx, setGenerateCtx] = useState(s.generateContext ?? '')
   const [refineAnalysisFeedback, setRefineAnalysisFeedback] = useState(s.lastFeedback ?? '')
   const [refiningAnalysis, setRefiningAnalysis] = useState(false)
@@ -681,6 +845,7 @@ export function QaLoopDetailBody({ session, refetch, onError, fullScreen }: Deta
         <Tab value="detail" label="Activity" sx={{ textTransform: 'none', minHeight: 36 }} />
         <Tab value="coverage" label="Coverage" sx={{ textTransform: 'none', minHeight: 36 }} />
         <Tab value="drafts" label={`Drafts (${session.drafts?.length ?? 0})`} sx={{ textTransform: 'none', minHeight: 36 }} />
+        {s.hasUiPhase && <Tab value="ui" label="UI Phase" sx={{ textTransform: 'none', minHeight: 36 }} />}
         <Tab value="push" label="Push" sx={{ textTransform: 'none', minHeight: 36 }} />
       </Tabs>
 
@@ -723,6 +888,7 @@ export function QaLoopDetailBody({ session, refetch, onError, fullScreen }: Deta
 
       {tab === 'coverage' && <CoverageMatrix session={s} onSaved={() => { refetch(); setTab('drafts') }} readOnly={!['Scanning', 'AwaitingReview'].includes(s.status)} />}
       {tab === 'drafts' && <DraftsByLevel session={s} refetch={refetch} onGenerate={doGenerate} readOnly={s.status === 'Done'} />}
+      {tab === 'ui' && <UiPhasePanel session={s} refetch={refetch} onError={onError} />}
       {tab === 'push' && <PushPanel session={s} refetch={refetch} />}
     </Box>
   )

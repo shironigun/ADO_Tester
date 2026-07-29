@@ -22,6 +22,7 @@ export interface ScanStartRequest {
   testSuiteId?: number
   autoHandoff?: boolean
   additionalContext?: string
+  hasUiPhase?: boolean
 }
 
 // A product frontend module discovered from the SPA route file (QaLoopController /frontend-modules).
@@ -70,6 +71,8 @@ export interface ApiSessionDetail extends SessionDetail {
   additionalContext?: string | null
   generateContext?: string | null
   lastFeedback?: string | null
+  hasUiPhase: boolean
+  uiStatus?: string | null
 }
 
 export interface ApiTestDraftDto {
@@ -84,6 +87,8 @@ export interface ApiTestDraftDto {
   adoTestCaseId: number | null
   tags: string[]
   sourceRoutes: string[]
+  draftKind?: string | null
+  bucket?: string | null
 }
 
 export interface UpdateApiDraftRequest {
@@ -184,6 +189,18 @@ export async function cancelSession(id: number): Promise<void> {
 
 export async function deleteSession(id: number): Promise<void> {
   await api.delete(`/api/qaloop/sessions/${id}`)
+}
+
+export async function authorUiCases(id: number): Promise<void> {
+  await api.post(`/api/qaloop/sessions/${id}/author-ui-cases`, {})
+}
+
+export async function generateUiScripts(id: number): Promise<void> {
+  await api.post(`/api/qaloop/sessions/${id}/generate-ui-scripts`, {})
+}
+
+export async function healSpecs(id: number, draftIds: number[]): Promise<void> {
+  await api.post(`/api/qaloop/sessions/${id}/heal-specs`, { draftIds })
 }
 
 export const sessionStreamUrl = (id: number) => apiUrl(`/api/qaloop/sessions/${id}/stream`)

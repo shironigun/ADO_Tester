@@ -107,6 +107,15 @@
   no bucket suites created for API-only pushes). `QaLoopAdoStub.GetTestSuitesAsync` returns empty list (was
   NotImplementedException) for cleaner suite-creation tests. 160/160 tests green.
 
+- **QLV2-207** — `qaLoop.ts`: `ScanStartRequest += hasUiPhase?`; `ApiSessionDetail += hasUiPhase/uiStatus`;
+  `ApiTestDraftDto += draftKind?/bucket?`; added `authorUiCases(id)`, `generateUiScripts(id)`,
+  `healSpecs(id, draftIds)` API functions. `qaLoop.tsx`: `hasUiPhase` Switch toggle on start form
+  (wired into scan request); new `UiPhasePanel` component — author step (Author UI Cases button +
+  LinearProgress), review step (UiCase list with bucket chip + per-case Approve button + Generate
+  Scripts button), script step (UiScript list with spec viewer + heal-selection checkboxes + "Heal
+  selected (N)" button); "UI Phase" tab added to QaLoopDetailBody (conditionally shown when
+  `hasUiPhase`). Build clean; lint clean on touched files (1 pre-existing warning only).
+
 - **QLV2-206** — `HealSpecsRequest { DraftIds: int[] }` added to contracts. `IQaLoopOrchestrator.HealSpecsAsync`
   added. `QaLoopOrchestrator.HealSpecsAsync/InnerAsync`: loads UiScript drafts by ID+sessionId; calls
   `IPlaywrightAgentService.HealAsync(draft.SpecFilePath, draft.ErrorMessage ?? "")` per draft; reads file

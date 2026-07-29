@@ -102,7 +102,7 @@ Acceptance-criteria shorthand: **B** = `dotnet build` clean · **T** = `dotnet t
   `IQaLoopOrchestrator` entry; controller `POST sessions/{id}/heal-specs` (202). **AC:** B/T; endpoint
   resolves; `HealSpecsAsync` unit test covers reset-to-Draft path.
 
-- [ ] **QLV2-207** — Frontend: `ScanStartRequest` += `hasUiPhase`; scan form UI-phase toggle; session
+- [x] **QLV2-207** — Frontend: `ScanStartRequest` += `hasUiPhase`; scan form UI-phase toggle; session
   config: `UiAuthoring`/`UiAwaitingReview` step (case list with bucket chip + override dropdown +
   approve/refine) + `UiDrafting`/`UiDrafted` step (script viewer + approve); QA Runs triage drawer
   += "Heal selected" multi-select button (calls `heal-specs`). **AC:** F; `npm run build` + `npm run
