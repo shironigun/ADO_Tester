@@ -28,8 +28,9 @@ import VisibilityIcon from '@mui/icons-material/Visibility'
 import {
   startScan, listSessionsPage, getSessionDetail, saveAnalysis, generateDrafts, patchDraft,
   approveAllDrafts, pushSession, updateSessionPlan, cancelSession, deleteSession, sessionStreamUrl, listFrontendModules, LEVEL_NAMES,
+  rerunAnalyze, refineDrafts,
   type ApiSessionDetail, type ApiTestDraftDto, type ScanStartRequest, type SurfaceRow,
-  type FrontendModule,
+  type FrontendModule, type ApiDraftFeedback,
 } from '../../api/qaLoop'
 import { getPlans, getSuites, searchWorkItems } from '../../api/authorTests'
 import type { TestPlan, TestSuite } from '../../api/authorTests'
@@ -83,6 +84,7 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
   const [branches, setBranches]       = useState<string[]>([])
   const [branchesLoading, setBranchesLoading] = useState(false)
   const [loading, setLoading]         = useState(false)
+  const [additionalContext, setAdditionalContext] = useState('')
 
   // Load saved defaults from Settings and pre-populate fields on mount.
   useEffect(() => {
@@ -160,6 +162,7 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
         testSuiteId: suiteId ?? undefined,
         workItemId: story?.id ?? undefined,
         autoHandoff: true,
+        additionalContext: additionalContext.trim() || undefined,
       }
       const { sessionId } = await startScan(PROJECT_ID, req)
       onStarted(sessionId)
@@ -220,6 +223,11 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
           inputValue={storyInput} onInputChange={(_, v) => { setStoryInput(v); searchStories(v) }}
           onChange={(_, v) => setStory(v)} value={story}
           renderInput={p => <TextField {...p} label="Story (optional)" size="small" />}
+        />
+        <TextField
+          label="Additional context (optional)" size="small" multiline minRows={2}
+          value={additionalContext} onChange={e => setAdditionalContext(e.target.value)}
+          helperText="What to focus on, what to skip, or any scope notes for the analyzer"
         />
         <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
           <Button onClick={onClose} disabled={loading}>Cancel</Button>
@@ -322,11 +330,13 @@ const stripTitleTag = (title: string): string =>
 function DraftsByLevel({ session, refetch, onGenerate, readOnly }: { session: ApiSessionDetail; refetch: () => void; onGenerate: () => void; readOnly?: boolean }) {
   const wiUrl = useAdoWorkItemUrl()
   const drafts = (session.drafts ?? []) as unknown as ApiTestDraftDto[]
-  // ApiTestDraftDto.level is TestLevel.ToWire() — lowercase ("contract"/"endpoint"/"workflow") — not
-  // the capitalized tab labels; compare case-insensitively rather than assuming either casing.
   const levels = ['Contract', 'Endpoint', 'Workflow']
   const [tab, setTab] = useState(0)
   const [openDraftId, setOpenDraftId] = useState<number | null>(null)
+  const [perFeedback, setPerFeedback] = useState<Record<number, string>>({})
+  const [perRemove, setPerRemove]     = useState<Record<number, boolean>>({})
+  const [overallFeedback, setOverallFeedback] = useState(session.lastFeedback ?? '')
+  const [refining, setRefining] = useState(false)
 
   const byLevel = (l: string) => drafts.filter(d => d.level.toLowerCase() === l.toLowerCase())
   const hasApprovable = drafts.some(d => d.status !== 'Approved' && d.status !== 'Rejected' && d.status !== 'Pushed')
@@ -344,11 +354,24 @@ function DraftsByLevel({ session, refetch, onGenerate, readOnly }: { session: Ap
   async function doApproveAll() {
     try { await approveAllDrafts(session.id); refetch() } catch { /* ignore */ }
   }
+  async function doRefine() {
+    const perDraft: ApiDraftFeedback[] = drafts
+      .filter(d => d.status !== 'Approved' && d.status !== 'Pushed')
+      .map(d => ({ draftId: d.id, feedback: perFeedback[d.id] || undefined, remove: perRemove[d.id] ?? false }))
+      .filter(f => f.feedback || f.remove)
+    if (perDraft.length === 0 && !overallFeedback.trim()) return
+    setRefining(true)
+    try {
+      await refineDrafts(session.id, { overallFeedback: overallFeedback.trim() || undefined, perDraft })
+      setPerFeedback({}); setPerRemove({})
+      refetch()
+    } catch { /* ignore */ }
+    finally { setRefining(false) }
+  }
   async function saveOpenDraft(patch: { title?: string; preconditions?: string; steps?: { action: string; expected: string }[] }) {
     if (!openDraft) return
     const body: { title?: string; preconditions?: string; stepsJson?: string } = {}
     if (patch.title !== undefined) {
-      // Re-attach the machinery tag stripped for display so push-time rewrite still finds it.
       const tag = openDraft.title.match(/^\[(?:<tcId-pending(?::\d+)?>|\d+)\]/)?.[0]
       body.title = tag ? `${tag} ${patch.title}` : patch.title
     }
@@ -357,8 +380,10 @@ function DraftsByLevel({ session, refetch, onGenerate, readOnly }: { session: Ap
     await patchDraft(openDraft.id, body); refetch()
   }
 
+  const mutableStatuses = ['Draft', 'Rejected']
+  const hasMutableDrafts = drafts.some(d => mutableStatuses.includes(d.status))
+
   if (drafts.length === 0) {
-    // Mid-generation: drafts arrive when status leaves Drafting/Analyzing.
     if (session.status === 'Drafting' || session.status === 'Analyzing')
       return (
         <Box sx={{ py: 2, textAlign: 'center' }}>
@@ -387,31 +412,62 @@ function DraftsByLevel({ session, refetch, onGenerate, readOnly }: { session: Ap
         {levels.map((l, i) => <Tab key={l} value={i} label={`${l} (${byLevel(l).length})`} sx={{ textTransform: 'none', minHeight: 36 }} />)}
       </Tabs>
       <Stack spacing={1}>
-        {byLevel(levels[tab]).map(d => (
-          <Card key={d.id} variant="outlined"
-            sx={{ transition: 'border-color .15s, box-shadow .15s', '&:hover': { borderColor: 'primary.main', boxShadow: 1 } }}>
-            <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
-              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                <StatusChip value={d.status} kind="draft" />
-                <Typography variant="body2"
-                  sx={{ flex: 1, fontWeight: 500, cursor: 'pointer', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                  title={stripTitleTag(d.title)} onClick={() => setOpenDraftId(d.id)}>{stripTitleTag(d.title)}</Typography>
-                <Chip size="small" variant="outlined"
-                  label={`${stepCount(d.stepsJson)} step${stepCount(d.stepsJson) === 1 ? '' : 's'}`} />
-                {d.adoTestCaseId && <Chip size="small" color="success" variant="outlined" label={`TC #${d.adoTestCaseId}`} />}
-                {!readOnly && d.status !== 'Pushed' && d.status !== 'Rejected' && (
-                  <>
-                    {d.status !== 'Approved' && <Tooltip title="Approve"><IconButton size="small" color="success" onClick={() => doApprove(d.id)}><CheckIcon fontSize="small" /></IconButton></Tooltip>}
-                    <Tooltip title="Reject"><IconButton size="small" color="error" onClick={() => doReject(d.id)}><CloseIcon fontSize="small" /></IconButton></Tooltip>
-                  </>
+        {byLevel(levels[tab]).map(d => {
+          const locked = d.status === 'Approved' || d.status === 'Pushed'
+          return (
+            <Card key={d.id} variant="outlined"
+              sx={{ transition: 'border-color .15s, box-shadow .15s', '&:hover': { borderColor: 'primary.main', boxShadow: 1 } }}>
+              <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
+                <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                  <StatusChip value={d.status} kind="draft" />
+                  <Typography variant="body2"
+                    sx={{ flex: 1, fontWeight: 500, cursor: 'pointer', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    title={stripTitleTag(d.title)} onClick={() => setOpenDraftId(d.id)}>{stripTitleTag(d.title)}</Typography>
+                  <Chip size="small" variant="outlined"
+                    label={`${stepCount(d.stepsJson)} step${stepCount(d.stepsJson) === 1 ? '' : 's'}`} />
+                  {d.adoTestCaseId && <Chip size="small" color="success" variant="outlined" label={`TC #${d.adoTestCaseId}`} />}
+                  {!readOnly && d.status !== 'Pushed' && d.status !== 'Rejected' && (
+                    <>
+                      {d.status !== 'Approved' && <Tooltip title="Approve"><IconButton size="small" color="success" onClick={() => doApprove(d.id)}><CheckIcon fontSize="small" /></IconButton></Tooltip>}
+                      <Tooltip title="Reject"><IconButton size="small" color="error" onClick={() => doReject(d.id)}><CloseIcon fontSize="small" /></IconButton></Tooltip>
+                    </>
+                  )}
+                  <Button size="small" variant="outlined" startIcon={<VisibilityIcon />}
+                    onClick={() => setOpenDraftId(d.id)}>View</Button>
+                </Stack>
+                {!readOnly && !locked && (
+                  <Stack direction="row" spacing={1} sx={{ mt: 1, alignItems: 'center' }}>
+                    <TextField size="small" placeholder="Per-test feedback…" variant="outlined"
+                      sx={{ flex: 1 }} value={perFeedback[d.id] ?? ''}
+                      onChange={e => setPerFeedback(prev => ({ ...prev, [d.id]: e.target.value }))} />
+                    <Tooltip title="Flag for removal">
+                      <Checkbox size="small" checked={perRemove[d.id] ?? false}
+                        onChange={e => setPerRemove(prev => ({ ...prev, [d.id]: e.target.checked }))}
+                        color="error" />
+                    </Tooltip>
+                    <Typography variant="caption" color="text.secondary">Remove</Typography>
+                  </Stack>
                 )}
-                <Button size="small" variant="outlined" startIcon={<VisibilityIcon />}
-                  onClick={() => setOpenDraftId(d.id)}>View</Button>
-              </Stack>
-            </CardContent>
-          </Card>
-        ))}
+              </CardContent>
+            </Card>
+          )
+        })}
       </Stack>
+
+      {!readOnly && hasMutableDrafts && (
+        <Box sx={{ mt: 2 }}>
+          <TextField label="Overall feedback (optional)" size="small" multiline minRows={2} fullWidth
+            value={overallFeedback} onChange={e => setOverallFeedback(e.target.value)}
+            helperText="Applied to all refined drafts alongside any per-test notes"
+            disabled={refining}
+          />
+          <Button variant="contained" size="small" sx={{ mt: 1 }}
+            onClick={doRefine}
+            disabled={refining || (Object.values(perFeedback).every(v => !v) && Object.values(perRemove).every(v => !v) && !overallFeedback.trim())}>
+            {refining ? 'Regenerating…' : 'Regenerate with feedback'}
+          </Button>
+        </Box>
+      )}
 
       {openDraft && (
         <DraftDetailDialog
@@ -596,10 +652,24 @@ export function QaLoopDetailBody({ session, refetch, onError, fullScreen }: Deta
   const live = !['Done', 'Failed', 'Cancelled'].includes(s.status)
   const stepIdx = activeStepIndex(s.status, s.currentActivity)
   const [tab, setTab] = useState<'detail' | 'coverage' | 'drafts' | 'push'>('detail')
+  const [generateCtx, setGenerateCtx] = useState(s.generateContext ?? '')
+  const [refineAnalysisFeedback, setRefineAnalysisFeedback] = useState(s.lastFeedback ?? '')
+  const [refiningAnalysis, setRefiningAnalysis] = useState(false)
+  const [generating, setGenerating] = useState(false)
 
   async function doGenerate() {
-    try { await generateDrafts(s.id); refetch() }
+    setGenerating(true)
+    try { await generateDrafts(s.id, generateCtx.trim() || undefined); refetch() }
     catch (err) { onError(err, 'Failed to generate drafts') }
+    finally { setGenerating(false) }
+  }
+
+  async function doRerunAnalyze() {
+    if (!refineAnalysisFeedback.trim()) return
+    setRefiningAnalysis(true)
+    try { await rerunAnalyze(s.id, refineAnalysisFeedback.trim()); refetch() }
+    catch (err) { onError(err, 'Failed to rerun analysis') }
+    finally { setRefiningAnalysis(false) }
   }
 
   return (
@@ -617,9 +687,30 @@ export function QaLoopDetailBody({ session, refetch, onError, fullScreen }: Deta
       {tab === 'detail' && (
         <Box>
           {s.status === 'AwaitingReview' && (
-            <Alert severity="info" sx={{ mb: 2 }} action={
-              <Button color="inherit" size="small" onClick={doGenerate}>Generate drafts</Button>
-            }>Coverage analysis ready. Generate Playwright drafts when ready.</Alert>
+            <Stack spacing={2} sx={{ mb: 2 }}>
+              <Alert severity="info" action={
+                <Button color="inherit" size="small" onClick={doGenerate} disabled={generating}>
+                  {generating ? 'Generating…' : 'Generate drafts'}
+                </Button>
+              }>Coverage analysis ready. Generate Playwright drafts when ready.</Alert>
+              <TextField
+                label="Context for generators (optional)" size="small" multiline minRows={2}
+                value={generateCtx} onChange={e => setGenerateCtx(e.target.value)}
+                helperText="Scope notes passed to all three generator agents"
+              />
+              <Box>
+                <TextField
+                  label="Refine analysis with feedback" size="small" multiline minRows={2} fullWidth
+                  value={refineAnalysisFeedback} onChange={e => setRefineAnalysisFeedback(e.target.value)}
+                  helperText="Describe gaps or corrections — the Analyzer will improve the existing coverage matrix"
+                  disabled={refiningAnalysis}
+                />
+                <Button variant="outlined" size="small" sx={{ mt: 1 }}
+                  onClick={doRerunAnalyze} disabled={refiningAnalysis || !refineAnalysisFeedback.trim()}>
+                  {refiningAnalysis ? 'Refining…' : 'Refine analysis'}
+                </Button>
+              </Box>
+            </Stack>
           )}
           {s.errorMessage && <Alert severity="error" sx={{ mb: 2 }}>{s.errorMessage}</Alert>}
           {(s.activityEnabled || (s.eventLogJson?.length ?? 0) > 2)
