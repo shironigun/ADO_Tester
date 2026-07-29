@@ -35,6 +35,10 @@ namespace QaAutomation.Migrations.Npgsql.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("AdoTestCaseId");
 
+                    b.Property<string>("Bucket")
+                        .HasColumnType("text")
+                        .HasColumnName("Bucket");
+
                     b.Property<int?>("CaseIndex")
                         .HasColumnType("integer")
                         .HasColumnName("CaseIndex");
@@ -42,6 +46,10 @@ namespace QaAutomation.Migrations.Npgsql.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp without time zone")
                         .HasColumnName("CreatedAt");
+
+                    b.Property<string>("DraftKind")
+                        .HasColumnType("text")
+                        .HasColumnName("DraftKind");
 
                     b.Property<string>("ErrorMessage")
                         .HasColumnType("text")
@@ -166,6 +174,12 @@ namespace QaAutomation.Migrations.Npgsql.Migrations
                     b.Property<string>("GenerateContext")
                         .HasColumnType("text");
 
+                    b.Property<bool>("HasUiPhase")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("HasUiPhase");
+
                     b.Property<string>("InventoryJson")
                         .HasColumnType("text")
                         .HasColumnName("InventoryJson");
@@ -202,6 +216,10 @@ namespace QaAutomation.Migrations.Npgsql.Migrations
                     b.Property<int?>("TestSuiteId")
                         .HasColumnType("integer")
                         .HasColumnName("TestSuiteId");
+
+                    b.Property<string>("UiStatus")
+                        .HasColumnType("text")
+                        .HasColumnName("UiStatus");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp without time zone")
