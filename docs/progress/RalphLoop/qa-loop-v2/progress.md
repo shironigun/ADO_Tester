@@ -4,14 +4,14 @@
 - **Design:** `solution.md` (authoritative vision brief) · **Ruleset:** `Ralph loop.md`
 - **Backlog:** `prd.md` (tasks `QLV2-###`, grouped by slab, built in order) · **Guide:** `blueprint.md`
 - **Started:** 2026-07-29
-- **Status:** SLAB 1 COMPLETE — all 13 tasks (QLV2-101..113) VERIFIED. 158/158 tests pass.
-  Frontend build clean. Resume point for Slab 2: **QLV2-201** (decompose from epic in prd.md).
+- **Status:** SLAB 2 COMPLETE — all 21 tasks (QLV2-101..208) VERIFIED. 163/163 tests pass.
+  Frontend build clean. Resume point for Slab 3: **QLV2-301** (decompose from epic in prd.md).
 
 ## Slab status
 | Slab | Name                                                      | Status                                     |
 | ---- | --------------------------------------------------------- | ------------------------------------------ |
 | 1    | Free-text + merge-refine in QA Loop                       | **COMPLETE** (QLV2-101..113, all VERIFIED) |
-| 2    | UI testing phase (Playwright agents via MCP + Claude CLI) | Not started                                |
+| 2    | UI testing phase (Playwright agents via MCP + Claude CLI) | **COMPLETE** (QLV2-201..208, all VERIFIED) |
 | 3    | Scripts Board module                                      | Not started                                |
 
 ---
@@ -115,6 +115,15 @@
   Scripts button), script step (UiScript list with spec viewer + heal-selection checkboxes + "Heal
   selected (N)" button); "UI Phase" tab added to QaLoopDetailBody (conditionally shown when
   `hasUiPhase`). Build clean; lint clean on touched files (1 pre-existing warning only).
+
+- **QLV2-208** — `QaLoopOrchestratorTests`: three new tests: `AuthorUiCases_creates_UiCase_drafts_with_bucket`
+  (polls `UiStatus != Authoring`, asserts `AwaitingReview` + `DraftKind=UiCase, Bucket="smoke"`);
+  `GenerateUiScripts_creates_UiScript_drafts` (seeds approved UiCase, polls `UiStatus=Drafted`, asserts UiScript
+  rows with non-null `SpecFilePath`); `HealSpecs_resets_status_to_Draft` (seeds UiScript+file, sets
+  Rejected+ErrorMessage, polls for `Status=Draft`, asserts `ErrorMessage=null`). Harness: `DataDir` public;
+  `StubPlaywrightAgentService` added; `SeedUiCaseDraftAsync` + `SeedUiScriptDraftWithFileAsync` helpers. 163/163
+  tests pass. Feature doc `docs/features/qa-loop-ui-phase.md` written (what/why, data model, data flow, ADO suite
+  tree, key files, config, limitations). Changelog entry added. **SLAB 2 COMPLETE.**
 
 - **QLV2-206** — `HealSpecsRequest { DraftIds: int[] }` added to contracts. `IQaLoopOrchestrator.HealSpecsAsync`
   added. `QaLoopOrchestrator.HealSpecsAsync/InnerAsync`: loads UiScript drafts by ID+sessionId; calls

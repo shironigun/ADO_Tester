@@ -6,6 +6,14 @@ Newest entries first.
 
 ## 2026-07-29
 
+### feat(qlv2): QA Loop v2 Slab 2 — UI Testing Phase (COMPLETE)
+All 8 tasks (QLV2-201..208) VERIFIED. See [`docs/features/qa-loop-ui-phase.md`](features/qa-loop-ui-phase.md) for details.
+- **DB:** 4 new columns — `ApiTestSessions.HasUiPhase/UiStatus`; `ApiTestDrafts.DraftKind/Bucket`. `ApiDraftKind` + `ApiUiStatus` enums. SQLite + Npgsql migrations applied.
+- **Settings:** `QaLoopOptions` += `AppUrl/AppUsername/AppPassword/PlaywrightRoot`; runtime-settings registered; `scripts/fixtures/auth.setup.ts` Playwright login scaffold.
+- **Backend:** `UiCaseAuthorAgent` + embedded `ui_case_author_system.txt`; `IPlaywrightAgentService` / `PlaywrightAgentService` (generate + heal via Claude CLI); orchestrator `AuthorUiCasesAsync`, `GenerateUiScriptsAsync`, `HealSpecsAsync`, `EnsureUiBucketSuitesAsync`; `PlaywrightRunner.EnableCapture`; three new controller endpoints.
+- **Frontend:** `hasUiPhase` toggle on scan form; `UiPhasePanel` (author/review/scripts sub-panels); "UI Phase" tab in session detail.
+- **Tests:** 3 new orchestrator tests (AuthorUiCases / GenerateUiScripts / HealSpecs paths); 163/163 pass.
+
 ### feat(qlv2): QA Loop v2 Slab 1 — Free-text context + merge-refine (COMPLETE)
 All 13 tasks (QLV2-101..113) VERIFIED. See [`docs/features/qa-loop-free-text.md`](features/qa-loop-free-text.md) for details.
 - **DB:** 3 new columns on `ApiTestSessions` (`AdditionalContext`, `GenerateContext`, `LastFeedback`); SQLite + Npgsql migrations applied.

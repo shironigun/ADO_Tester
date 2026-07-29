@@ -108,7 +108,7 @@ Acceptance-criteria shorthand: **B** = `dotnet build` clean · **T** = `dotnet t
   += "Heal selected" multi-select button (calls `heal-specs`). **AC:** F; `npm run build` + `npm run
   lint` clean.
 
-- [ ] **QLV2-208** — Tests + docs: `QaLoopOrchestratorTests` for `AuthorUiCasesAsync` (rows have
+- [x] **QLV2-208** — Tests + docs: `QaLoopOrchestratorTests` for `AuthorUiCasesAsync` (rows have
   `DraftKind=UiCase`, `Bucket` set) + `GenerateUiScriptsAsync` (rows have `DraftKind=UiScript`,
   `SpecFilePath` set); full B/T/F. Feature doc `docs/features/qa-loop-ui-phase.md` +
   `docs/changelog/` entry. **AC:** all green; docs written.

@@ -412,6 +412,113 @@ public sealed class QaLoopOrchestratorTests
         Assert.Equal("Please add GET /deals coverage", session.LastFeedback);
     }
 
+    // ── QLV2-208: UI phase orchestrator tests ────────────────────────────────────
+
+    private const string UiCaseAuthorJson = """
+        [{"title":"Verify dashboard loads","preconditions":"User is logged in","steps":[{"action":"Navigate to /dashboard","expected":"Dashboard page is displayed"}],"bucket":"smoke"}]
+        """;
+
+    [Fact]
+    public async Task AuthorUiCases_creates_UiCase_drafts_with_bucket()
+    {
+        using var h = Harness.Create(new StubLlmClient(UiCaseAuthorJson));
+        var sid = await h.SeedSessionAsync("Deals");
+        await h.SetInventoryAsync(sid, EmptyAnalyzerJson);
+
+        await h.Orchestrator.AuthorUiCasesAsync(sid);
+
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        ApiUiStatus? uiStatus = null;
+        while (DateTime.UtcNow < deadline)
+        {
+            using var scope = h.Provider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+            var sess = await db.ApiTestSessions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == sid);
+            if (sess?.UiStatus is not ApiUiStatus.Authoring and not null) { uiStatus = sess.UiStatus; break; }
+            await Task.Delay(40);
+        }
+
+        using var checkScope = h.Provider.CreateScope();
+        var checkDb = checkScope.ServiceProvider.GetRequiredService<QaDbContext>();
+        var drafts = await checkDb.ApiTestDrafts.Where(d => d.SessionId == sid).ToListAsync();
+
+        Assert.Equal(ApiUiStatus.AwaitingReview, uiStatus);
+        Assert.Contains(drafts, d => d.DraftKind == ApiDraftKind.UiCase && d.Bucket == "smoke");
+    }
+
+    [Fact]
+    public async Task GenerateUiScripts_creates_UiScript_drafts()
+    {
+        using var h = Harness.Create(new StubLlmClient());
+        var sid = await h.SeedSessionAsync("Deals");
+        var caseId = await h.SeedUiCaseDraftAsync(sid, "Verify login", bucket: "smoke");
+
+        using (var scope = h.Provider.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+            var d = await db.ApiTestDrafts.FindAsync(caseId);
+            d!.Status = ApiDraftStatus.Approved;
+            await db.SaveChangesAsync();
+        }
+
+        await h.Orchestrator.GenerateUiScriptsAsync(sid);
+
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (DateTime.UtcNow < deadline)
+        {
+            using var scope = h.Provider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+            var sess = await db.ApiTestSessions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == sid);
+            if (sess?.UiStatus == ApiUiStatus.Drafted) break;
+            await Task.Delay(40);
+        }
+
+        using var checkScope = h.Provider.CreateScope();
+        var checkDb = checkScope.ServiceProvider.GetRequiredService<QaDbContext>();
+        var scripts = await checkDb.ApiTestDrafts
+            .Where(d => d.SessionId == sid && d.DraftKind == ApiDraftKind.UiScript)
+            .ToListAsync();
+
+        Assert.NotEmpty(scripts);
+        Assert.All(scripts, d => Assert.NotNull(d.SpecFilePath));
+    }
+
+    [Fact]
+    public async Task HealSpecs_resets_status_to_Draft()
+    {
+        using var h = Harness.Create(new StubLlmClient());
+        var sid = await h.SeedSessionAsync("Deals");
+        var (draftId, _) = await h.SeedUiScriptDraftWithFileAsync(sid, "Verify dashboard");
+
+        using (var scope = h.Provider.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+            var d = await db.ApiTestDrafts.FindAsync(draftId);
+            d!.Status = ApiDraftStatus.Rejected;
+            d.ErrorMessage = "Selector not found";
+            await db.SaveChangesAsync();
+        }
+
+        await h.Orchestrator.HealSpecsAsync(sid, [draftId]);
+
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(40);
+            using var scope = h.Provider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+            var d = await db.ApiTestDrafts.AsNoTracking().FirstOrDefaultAsync(x => x.Id == draftId);
+            if (d?.Status == ApiDraftStatus.Draft) break;
+        }
+
+        using var checkScope = h.Provider.CreateScope();
+        var checkDb = checkScope.ServiceProvider.GetRequiredService<QaDbContext>();
+        var healed = await checkDb.ApiTestDrafts.AsNoTracking().FirstOrDefaultAsync(d => d.Id == draftId);
+
+        Assert.Equal(ApiDraftStatus.Draft, healed!.Status);
+        Assert.Null(healed.ErrorMessage);
+    }
+
     // ── harness ──────────────────────────────────────────────────────────────────
 
     private sealed class Harness : IDisposable
@@ -420,7 +527,7 @@ public sealed class QaLoopOrchestratorTests
         public required QaLoopOrchestrator Orchestrator { get; init; }
         public required QaLoopAdoStub Ado { get; init; }
         private string DbPath { get; init; } = "";
-        private string DataDir { get; init; } = "";
+        public string DataDir { get; init; } = "";
 
         public static Harness Create(StubLlmClient llm)
         {
@@ -434,6 +541,7 @@ public sealed class QaLoopOrchestratorTests
                 .AddInterceptors(SqliteBusyTimeoutInterceptor.Instance));
             services.AddScoped<DatabaseInitializer>();
             services.AddSingleton<ITextSearchProvider, SqliteFts5Search>();
+            services.AddSingleton<IPlaywrightAgentService>(new StubPlaywrightAgentService(dataDir));
             var provider = services.BuildServiceProvider();
 
             using (var scope = provider.CreateScope())
@@ -486,6 +594,57 @@ public sealed class QaLoopOrchestratorTests
             session.AnalysisJson  = doc.RootElement.GetProperty("surfaceMatrix").GetRawText();
             session.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync();
+        }
+
+        public async Task<int> SeedUiCaseDraftAsync(int sessionId, string title, string bucket)
+        {
+            using var scope = Provider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+            var draft = new ApiTestDraft
+            {
+                SessionId = sessionId,
+                Title = title,
+                Preconditions = "",
+                StepsJson = "[{\"action\":\"open app\",\"expected\":\"dashboard visible\"}]",
+                Status = ApiDraftStatus.Draft,
+                Level = TestLevel.Ui,
+                DraftKind = ApiDraftKind.UiCase,
+                Bucket = bucket,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+            db.ApiTestDrafts.Add(draft);
+            await db.SaveChangesAsync();
+            return draft.Id;
+        }
+
+        public async Task<(int DraftId, string SpecPath)> SeedUiScriptDraftWithFileAsync(int sessionId, string title)
+        {
+            var dir = Path.Combine(DataDir, "generated", "ui", "smoke");
+            Directory.CreateDirectory(dir);
+            var specPath = Path.Combine(dir, $"test-{Guid.NewGuid():N}.ui.spec.ts");
+            await File.WriteAllTextAsync(specPath, "// original spec");
+
+            using var scope = Provider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+            var draft = new ApiTestDraft
+            {
+                SessionId = sessionId,
+                Title = title,
+                Preconditions = "",
+                StepsJson = "[{\"action\":\"open app\",\"expected\":\"dashboard visible\"}]",
+                Status = ApiDraftStatus.Approved,
+                Level = TestLevel.Ui,
+                DraftKind = ApiDraftKind.UiScript,
+                Bucket = "smoke",
+                SpecCode = "// original spec",
+                SpecFilePath = specPath,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+            db.ApiTestDrafts.Add(draft);
+            await db.SaveChangesAsync();
+            return (draft.Id, specPath);
         }
 
         public async Task<int> SeedUiScriptDraftAsync(int sessionId, string title, string bucket)
@@ -575,6 +734,35 @@ public sealed class QaLoopOrchestratorTests
         private readonly ILlmClient _client;
         public StubLlmClientFactory(ILlmClient client) => _client = client;
         public Task<ILlmClient> CreateAsync(CancellationToken ct = default) => Task.FromResult(_client);
+    }
+
+    private sealed class StubPlaywrightAgentService : IPlaywrightAgentService
+    {
+        private readonly string _dataDir;
+        public StubPlaywrightAgentService(string dataDir) => _dataDir = dataDir;
+
+        public async Task<string> GenerateScriptAsync(
+            string caseTitle, string stepsJson, string bucket, int tcIdPending,
+            IProgress<string>? progress, CancellationToken ct)
+        {
+            var dir = Path.Combine(_dataDir, "generated", "ui", bucket);
+            Directory.CreateDirectory(dir);
+            var slug = new string(caseTitle.ToLowerInvariant()
+                .Select(c => char.IsLetterOrDigit(c) ? c : '-').ToArray()).Trim('-');
+            var path = Path.Combine(dir, $"{slug}-{tcIdPending}.ui.spec.ts");
+            await File.WriteAllTextAsync(path, $"// stub spec for {caseTitle}", ct);
+            return path;
+        }
+
+        public async Task HealAsync(
+            string specFilePath, string failureMessage,
+            IProgress<string>? progress, CancellationToken ct)
+        {
+            var existing = File.Exists(specFilePath)
+                ? await File.ReadAllTextAsync(specFilePath, ct)
+                : "";
+            await File.WriteAllTextAsync(specFilePath, existing + "\n// healed", ct);
+        }
     }
 
     /// <summary>Stub ADO client for QA Loop push tests: records write calls; reads throw unless
