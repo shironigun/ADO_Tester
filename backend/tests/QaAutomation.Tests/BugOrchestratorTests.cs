@@ -13,6 +13,7 @@ using QaAutomation.Infrastructure.Data;
 using QaAutomation.Infrastructure.Events;
 using QaAutomation.Infrastructure.Knowledgebase;
 using QaAutomation.Infrastructure.Orchestrators;
+using QaAutomation.Infrastructure.TextSearch;
 
 namespace QaAutomation.Tests;
 
@@ -156,6 +157,7 @@ public sealed class BugOrchestratorTests
                 .UseSqlite($"Data Source={dbPath}")
                 .AddInterceptors(SqliteBusyTimeoutInterceptor.Instance));
             services.AddScoped<DatabaseInitializer>();
+            services.AddSingleton<ITextSearchProvider, SqliteFts5Search>();
             services.AddScoped<IKnowledgebaseService, KnowledgebaseService>();
             services.AddSingleton(Options.Create(new StorageOptions { DataDirectory = dataDir, KnowledgebaseFolderName = "kb" }));
             var provider = services.BuildServiceProvider();
@@ -167,7 +169,8 @@ public sealed class BugOrchestratorTests
             var bugs = new BugOrchestrator(
                 provider.GetRequiredService<IServiceScopeFactory>(),
                 new EventBus(), new PipelineConcurrency(), new CancellationRegistry(),
-                ado, new StubLlmClientFactory(llm), NullLogger<BugOrchestrator>.Instance);
+                ado, new StubLlmClientFactory(llm), new NullCodeContextService(),
+                NullLogger<BugOrchestrator>.Instance);
 
             return new Harness { Provider = provider, Bugs = bugs, Ado = ado, DbPath = dbPath, DataDir = dataDir };
         }
@@ -196,6 +199,16 @@ public sealed class BugOrchestratorTests
                 try { File.Delete(DbPath + s); } catch { /* best effort */ }
             try { Directory.Delete(DataDir, recursive: true); } catch { /* best effort */ }
         }
+    }
+
+    private sealed class NullCodeContextService : ICodeContextService
+    {
+        public Task<(string DiffSummary, string Code)> DiscoverAsync(
+            int workItemId, Core.Models.AdoWorkItem wi, Core.Models.AnalystOutput? analysis,
+            IReadOnlyList<string> commitIds, IReadOnlyList<string> prIds,
+            string? extraHintText, bool alwaysSearch,
+            ILlmClient llm, string key, CancellationToken ct)
+            => Task.FromResult(("", ""));
     }
 
     private sealed class StubLlmClientFactory(ILlmClient client) : ILlmClientFactory

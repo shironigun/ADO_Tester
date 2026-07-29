@@ -455,6 +455,52 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                     b.ToTable("ErrorLogs", (string)null);
                 });
 
+            modelBuilder.Entity("QaAutomation.Core.Models.ExistingTestCaseIndexEntry", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("Id");
+
+                    b.Property<int>("AdoTestCaseId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("AdoTestCaseId");
+
+                    b.Property<int>("ScanId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("ScanId");
+
+                    b.Property<string>("StepsHash")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("StepsHash");
+
+                    b.Property<string>("StepsSummary")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("StepsSummary");
+
+                    b.Property<string>("SuitePath")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("SuitePath");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Title");
+
+                    b.Property<string>("TitleSignature")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("TitleSignature");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ScanId")
+                        .HasDatabaseName("ix_ExistingTestCaseIndexEntries_ScanId");
+
+                    b.ToTable("ExistingTestCaseIndexEntries", (string)null);
+                });
+
             modelBuilder.Entity("QaAutomation.Core.Models.KnowledgebaseDocument", b =>
                 {
                     b.Property<int>("Id")
@@ -1162,6 +1208,41 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                     b.ToTable("TestFailures", (string)null);
                 });
 
+            modelBuilder.Entity("QaAutomation.Core.Models.TestPlanScan", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("Id");
+
+                    b.Property<int>("CaseCount")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("CaseCount");
+
+                    b.Property<int>("PlanId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("PlanId");
+
+                    b.Property<DateTime>("ScannedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("ScannedAt");
+
+                    b.Property<int?>("SuiteId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("SuiteId");
+
+                    b.Property<string>("TitlePatternSummary")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("TitlePatternSummary");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PlanId", "SuiteId")
+                        .HasDatabaseName("ix_TestPlanScans_PlanId_SuiteId");
+
+                    b.ToTable("TestPlanScans", (string)null);
+                });
+
             modelBuilder.Entity("QaAutomation.Core.Models.TestRun", b =>
                 {
                     b.Property<int>("Id")
@@ -1295,6 +1376,10 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                         .HasColumnType("INTEGER")
                         .HasColumnName("Id");
 
+                    b.Property<string>("AdditionalContext")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("AdditionalContext");
+
                     b.Property<string>("AnalysisJson")
                         .HasColumnType("TEXT")
                         .HasColumnName("AnalysisJson");
@@ -1302,6 +1387,10 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                     b.Property<int?>("BatchId")
                         .HasColumnType("INTEGER")
                         .HasColumnName("BatchId");
+
+                    b.Property<string>("CodeContext")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("CodeContext");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT")
@@ -1319,14 +1408,30 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("EventLogJson");
 
+                    b.Property<string>("PlanNavigationHint")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("PlanNavigationHint");
+
                     b.Property<int>("ProjectId")
                         .HasColumnType("INTEGER")
                         .HasColumnName("ProjectId");
+
+                    b.Property<int?>("ReferenceTestPlanId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("ReferenceTestPlanId");
+
+                    b.Property<int?>("ReferenceTestSuiteId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("ReferenceTestSuiteId");
 
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("TEXT")
                         .HasColumnName("Status");
+
+                    b.Property<string>("TesterContext")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("TesterContext");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT")

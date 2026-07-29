@@ -25,7 +25,7 @@ public interface IExistingTestsIndexService
     /// <summary>Post-gen similarity check on <paramref name="cases"/>.
     /// Returns a result for each case that is a clear duplicate or borderline match in the index.</summary>
     Task<IReadOnlyList<DedupResult>> FindDuplicatesAsync(
-        int planId, int? suiteId, IReadOnlyList<GeneratedTestCase> cases, CancellationToken ct);
+        int planId, int? suiteId, IReadOnlyList<DedupTestCase> cases, CancellationToken ct);
 }
 
 /// <summary>Outcome of a single dedup check.</summary>
@@ -35,7 +35,8 @@ public interface IExistingTestsIndexService
 /// <param name="MatchedAdoId">The existing ADO TC work-item id.</param>
 public sealed record DedupResult(string Title, bool IsClearDuplicate, string? MatchedTitle, int? MatchedAdoId);
 
-/// <summary>A generated test case to check against the dedup index.</summary>
+/// <summary>A test case passed to the dedup index for similarity checking. Distinct from the full
+/// <see cref="QaAutomation.Core.Models.GeneratedTestCase"/> (which carries Steps/Preconditions).</summary>
 /// <param name="Title">Test case title.</param>
 /// <param name="StepsSummary">Concatenated step actions for overlap check.</param>
-public sealed record GeneratedTestCase(string Title, string StepsSummary);
+public sealed record DedupTestCase(string Title, string StepsSummary);

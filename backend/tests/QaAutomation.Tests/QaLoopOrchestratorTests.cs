@@ -10,6 +10,7 @@ using QaAutomation.Core.Models;
 using QaAutomation.Infrastructure.Data;
 using QaAutomation.Infrastructure.Events;
 using QaAutomation.Infrastructure.Orchestrators;
+using QaAutomation.Infrastructure.TextSearch;
 
 namespace QaAutomation.Tests;
 
@@ -321,6 +322,7 @@ public sealed class QaLoopOrchestratorTests
                 .UseSqlite($"Data Source={dbPath}")
                 .AddInterceptors(SqliteBusyTimeoutInterceptor.Instance));
             services.AddScoped<DatabaseInitializer>();
+            services.AddSingleton<ITextSearchProvider, SqliteFts5Search>();
             var provider = services.BuildServiceProvider();
 
             using (var scope = provider.CreateScope())

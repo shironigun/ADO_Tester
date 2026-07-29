@@ -1,16 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    PostgreSQL-only EF Core migrations assembly (dual-provider migration — see
-    docs/progress/RalphLoop/postgresql-migration/). Kept SEPARATE from the SQLite migrations in
-    QaAutomation.Infrastructure/Data/Migrations because EF migrations are provider-specific and the two
-    sets cannot share a single model snapshot. Selected at runtime + design-time via
-    UseNpgsql(cs, o => o.MigrationsAssembly("QaAutomation.Migrations.Npgsql")).
+    PostgreSQL-only EF Core migrations assembly (dual-provider migration).
+    Kept SEPARATE from the SQLite migrations in QaAutomation.Infrastructure/Data/Migrations
+    because EF migrations are provider-specific and the two sets cannot share a model snapshot.
+    Selected at runtime and design-time via MigrationsAssembly("QaAutomation.Migrations.Npgsql").
 
-    Generate the initial migration locally (no .NET SDK in CI):
+    To generate the initial migration locally, run from the backend/ folder:
       dotnet sln add src/QaAutomation.Migrations.Npgsql
-      DATABASE_PROVIDER=postgres dotnet ef migrations add InitialNpgsql \
-        --project src/QaAutomation.Migrations.Npgsql --startup-project src/QaAutomation.Api
+      set DATABASE_PROVIDER=postgres and run:
+        dotnet ef migrations add InitialNpgsql
+        with -p src/QaAutomation.Migrations.Npgsql -s src/QaAutomation.Api
     The Npgsql provider is available transitively via the Infrastructure reference.
   -->
 

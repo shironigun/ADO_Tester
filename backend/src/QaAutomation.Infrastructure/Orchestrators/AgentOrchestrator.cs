@@ -410,7 +410,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             try
             {
                 var toCheck = generated
-                    .Select(g => new GeneratedTestCase(g.Title, string.Join(" | ", g.Steps.Select(s => s.Action))))
+                    .Select(g => new DedupTestCase(g.Title, string.Join(" | ", g.Steps.Select(s => s.Action))))
                     .ToList();
                 dedupResults = await _dedupIndex.FindDuplicatesAsync(
                     session.ReferenceTestPlanId.Value, session.ReferenceTestSuiteId, toCheck, ct);

@@ -13,6 +13,7 @@ using QaAutomation.Infrastructure.Data;
 using QaAutomation.Infrastructure.Events;
 using QaAutomation.Infrastructure.QaPipelines;
 using QaAutomation.Infrastructure.Results;
+using QaAutomation.Infrastructure.TextSearch;
 
 namespace QaAutomation.Tests;
 
@@ -233,6 +234,7 @@ public sealed class JUnitTriageSplitTests
                 .UseSqlite($"Data Source={dbPath}")
                 .AddInterceptors(SqliteBusyTimeoutInterceptor.Instance));
             services.AddScoped<DatabaseInitializer>();
+            services.AddSingleton<ITextSearchProvider, SqliteFts5Search>();
             var provider = services.BuildServiceProvider();
 
             using (var init = provider.CreateScope())
@@ -295,6 +297,7 @@ public sealed class JUnitTriageSplitTests
                 .UseSqlite($"Data Source={dbPath}")
                 .AddInterceptors(SqliteBusyTimeoutInterceptor.Instance));
             services.AddScoped<DatabaseInitializer>();
+            services.AddSingleton<ITextSearchProvider, SqliteFts5Search>();
             var provider = services.BuildServiceProvider();
 
             using (var init = provider.CreateScope())

@@ -11,6 +11,7 @@ using QaAutomation.Infrastructure.Data;
 using QaAutomation.Infrastructure.Events;
 using QaAutomation.Infrastructure.Knowledgebase;
 using QaAutomation.Infrastructure.Orchestrators;
+using QaAutomation.Infrastructure.TextSearch;
 
 namespace QaAutomation.Tests;
 
@@ -146,6 +147,7 @@ public sealed class AgentOrchestratorTests
                 .UseSqlite($"Data Source={dbPath}")
                 .AddInterceptors(SqliteBusyTimeoutInterceptor.Instance));
             services.AddScoped<DatabaseInitializer>();
+            services.AddSingleton<ITextSearchProvider, SqliteFts5Search>();
             services.AddScoped<IKnowledgebaseService, KnowledgebaseService>();
             services.AddSingleton(Options.Create(new StorageOptions { DataDirectory = dataDir, KnowledgebaseFolderName = "kb" }));
             var provider = services.BuildServiceProvider();
@@ -161,6 +163,8 @@ public sealed class AgentOrchestratorTests
                 new CancellationRegistry(),
                 ado,
                 new StubLlmClientFactory(llm),
+                new NullCodeContextService(),
+                new NullExistingTestsIndexService(),
                 NullLogger<AgentOrchestrator>.Instance);
 
             return new Harness { Provider = provider, Orchestrator = orchestrator, Ado = ado, DbPath = dbPath, DataDir = dataDir };
@@ -199,6 +203,24 @@ public sealed class AgentOrchestratorTests
         private readonly ILlmClient _client;
         public StubLlmClientFactory(ILlmClient client) => _client = client;
         public Task<ILlmClient> CreateAsync(CancellationToken cancellationToken = default) => Task.FromResult(_client);
+    }
+
+    private sealed class NullCodeContextService : ICodeContextService
+    {
+        public Task<(string DiffSummary, string Code)> DiscoverAsync(
+            int workItemId, Core.Models.AdoWorkItem wi, Core.Models.AnalystOutput? analysis,
+            IReadOnlyList<string> commitIds, IReadOnlyList<string> prIds,
+            string? extraHintText, bool alwaysSearch,
+            ILlmClient llm, string key, CancellationToken ct)
+            => Task.FromResult(("", ""));
+    }
+
+    private sealed class NullExistingTestsIndexService : IExistingTestsIndexService
+    {
+        public Task<Core.Models.TestPlanScan> EnsureIndexAsync(int planId, int? suiteId, bool forceRescan, CancellationToken ct) => throw new NotImplementedException();
+        public Task<Core.Models.TestPlanScan?> GetScanStatusAsync(int planId, int? suiteId, CancellationToken ct) => Task.FromResult<Core.Models.TestPlanScan?>(null);
+        public Task<string?> BuildTesterContextAsync(int planId, int? suiteId, Core.Models.AnalystOutput? analysis, int byteBudget, CancellationToken ct) => Task.FromResult<string?>(null);
+        public Task<IReadOnlyList<DedupResult>> FindDuplicatesAsync(int planId, int? suiteId, IReadOnlyList<DedupTestCase> cases, CancellationToken ct) => Task.FromResult<IReadOnlyList<DedupResult>>([]);
     }
 
     /// <summary>Records the four write calls the Author-Tests push exercises; the read returns a

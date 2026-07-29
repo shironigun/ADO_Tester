@@ -192,7 +192,7 @@ public sealed class ExistingTestsIndexService : IExistingTestsIndexService
     }
 
     public async Task<IReadOnlyList<DedupResult>> FindDuplicatesAsync(
-        int planId, int? suiteId, IReadOnlyList<GeneratedTestCase> cases, CancellationToken ct)
+        int planId, int? suiteId, IReadOnlyList<DedupTestCase> cases, CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
