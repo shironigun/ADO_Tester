@@ -16,8 +16,7 @@
 #   Claude CLI (default) — authenticate once after first `docker compose up`:
 #     docker compose exec backend claude      # follow the prompt, open the URL in a new browser tab
 #
-#   GitHub Copilot CLI — authenticate once, then switch provider in the app AppBar:
-#     docker compose exec -it backend copilot -p "hello"   # device-flow on first run
+#   GitHub Copilot CLI — set COPILOT_GITHUB_TOKEN in .env (GitHub PAT), then switch provider in AppBar.
 services:
   postgres:
     image: postgres:16

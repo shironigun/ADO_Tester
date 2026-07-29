@@ -64,25 +64,32 @@ Verify from the app: **Diagnostics** page → the Claude CLI provider should sho
 > (Anthropic / Azure OpenAI / an OpenAI-compatible gateway) — set that provider's key in `.env` and
 > restart the backend (`docker compose restart backend`).
 
-## 4. Log in to GitHub Copilot CLI (one time, optional) — no API key needed
+## 4. Authenticate GitHub Copilot CLI (optional)
 
 The **GitHub Copilot CLI** is also installed in the backend image. You only need this if you want to
-use the **CopilotCli** provider (switchable in the AppBar). It uses your **GitHub Copilot subscription**.
+use the **CopilotCli** provider (switchable in the AppBar).
 
-Authentication is triggered automatically the **first time you run a prompt**. Use `-it` so the
-device-flow code exchange can happen in your terminal:
+The cleanest authentication method for Docker is a **GitHub PAT** set as `COPILOT_GITHUB_TOKEN`
+in your `.env` file. The CLI picks it up automatically; no interactive step needed.
 
-```powershell
-docker compose exec -it backend copilot -p "hello"
-```
+1. Generate a classic GitHub PAT at <https://github.com/settings/tokens> (no specific scopes
+   required — Copilot access is account-level).
+2. Add it to your `.env`:
 
-- The CLI prints a GitHub device-flow **URL + code**. Open the URL in a browser, enter the code, and
-  approve with your GitHub account.
-- Credentials are stored under `$HOME/.config/github-copilot` and persist on the `adotester_claude`
-  volume across restarts.
+   ```
+   COPILOT_GITHUB_TOKEN=ghp_your_token_here
+   ```
 
-Verify: run the command again — it should return a response without prompting for auth. Then switch
-the provider to **CopilotCli** in the app AppBar.
+3. Restart the backend to pick it up:
+
+   ```powershell
+   docker compose restart backend
+   ```
+
+4. Switch the provider to **CopilotCli** in the app AppBar and run a generation to verify.
+
+> **Alternative:** exec into the container (`docker compose exec -it backend sh`) and run
+> `copilot`, then use the `/login` command for the interactive device-flow.
 
 ## 5. Everyday commands
 
