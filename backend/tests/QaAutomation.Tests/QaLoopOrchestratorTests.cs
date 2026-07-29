@@ -301,6 +301,71 @@ public sealed class QaLoopOrchestratorTests
         Assert.Single(h.Ado.SuiteAdds);
     }
 
+    // ── QLV2-112: refine-merge and analyzer-refine ────────────────────────────
+
+    [Fact]
+    public async Task RefineDrafts_updates_targeted_removes_flagged_leaves_approved_and_pushed_untouched()
+    {
+        // Stub LLM: RefineAsync calls two passes each (spec + testcase) — 6 calls for 3 targeted drafts,
+        // but we only target 1 here. Analyzer pass returns the usual EmptyAnalyzerJson (not invoked).
+        var llm = new StubLlmClient(
+            ContractSpecJson,                     // ContractGenerator pass 1 (spec)
+            ContractTcJson                        // ContractGenerator pass 2 (test-case)
+        );
+        using var h = Harness.Create(llm);
+
+        var sid = await h.SeedSessionAsync("Deals");
+        // Seed InventoryJson so RefineDraftsInnerAsync can resolve the route for the targeted draft.
+        await h.SetInventoryAsync(sid, OneGapAnalyzerJson);
+
+        var draftDraft    = await h.SeedDraftAsync(sid, "[<tcId-pending>] Draft title",    ApiDraftStatus.Draft,    sourceRoutes: "GET /deals");
+        var draftApproved = await h.SeedDraftAsync(sid, "[<tcId-pending>] Approved title", ApiDraftStatus.Approved, sourceRoutes: "GET /deals");
+        var draftPushed   = await h.SeedDraftAsync(sid, "[123] Pushed title",              ApiDraftStatus.Pushed,   adoId: 123);
+        var draftToRemove = await h.SeedDraftAsync(sid, "[<tcId-pending>] Remove me",      ApiDraftStatus.Draft,    sourceRoutes: "GET /deals");
+
+        var perDraft = new List<QaAutomation.Core.Contracts.ApiDraftFeedback>
+        {
+            new() { DraftId = draftDraft,    Feedback = "Add 401 coverage" },
+            new() { DraftId = draftToRemove, Remove = true },
+        };
+        await h.Orchestrator.RefineDraftsAsync(sid, overallFeedback: null, perDraft: perDraft);
+        await h.WaitForTerminalAsync(sid, ApiSessionStatus.Drafted);
+
+        using var scope = h.Provider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+        var drafts = await db.ApiTestDrafts.Where(d => d.SessionId == sid).ToListAsync();
+
+        // Targeted Draft → still in the DB, updated (status stays Draft — refine doesn't change status)
+        Assert.True(drafts.Any(d => d.Id == draftDraft && d.Status == ApiDraftStatus.Draft));
+
+        // Approved and Pushed must be untouched
+        Assert.True(drafts.Any(d => d.Id == draftApproved && d.Status == ApiDraftStatus.Approved));
+        Assert.True(drafts.Any(d => d.Id == draftPushed   && d.Status == ApiDraftStatus.Pushed));
+
+        // Flagged Draft removed
+        Assert.False(drafts.Any(d => d.Id == draftToRemove));
+    }
+
+    [Fact]
+    public async Task RerunAnalyze_returns_session_to_AwaitingReview_with_refreshed_matrix()
+    {
+        // Stub LLM: RefineInventoryAsync is one pass → return a revised analyzer JSON.
+        var refinedJson = """
+            {"inventory":{"routes":[{"method":"GET","route":"/deals","requestDto":null,"responseDto":null,"validationRules":[],"authRequirements":[]}],"dtos":[],"workflows":[]},"surfaceMatrix":{"rows":[{"id":"c1","level":"contract","label":"Contract GET /deals (refined)","status":"gap"}]},"additionalFilesNeeded":[]}
+            """;
+        using var h = Harness.Create(new StubLlmClient(refinedJson));
+
+        var sid = await h.SeedSessionAsync("Deals");
+        await h.SetInventoryAsync(sid, OneGapAnalyzerJson);
+
+        await h.Orchestrator.RerunAnalyzeAsync(sid, "Please add GET /deals coverage");
+        var session = await h.WaitForTerminalAsync(sid, ApiSessionStatus.AwaitingReview);
+
+        // Matrix should reflect the refined output
+        Assert.Contains("refined", session.AnalysisJson ?? "");
+        Assert.Equal("Please add GET /deals coverage", session.LastFeedback);
+    }
+
     // ── harness ──────────────────────────────────────────────────────────────────
 
     private sealed class Harness : IDisposable
@@ -363,9 +428,23 @@ public sealed class QaLoopOrchestratorTests
             return session.Id;
         }
 
+        public async Task SetInventoryAsync(int sessionId, string analyzerJson)
+        {
+            using var scope = Provider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+            var session = await db.ApiTestSessions.FindAsync(sessionId);
+            if (session is null) return;
+            // Parse only the inventory and surface sub-documents — avoid depending on ModuleAnalysis record.
+            var doc = System.Text.Json.JsonDocument.Parse(analyzerJson);
+            session.InventoryJson = doc.RootElement.GetProperty("inventory").GetRawText();
+            session.AnalysisJson  = doc.RootElement.GetProperty("surfaceMatrix").GetRawText();
+            session.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+        }
+
         public async Task<int> SeedDraftAsync(
             int sessionId, string title, ApiDraftStatus status, int? adoId = null,
-            int? caseIndex = null, string? specFilePath = null)
+            int? caseIndex = null, string? specFilePath = null, string? sourceRoutes = null)
         {
             using var scope = Provider.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
@@ -380,6 +459,7 @@ public sealed class QaLoopOrchestratorTests
                 Level = TestLevel.Contract,
                 CaseIndex = caseIndex,
                 SpecFilePath = specFilePath,
+                SourceRoutesJson = sourceRoutes is null ? null : System.Text.Json.JsonSerializer.Serialize(new[] { sourceRoutes }),
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
             };
@@ -481,7 +561,8 @@ public sealed class QaLoopOrchestratorTests
         public Task<IReadOnlyList<string>> DiscoverWorkItemTypesAsync(string organization, string project, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<string>> DiscoverBranchesAsync(string? repository = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<AdoWorkItem>> SearchWorkItemsAsync(string query, int top = 20, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task<IReadOnlyList<LinkedTestCase>> GetLinkedTestCasesAsync(int storyId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<LinkedTestCase>> GetLinkedTestCasesAsync(int storyId, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<LinkedTestCase>>([]);
         public Task<(IReadOnlyList<AdoWorkItem> Items, bool Truncated)> GetChildWorkItemsAsync(int parentId, bool recursive = true, int maxDepth = 5, int maxNodes = 500, int maxLeaves = 200, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<AdoTestPlan>> GetTestPlansAsync(CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<AdoTestSuite>> GetTestSuitesAsync(int planId, CancellationToken ct = default) => throw new NotImplementedException();
