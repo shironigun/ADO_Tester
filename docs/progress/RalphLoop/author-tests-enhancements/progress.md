@@ -18,48 +18,48 @@
 
 ## Task Progress
 
-| Task ID | Task Name | Status | Started | Completed | Notes |
-|---------|-----------|--------|---------|-----------|-------|
-| ATE-001 | TestSession context + reference-plan columns | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | 6 nullable cols; context mirrors BugSession. Local build pending |
-| ATE-002 | AuthorRunContext record | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | 4 optional fields; null = old behavior |
-| ATE-003 | AuthorTestsContracts DTOs | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | Start/RunTester/RerunAnalyst/RefineTester + TestFeedback; TestSessionDetail +6 fields |
-| ATE-004 | IAgentOrchestrator surface | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | context args on Start/RunTester; RerunAnalystAsync/RefineTesterAsync |
-| ATE-005 | AnalystAgent prompt injection | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | ## Additional Context + ## Code Context; system prompt untouched |
-| ATE-006 | AnalystAgent RefineAsync | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | prior AnalystOutput + reviewer-feedback section; same output shape |
-| ATE-007 | TesterAgent prompt injection | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | ## Extra Context + ## Existing Test Cases; Open-Questions preserved |
-| ATE-008 | TesterAgent RefineAsync | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | stable ref + status (Pushed read-only); tolerant ref/id parse |
-| ATE-009 | AgentOrchestrator refine + context + ReconcileDrafts | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | merge not wipe; unflagged survive, Pushed untouched |
-| ATE-010 | AuthorTestsController passthrough + refine endpoints | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | rerun-analyst + refine-tester (202) |
-| ATE-011 | FE api rerunAnalyst/refineTester + bodies | VERIFIED | 2026-07-28 | 2026-07-28 | tsc/vite build clean |
-| ATE-012 | FE AuthorStartForm additional-context field | VERIFIED | 2026-07-28 | 2026-07-28 | multiline field + helper text |
-| ATE-013 | FE AwaitingTester extra-tester-context box | VERIFIED | 2026-07-28 | 2026-07-28 | re-seeds from session |
-| ATE-014 | FE Analyst refine panel | VERIFIED | 2026-07-28 | 2026-07-28 | box + button → rerunAnalyst; disabled in-flight |
-| ATE-015 | FE Tester refine (per-test + remove + overall) | VERIFIED | 2026-07-28 | 2026-07-28 | Pushed cards locked |
-| ATE-016 | ICodeContextService abstraction | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | DiscoverAsync; extraHintText + alwaysSearch knobs |
-| ATE-017 | CodeContextService implementation | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | budgets 20/30k/250k; reuses BugHelpers + ADO Git surface |
-| ATE-018 | EventPhases.Dedup constant | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | "dedup" wire phase |
-| ATE-019 | Register ICodeContextService (DI) | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | singleton in DependencyInjection.cs |
-| ATE-020 | AgentOrchestrator Discover step + feed Analyst | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | alwaysSearch:true; session.CodeContext persisted |
-| ATE-021 | FE pipeline step insert + index shift | VERIFIED | 2026-07-28 | 2026-07-28 | discover=2/analyst=3/tester=4; reachedIdx reads codeContext |
-| ATE-022 | FE Discover panel | VERIFIED | 2026-07-28 | 2026-07-28 | code card + fallback |
-| ATE-023 | FE phase union + PHASE_LABEL (dedup) | VERIFIED | 2026-07-28 | 2026-07-28 | fixed TS2367 by adding 'dedup' to the union |
-| ATE-024 | IExistingTestsIndexService + records | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | Ensure/Status/Build/FindDuplicates; DedupResult/GeneratedTestCase |
-| ATE-025 | TestPlanScan entity | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | plan/suite scope + ScannedAt + CaseCount + TitlePatternSummary |
-| ATE-026 | ExistingTestCaseIndexEntry entity | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | normalized TitleSignature + StepsSummary/Hash |
-| ATE-027 | ExistingTestsIndexService implementation | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | 24h TTL; recursive scan; title-sig + Jaccard step overlap |
-| ATE-028 | QaDbContext DbSets + mappings | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | 2 DbSets + explicit Phase-1 TestSession mappings |
-| ATE-029 | DatabaseInitializer FTS5 test_case_index | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | bootstrapped alongside doc_chunks |
-| ATE-030 | Register IExistingTestsIndexService (DI) | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | singleton |
-| ATE-031 | AgentOrchestrator dedup injection + post-gen + event | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | inject when ref plan set; emit dedup {skipped,flagged} |
-| ATE-032 | AuthorTestsController rescan + scan-status endpoints | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | POST rescan + GET scan-status, optional suiteId |
-| ATE-033 | AuthorTestsContracts rescan/scan-status responses | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | RescanPlanResponse + ScanStatusResponse |
-| ATE-034 | EF migration AuthorTestsContextAndIndex | VERIFIED | 2026-07-29 | 2026-07-29 | Generated locally; 156/156 tests pass |
-| ATE-035 | FE api rescanPlan/getScanStatus | VERIFIED | 2026-07-28 | 2026-07-28 | optional suiteId; typed responses |
-| ATE-036 | FE AwaitingTester ref-plan pickers + rescan + status | VERIFIED | 2026-07-28 | 2026-07-28 | plan/suite selects + Rescan + "indexed N cases" + nav hint |
-| ATE-037 | FE AuthorStartForm ref-plan pickers | VERIFIED | 2026-07-28 | 2026-07-28 | pickers + nav hint → startSession |
-| ATE-038 | FE Tester dedup results card | VERIFIED | 2026-07-28 | 2026-07-28 | skipped/flagged chips + matched-TC tooltips |
-| ATE-039 | CLAUDE.md docs-discipline rule + /docs structure | VERIFIED | 2026-07-28 | 2026-07-28 | committed d31d8d2 |
-| ATE-040 | Feature doc + changelog entry | VERIFIED | 2026-07-29 | 2026-07-29 | docs/features/author-tests-enhancements.md + docs/changelog/changelog.md |
+| Task ID | Task Name                                            | Status        | Started    | Completed  | Notes                                                                                 |
+| ------- | ---------------------------------------------------- | ------------- | ---------- | ---------- | ------------------------------------------------------------------------------------- |
+| ATE-001 | TestSession context + reference-plan columns         | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | 6 nullable cols; context mirrors BugSession. Local build pending                      |
+| ATE-002 | AuthorRunContext record                              | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | 4 optional fields; null = old behavior                                                |
+| ATE-003 | AuthorTestsContracts DTOs                            | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | Start/RunTester/RerunAnalyst/RefineTester + TestFeedback; TestSessionDetail +6 fields |
+| ATE-004 | IAgentOrchestrator surface                           | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | context args on Start/RunTester; RerunAnalystAsync/RefineTesterAsync                  |
+| ATE-005 | AnalystAgent prompt injection                        | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | ## Additional Context + ## Code Context; system prompt untouched                      |
+| ATE-006 | AnalystAgent RefineAsync                             | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | prior AnalystOutput + reviewer-feedback section; same output shape                    |
+| ATE-007 | TesterAgent prompt injection                         | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | ## Extra Context + ## Existing Test Cases; Open-Questions preserved                   |
+| ATE-008 | TesterAgent RefineAsync                              | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | stable ref + status (Pushed read-only); tolerant ref/id parse                         |
+| ATE-009 | AgentOrchestrator refine + context + ReconcileDrafts | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | merge not wipe; unflagged survive, Pushed untouched                                   |
+| ATE-010 | AuthorTestsController passthrough + refine endpoints | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | rerun-analyst + refine-tester (202)                                                   |
+| ATE-011 | FE api rerunAnalyst/refineTester + bodies            | VERIFIED      | 2026-07-28 | 2026-07-28 | tsc/vite build clean                                                                  |
+| ATE-012 | FE AuthorStartForm additional-context field          | VERIFIED      | 2026-07-28 | 2026-07-28 | multiline field + helper text                                                         |
+| ATE-013 | FE AwaitingTester extra-tester-context box           | VERIFIED      | 2026-07-28 | 2026-07-28 | re-seeds from session                                                                 |
+| ATE-014 | FE Analyst refine panel                              | VERIFIED      | 2026-07-28 | 2026-07-28 | box + button → rerunAnalyst; disabled in-flight                                       |
+| ATE-015 | FE Tester refine (per-test + remove + overall)       | VERIFIED      | 2026-07-28 | 2026-07-28 | Pushed cards locked                                                                   |
+| ATE-016 | ICodeContextService abstraction                      | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | DiscoverAsync; extraHintText + alwaysSearch knobs                                     |
+| ATE-017 | CodeContextService implementation                    | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | budgets 20/30k/250k; reuses BugHelpers + ADO Git surface                              |
+| ATE-018 | EventPhases.Dedup constant                           | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | "dedup" wire phase                                                                    |
+| ATE-019 | Register ICodeContextService (DI)                    | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | singleton in DependencyInjection.cs                                                   |
+| ATE-020 | AgentOrchestrator Discover step + feed Analyst       | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | alwaysSearch:true; session.CodeContext persisted                                      |
+| ATE-021 | FE pipeline step insert + index shift                | VERIFIED      | 2026-07-28 | 2026-07-28 | discover=2/analyst=3/tester=4; reachedIdx reads codeContext                           |
+| ATE-022 | FE Discover panel                                    | VERIFIED      | 2026-07-28 | 2026-07-28 | code card + fallback                                                                  |
+| ATE-023 | FE phase union + PHASE_LABEL (dedup)                 | VERIFIED      | 2026-07-28 | 2026-07-28 | fixed TS2367 by adding 'dedup' to the union                                           |
+| ATE-024 | IExistingTestsIndexService + records                 | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | Ensure/Status/Build/FindDuplicates; DedupResult/GeneratedTestCase                     |
+| ATE-025 | TestPlanScan entity                                  | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | plan/suite scope + ScannedAt + CaseCount + TitlePatternSummary                        |
+| ATE-026 | ExistingTestCaseIndexEntry entity                    | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | normalized TitleSignature + StepsSummary/Hash                                         |
+| ATE-027 | ExistingTestsIndexService implementation             | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | 24h TTL; recursive scan; title-sig + Jaccard step overlap                             |
+| ATE-028 | QaDbContext DbSets + mappings                        | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | 2 DbSets + explicit Phase-1 TestSession mappings                                      |
+| ATE-029 | DatabaseInitializer FTS5 test_case_index             | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | bootstrapped alongside doc_chunks                                                     |
+| ATE-030 | Register IExistingTestsIndexService (DI)             | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | singleton                                                                             |
+| ATE-031 | AgentOrchestrator dedup injection + post-gen + event | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | inject when ref plan set; emit dedup {skipped,flagged}                                |
+| ATE-032 | AuthorTestsController rescan + scan-status endpoints | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | POST rescan + GET scan-status, optional suiteId                                       |
+| ATE-033 | AuthorTestsContracts rescan/scan-status responses    | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | RescanPlanResponse + ScanStatusResponse                                               |
+| ATE-034 | EF migration AuthorTestsContextAndIndex              | VERIFIED      | 2026-07-29 | 2026-07-29 | Generated locally; 156/156 tests pass                                                 |
+| ATE-035 | FE api rescanPlan/getScanStatus                      | VERIFIED      | 2026-07-28 | 2026-07-28 | optional suiteId; typed responses                                                     |
+| ATE-036 | FE AwaitingTester ref-plan pickers + rescan + status | VERIFIED      | 2026-07-28 | 2026-07-28 | plan/suite selects + Rescan + "indexed N cases" + nav hint                            |
+| ATE-037 | FE AuthorStartForm ref-plan pickers                  | VERIFIED      | 2026-07-28 | 2026-07-28 | pickers + nav hint → startSession                                                     |
+| ATE-038 | FE Tester dedup results card                         | VERIFIED      | 2026-07-28 | 2026-07-28 | skipped/flagged chips + matched-TC tooltips                                           |
+| ATE-039 | CLAUDE.md docs-discipline rule + /docs structure     | VERIFIED      | 2026-07-28 | 2026-07-28 | committed d31d8d2                                                                     |
+| ATE-040 | Feature doc + changelog entry                        | VERIFIED      | 2026-07-29 | 2026-07-29 | docs/features/author-tests-enhancements.md + docs/changelog/changelog.md              |
 
 ---
 

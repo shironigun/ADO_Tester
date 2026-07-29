@@ -1,10 +1,10 @@
 # Feature: Author Tests Enhancements
 
-| **Feature** | Author Tests Enhancements — Free-Text Context, Code Discovery, Refine Loops, Existing-Test Dedup |
-|---|---|
-| **Date Shipped** | 2026-07-28 |
-| **Branch** | `claude/chat-session-flzhjh` → merged to `master` 2026-07-29 |
-| **PRD/Design** | `docs/progress/RalphLoop/author-tests-enhancements/` |
+| **Feature**      | Author Tests Enhancements — Free-Text Context, Code Discovery, Refine Loops, Existing-Test Dedup |
+| ---------------- | ------------------------------------------------------------------------------------------------ |
+| **Date Shipped** | 2026-07-28                                                                                       |
+| **Branch**       | `claude/chat-session-flzhjh` → merged to `master` 2026-07-29                                     |
+| **PRD/Design**   | `docs/progress/RalphLoop/author-tests-enhancements/`                                             |
 
 ## What it does
 
@@ -37,14 +37,14 @@ Fetch → Retrieve KB → Discover code → Analyst → (pause) → Tester
 ## Data changes (migration `AuthorTestsContextAndIndex`, 2026-07-29)
 
 **`TestSessions` — 6 new nullable columns:**
-| Column | Type | Purpose |
-|---|---|---|
-| `AdditionalContext` | `TEXT?` | Free-text passed to Analyst |
-| `CodeContext` | `TEXT?` | Code snippet assembled by code-discovery |
-| `TesterContext` | `TEXT?` | Free-text passed to Tester |
-| `ReferenceTestPlanId` | `INTEGER?` | Dedup reference plan |
+| Column                 | Type       | Purpose                                   |
+| ---------------------- | ---------- | ----------------------------------------- |
+| `AdditionalContext`    | `TEXT?`    | Free-text passed to Analyst               |
+| `CodeContext`          | `TEXT?`    | Code snippet assembled by code-discovery  |
+| `TesterContext`        | `TEXT?`    | Free-text passed to Tester                |
+| `ReferenceTestPlanId`  | `INTEGER?` | Dedup reference plan                      |
 | `ReferenceTestSuiteId` | `INTEGER?` | Dedup reference suite (null = whole plan) |
-| `PlanNavigationHint` | `TEXT?` | Display hint (plan/suite name) |
+| `PlanNavigationHint`   | `TEXT?`    | Display hint (plan/suite name)            |
 
 **New tables:**
 - `TestPlanScans` — one row per plan/suite scan, with `ScannedAt`, `CaseCount`, `TitlePatternSummary`.
@@ -53,18 +53,18 @@ Fetch → Retrieve KB → Discover code → Analyst → (pause) → Tester
 
 ## Key files
 
-| Area | File(s) |
-|---|---|
-| Entities | `Core/Models/TestSession.cs`, `TestPlanScan.cs`, `ExistingTestCaseIndexEntry.cs` |
-| Contracts | `Core/Contracts/AuthorTestsContracts.cs` |
-| Interfaces | `Core/Abstractions/IAgentOrchestrator.cs`, `ICodeContextService.cs`, `IExistingTestsIndexService.cs` |
-| Agents | `Infrastructure/Agents/AnalystAgent.cs`, `TesterAgent.cs` |
-| Services | `Infrastructure/ExistingTests/ExistingTestsIndexService.cs`, `Infrastructure/CodeContext/CodeContextService.cs` |
-| Orchestrator | `Infrastructure/Orchestrators/AgentOrchestrator.cs` |
-| Controller | `Infrastructure/Api/Controllers/AuthorTestsController.cs` |
-| DI | `Infrastructure/DependencyInjection.cs` |
-| Migration | `Infrastructure/Data/Migrations/20260729012836_AuthorTestsContextAndIndex.cs` |
-| Frontend | `client/src/session/configs/authorTests.tsx`, `client/src/api/authorTests.ts`, `client/src/session/SessionWorkspace.tsx` |
+| Area         | File(s)                                                                                                                  |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| Entities     | `Core/Models/TestSession.cs`, `TestPlanScan.cs`, `ExistingTestCaseIndexEntry.cs`                                         |
+| Contracts    | `Core/Contracts/AuthorTestsContracts.cs`                                                                                 |
+| Interfaces   | `Core/Abstractions/IAgentOrchestrator.cs`, `ICodeContextService.cs`, `IExistingTestsIndexService.cs`                     |
+| Agents       | `Infrastructure/Agents/AnalystAgent.cs`, `TesterAgent.cs`                                                                |
+| Services     | `Infrastructure/ExistingTests/ExistingTestsIndexService.cs`, `Infrastructure/CodeContext/CodeContextService.cs`          |
+| Orchestrator | `Infrastructure/Orchestrators/AgentOrchestrator.cs`                                                                      |
+| Controller   | `Infrastructure/Api/Controllers/AuthorTestsController.cs`                                                                |
+| DI           | `Infrastructure/DependencyInjection.cs`                                                                                  |
+| Migration    | `Infrastructure/Data/Migrations/20260729012836_AuthorTestsContextAndIndex.cs`                                            |
+| Frontend     | `client/src/session/configs/authorTests.tsx`, `client/src/api/authorTests.ts`, `client/src/session/SessionWorkspace.tsx` |
 
 ## Parity guardrails preserved
 - System prompts (embedded `.txt` resources) are **not touched** — all new instructions are in user prompts only.
