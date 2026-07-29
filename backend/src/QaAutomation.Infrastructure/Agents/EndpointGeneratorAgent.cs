@@ -14,10 +14,10 @@ public sealed class EndpointGeneratorAgent
     public EndpointGeneratorAgent(ILlmClient llm) => _llm = llm;
 
     public async Task<List<GeneratedSpec>> GenerateAsync(
-        string module, RouteInfo route,
+        string module, RouteInfo route, string? extraContext = null,
         StreamProgress? progress = null, Action<LlmEmit>? emit = null, CancellationToken ct = default)
     {
-        var userPrompt = BuildPrompt(module, route);
+        var userPrompt = BuildPrompt(module, route, extraContext);
 
         // Pass 1: spec + cases metadata
         var specData = await JsonUtils.CompleteJsonAsync(
@@ -71,7 +71,7 @@ public sealed class EndpointGeneratorAgent
         return specs;
     }
 
-    private static string BuildPrompt(string module, RouteInfo route)
+    private static string BuildPrompt(string module, RouteInfo route, string? extraContext = null)
     {
         var sb = new StringBuilder();
         sb.Append($"Module: {module}\n");
@@ -80,7 +80,64 @@ public sealed class EndpointGeneratorAgent
         if (route.ResponseDto is not null) sb.Append($"ResponseDto: {route.ResponseDto}\n");
         if (route.ValidationRules.Count > 0) sb.Append($"ValidationRules: {string.Join(", ", route.ValidationRules)}\n");
         if (route.AuthRequirements.Count > 0) sb.Append($"AuthRequirements: {string.Join(", ", route.AuthRequirements)}\n");
+        if (!string.IsNullOrWhiteSpace(extraContext))
+        {
+            sb.Append("\n## Extra Context (from tester)\n");
+            sb.Append(extraContext.Trim());
+            sb.Append('\n');
+        }
         return sb.ToString();
+    }
+
+    /// <summary>Refine existing endpoint specs with reviewer feedback.
+    /// Returns one refined spec per case; system prompt unchanged.</summary>
+    public async Task<List<GeneratedSpec>> RefineAsync(
+        string module, RouteInfo route, string priorSpec, IReadOnlyList<TestCaseStep> priorSteps,
+        string feedback, string? extraContext = null,
+        StreamProgress? progress = null, Action<LlmEmit>? emit = null, CancellationToken ct = default)
+    {
+        var sb = new StringBuilder();
+        sb.Append(BuildPrompt(module, route, extraContext));
+        sb.Append("\n## Prior spec\n");
+        sb.Append(priorSpec);
+        sb.Append("\n\n## Prior ADO test case steps\n");
+        foreach (var s in priorSteps)
+            sb.Append($"- Action: {s.Action} | Expected: {s.Expected}\n");
+        sb.Append("\n## Reviewer Feedback (refine, do NOT restart)\n");
+        sb.Append(feedback.Trim());
+        sb.Append('\n');
+        var userPrompt = sb.ToString();
+
+        var specData = await JsonUtils.CompleteJsonAsync(
+            _llm, AgentPrompts.EndpointGeneratorSystem, userPrompt, '{', progress, emit,
+            label: "EndpointGenerator(refine)", cancellationToken: ct);
+        var rawSpecCode = "";
+        var cases = new List<(string Label, int StatusCode)>();
+        if (specData is JsonObject so)
+        {
+            rawSpecCode = JsonUtils.StrOr(so, "spec");
+            if (so["cases"] is JsonArray ca)
+                foreach (var c in ca)
+                    if (c is JsonObject co)
+                        cases.Add((JsonUtils.StrOr(co, "label"), (int)(co["statusCode"]?.GetValue<int>() ?? 200)));
+        }
+        if (cases.Count == 0) cases = [("200 happy path", 200), ("401 without bearer", 401), ("400 on invalid input", 400)];
+        var specCode = SpecNormalizer.Normalize(TitleTag.EnsureIndexedInSpec(rawSpecCode, cases.Count));
+
+        var tcData = await JsonUtils.CompleteJsonAsync(
+            _llm, AgentPrompts.EndpointTestcaseSystem,
+            userPrompt + $"\n\nGenerate one test case per case: {string.Join(", ", cases.Select(c => c.Label))}",
+            '[', progress, emit, label: "EndpointTestcase(refine)", cancellationToken: ct);
+        var tcs = ParseTestCases(tcData, cases);
+        var mod = TitleTag.TitleCaseModule(module);
+        var specs = new List<GeneratedSpec>();
+        for (var i = 0; i < cases.Count; i++)
+        {
+            var tc = i < tcs.Count ? tcs[i] : FallbackTestCase(module, route, cases[i].Label, cases[i].StatusCode);
+            tc.Title = TitleTag.EnsureTitle(tc.Title, $"{mod} - Endpoint - {route.Method} - Verify that {route.Route} {cases[i].Label}", caseIndex: i);
+            specs.Add(new GeneratedSpec { Level = "endpoint", Title = tc.Title, SpecCode = specCode, SourceRoutes = [$"{route.Method} {route.Route}"], TestCase = tc, CaseIndex = i });
+        }
+        return specs;
     }
 
     private static List<GeneratedTestCase> ParseTestCases(JsonNode data, List<(string Label, int StatusCode)> cases)

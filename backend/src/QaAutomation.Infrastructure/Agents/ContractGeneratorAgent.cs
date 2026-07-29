@@ -63,10 +63,10 @@ public sealed class ContractGeneratorAgent
     public ContractGeneratorAgent(ILlmClient llm) => _llm = llm;
 
     public async Task<GeneratedSpec> GenerateAsync(
-        string module, RouteInfo route,
+        string module, RouteInfo route, string? extraContext = null,
         StreamProgress? progress = null, Action<LlmEmit>? emit = null, CancellationToken ct = default)
     {
-        var userPrompt = BuildPrompt(module, route);
+        var userPrompt = BuildPrompt(module, route, extraContext);
 
         // Pass 1: spec + schema
         var specData = await JsonUtils.CompleteJsonAsync(
@@ -103,7 +103,7 @@ public sealed class ContractGeneratorAgent
         };
     }
 
-    private static string BuildPrompt(string module, RouteInfo route)
+    private static string BuildPrompt(string module, RouteInfo route, string? extraContext = null)
     {
         var sb = new StringBuilder();
         sb.Append($"Module: {module}\n");
@@ -112,7 +112,48 @@ public sealed class ContractGeneratorAgent
         if (route.ResponseDto is not null) sb.Append($"ResponseDto: {route.ResponseDto}\n");
         if (route.ValidationRules.Count > 0) sb.Append($"ValidationRules: {string.Join(", ", route.ValidationRules)}\n");
         if (route.AuthRequirements.Count > 0) sb.Append($"AuthRequirements: {string.Join(", ", route.AuthRequirements)}\n");
+        if (!string.IsNullOrWhiteSpace(extraContext))
+        {
+            sb.Append("\n## Extra Context (from tester)\n");
+            sb.Append(extraContext.Trim());
+            sb.Append('\n');
+        }
         return sb.ToString();
+    }
+
+    /// <summary>Refine an existing contract spec+steps with reviewer feedback.
+    /// Re-emits with the same output shape; system prompt unchanged.</summary>
+    public async Task<GeneratedSpec> RefineAsync(
+        string module, RouteInfo route, string priorSpec, IReadOnlyList<TestCaseStep> priorSteps,
+        string feedback, string? extraContext = null,
+        StreamProgress? progress = null, Action<LlmEmit>? emit = null, CancellationToken ct = default)
+    {
+        var sb = new StringBuilder();
+        sb.Append(BuildPrompt(module, route, extraContext));
+        sb.Append("\n## Prior spec\n");
+        sb.Append(priorSpec);
+        sb.Append("\n\n## Prior ADO test case steps\n");
+        foreach (var s in priorSteps)
+            sb.Append($"- Action: {s.Action} | Expected: {s.Expected}\n");
+        sb.Append("\n## Reviewer Feedback (refine, do NOT restart)\n");
+        sb.Append(feedback.Trim());
+        sb.Append('\n');
+
+        var specData = await JsonUtils.CompleteJsonAsync(
+            _llm, AgentPrompts.ContractGeneratorSystem, sb.ToString(), '{', progress, emit,
+            label: "ContractGenerator(refine)", cancellationToken: ct);
+        var specCode = "";
+        var schemaJson = "";
+        if (specData is JsonObject so) { specCode = JsonUtils.StrOr(so, "spec"); schemaJson = JsonUtils.StrOr(so, "schema"); }
+        specCode = SpecNormalizer.Normalize(TitleTag.EnsureInSpec(specCode, $"Contract: {route.Method} {route.Route}"));
+
+        var tcData = await JsonUtils.CompleteJsonAsync(
+            _llm, AgentPrompts.ContractTestcaseSystem, sb.ToString(), '[', progress, emit,
+            label: "ContractTestcase(refine)", cancellationToken: ct);
+        var mod = TitleTag.TitleCaseModule(module);
+        var tc = ParseTestCase(tcData) ?? FallbackTestCase(module, route);
+        tc.Title = TitleTag.EnsureTitle(tc.Title, $"{mod} - Contract - {route.Method} - Verify that {route.Route} response shape matches the expected schema");
+        return new GeneratedSpec { Level = "contract", Title = tc.Title, SpecCode = specCode, SchemaJson = schemaJson.Length > 0 ? schemaJson : null, SourceRoutes = [$"{route.Method} {route.Route}"], TestCase = tc };
     }
 
     private static GeneratedTestCase? ParseTestCase(JsonNode data)

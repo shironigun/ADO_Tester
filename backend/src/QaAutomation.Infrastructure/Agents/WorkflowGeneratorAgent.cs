@@ -14,10 +14,10 @@ public sealed class WorkflowGeneratorAgent
     public WorkflowGeneratorAgent(ILlmClient llm) => _llm = llm;
 
     public async Task<GeneratedSpec> GenerateAsync(
-        string module, WorkflowInfo workflow, InventoryDoc inventory,
+        string module, WorkflowInfo workflow, InventoryDoc inventory, string? extraContext = null,
         StreamProgress? progress = null, Action<LlmEmit>? emit = null, CancellationToken ct = default)
     {
-        var userPrompt = BuildPrompt(module, workflow, inventory);
+        var userPrompt = BuildPrompt(module, workflow, inventory, extraContext);
 
         // Pass 1: spec
         var specData = await JsonUtils.CompleteJsonAsync(
@@ -48,7 +48,7 @@ public sealed class WorkflowGeneratorAgent
         };
     }
 
-    private static string BuildPrompt(string module, WorkflowInfo workflow, InventoryDoc inventory)
+    private static string BuildPrompt(string module, WorkflowInfo workflow, InventoryDoc inventory, string? extraContext = null)
     {
         var sb = new StringBuilder();
         sb.Append($"Module: {module}\n");
@@ -64,7 +64,49 @@ public sealed class WorkflowGeneratorAgent
             if (route is not null)
                 sb.Append($"  {route.Method} {route.Route}: requestDto={route.RequestDto ?? "none"}, responseDto={route.ResponseDto ?? "none"}\n");
         }
+        if (!string.IsNullOrWhiteSpace(extraContext))
+        {
+            sb.Append("\n## Extra Context (from tester)\n");
+            sb.Append(extraContext.Trim());
+            sb.Append('\n');
+        }
         return sb.ToString();
+    }
+
+    /// <summary>Refine an existing workflow spec+steps with reviewer feedback.
+    /// Re-emits with the same output shape; system prompt unchanged.</summary>
+    public async Task<GeneratedSpec> RefineAsync(
+        string module, WorkflowInfo workflow, InventoryDoc inventory,
+        string priorSpec, IReadOnlyList<TestCaseStep> priorSteps,
+        string feedback, string? extraContext = null,
+        StreamProgress? progress = null, Action<LlmEmit>? emit = null, CancellationToken ct = default)
+    {
+        var sb = new StringBuilder();
+        sb.Append(BuildPrompt(module, workflow, inventory, extraContext));
+        sb.Append("\n## Prior spec\n");
+        sb.Append(priorSpec);
+        sb.Append("\n\n## Prior ADO test case steps\n");
+        foreach (var s in priorSteps)
+            sb.Append($"- Action: {s.Action} | Expected: {s.Expected}\n");
+        sb.Append("\n## Reviewer Feedback (refine, do NOT restart)\n");
+        sb.Append(feedback.Trim());
+        sb.Append('\n');
+        var userPrompt = sb.ToString();
+
+        var specData = await JsonUtils.CompleteJsonAsync(
+            _llm, AgentPrompts.WorkflowGeneratorSystem, userPrompt, '{', progress, emit,
+            label: "WorkflowGenerator(refine)", cancellationToken: ct);
+        var specCode = "";
+        if (specData is JsonObject so)
+            specCode = SpecNormalizer.Normalize(TitleTag.EnsureInSpec(JsonUtils.StrOr(so, "spec"), $"Workflow: {workflow.Name}"));
+
+        var tcData = await JsonUtils.CompleteJsonAsync(
+            _llm, AgentPrompts.WorkflowTestcaseSystem, userPrompt, '[', progress, emit,
+            label: "WorkflowTestcase(refine)", cancellationToken: ct);
+        var mod = TitleTag.TitleCaseModule(module);
+        var tc = ParseTestCase(tcData) ?? FallbackTestCase(module, workflow);
+        tc.Title = TitleTag.EnsureTitle(tc.Title, $"{mod} - Workflow - Verify that the {workflow.Name} workflow completes end-to-end");
+        return new GeneratedSpec { Level = "workflow", Title = tc.Title, SpecCode = specCode, SourceRoutes = workflow.Steps.Select(s => s.Endpoint).Distinct().ToList(), TestCase = tc };
     }
 
     private static GeneratedTestCase? ParseTestCase(JsonNode data)
