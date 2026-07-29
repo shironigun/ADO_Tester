@@ -40,7 +40,8 @@ COPY --from=node:20-bookworm-slim /usr/local/bin/node             /usr/local/bin
 COPY --from=node:20-bookworm-slim /usr/local/lib/node_modules     /usr/local/lib/node_modules
 RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
-    && npm install -g @anthropic-ai/claude-code @github/copilot \
+    && npm install -g @anthropic-ai/claude-code \
+    && npm install -g @github/copilot --force \
     && npm cache clean --force
 
 # HOME must be stable + writable so the Claude CLI can persist its subscription
