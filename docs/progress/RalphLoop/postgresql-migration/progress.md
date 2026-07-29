@@ -18,24 +18,24 @@
 
 ## Task Progress
 
-| Task ID | Task Name | Status | Started | Completed | Notes |
-|---------|-----------|--------|---------|-----------|-------|
-| PGM-001 | Add Npgsql EF Core provider package | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | Npgsql.EntityFrameworkCore.PostgreSQL 8.0.11 added; user restores/builds locally |
-| PGM-002 | Boot-time provider selection + DatabaseOptions | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | DatabaseOptions enum; Program.cs reads DATABASE_PROVIDER (+ legacy-timestamp switch); AddInfrastructure branch (SQLite overload kept for tests) |
-| PGM-003 | Design-time factory provider branch | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | QaDbContextFactory branches on DATABASE_PROVIDER |
-| PGM-004 | ITextSearchProvider abstraction | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | Interface + DocChunkHit in Infrastructure/TextSearch (see layering note in log) |
-| PGM-005 | SqliteFts5Search + PostgresFtsSearch | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | SQLite = bm25/MATCH moved verbatim; Postgres = tsvector/GIN/ts_rank; FtsMatch shared tokenizer |
-| PGM-006 | Generate the Npgsql migration | VERIFIED | 2026-07-29 | 2026-07-29 | `dotnet sln add` + `dotnet ef migrations add Initial`; 156/156 tests pass |
-| PGM-007 | DatabaseInitializer provider branch | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | adopt-qa.db gated to IsSqlite(); EnsureFtsTable → _textSearch.EnsureSchema |
-| PGM-008 | KnowledgebaseService delegates FTS | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | upload/delete/search via provider; MatchExpression kept (delegates to FtsMatch) |
-| PGM-009 | ExistingTestsIndexService delegates FTS | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | write + FTS read via provider; also removed a latent non-partial-class regex issue |
-| PGM-010 | Register ITextSearchProvider by provider (DI) | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | Sqlite/Postgres singleton by DATABASE_PROVIDER; 2 test fixtures updated |
-| PGM-011 | .env keys | VERIFIED | 2026-07-28 | 2026-07-28 | DATABASE_PROVIDER + POSTGRES_CONNECTION_STRING documented in .env.example (config text) |
-| PGM-012 | Local Docker setup guide | VERIFIED | 2026-07-28 | 2026-07-28 | docs/setup/postgresql-docker.md written |
-| PGM-013 | Azure deployment guide | VERIFIED | 2026-07-28 | 2026-07-28 | docs/setup/postgresql-azure.md written |
-| PGM-014 | Local verification (SQLite green + PG round-trip) | NOT STARTED | | | User-run |
-| PGM-015 | Feature doc + changelog | NOT STARTED | | | After verification |
-| PGM-016 | Scaffold the Npgsql migrations assembly | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | New QaAutomation.Migrations.Npgsql project + MigrationsAssembly wiring + Api ref + docker-compose.yml |
+| Task ID | Task Name                                         | Status        | Started    | Completed  | Notes                                                                                                                                           |
+| ------- | ------------------------------------------------- | ------------- | ---------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| PGM-001 | Add Npgsql EF Core provider package               | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | Npgsql.EntityFrameworkCore.PostgreSQL 8.0.11 added; user restores/builds locally                                                                |
+| PGM-002 | Boot-time provider selection + DatabaseOptions    | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | DatabaseOptions enum; Program.cs reads DATABASE_PROVIDER (+ legacy-timestamp switch); AddInfrastructure branch (SQLite overload kept for tests) |
+| PGM-003 | Design-time factory provider branch               | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | QaDbContextFactory branches on DATABASE_PROVIDER                                                                                                |
+| PGM-004 | ITextSearchProvider abstraction                   | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | Interface + DocChunkHit in Infrastructure/TextSearch (see layering note in log)                                                                 |
+| PGM-005 | SqliteFts5Search + PostgresFtsSearch              | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | SQLite = bm25/MATCH moved verbatim; Postgres = tsvector/GIN/ts_rank; FtsMatch shared tokenizer                                                  |
+| PGM-006 | Generate the Npgsql migration                     | VERIFIED      | 2026-07-29 | 2026-07-29 | `dotnet sln add` + `dotnet ef migrations add Initial`; 156/156 tests pass                                                                       |
+| PGM-007 | DatabaseInitializer provider branch               | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | adopt-qa.db gated to IsSqlite(); EnsureFtsTable → _textSearch.EnsureSchema                                                                      |
+| PGM-008 | KnowledgebaseService delegates FTS                | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | upload/delete/search via provider; MatchExpression kept (delegates to FtsMatch)                                                                 |
+| PGM-009 | ExistingTestsIndexService delegates FTS           | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | write + FTS read via provider; also removed a latent non-partial-class regex issue                                                              |
+| PGM-010 | Register ITextSearchProvider by provider (DI)     | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | Sqlite/Postgres singleton by DATABASE_PROVIDER; 2 test fixtures updated                                                                         |
+| PGM-011 | .env keys                                         | VERIFIED      | 2026-07-28 | 2026-07-28 | DATABASE_PROVIDER + POSTGRES_CONNECTION_STRING documented in .env.example (config text)                                                         |
+| PGM-012 | Local Docker setup guide                          | VERIFIED      | 2026-07-28 | 2026-07-28 | docs/setup/postgresql-docker.md written                                                                                                         |
+| PGM-013 | Azure deployment guide                            | VERIFIED      | 2026-07-28 | 2026-07-28 | docs/setup/postgresql-azure.md written                                                                                                          |
+| PGM-014 | Local verification (SQLite green + PG round-trip) | NOT STARTED   |            |            | User-run                                                                                                                                        |
+| PGM-015 | Feature doc + changelog                           | NOT STARTED   |            |            | After verification                                                                                                                              |
+| PGM-016 | Scaffold the Npgsql migrations assembly           | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | New QaAutomation.Migrations.Npgsql project + MigrationsAssembly wiring + Api ref + docker-compose.yml                                           |
 
 ---
 

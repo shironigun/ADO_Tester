@@ -12,28 +12,28 @@ Acceptance-criteria shorthand: **B** = `dotnet build` clean · **T** = `dotnet t
 
 ## Slab 1 — Free-text + merge-refine in QA Loop
 
-- [ ] **QLV2-101** — Add `AdditionalContext`, `GenerateContext`, `LastFeedback` (nullable `TEXT`) to
+- [x] **QLV2-101** — Add `AdditionalContext`, `GenerateContext`, `LastFeedback` (nullable `TEXT`) to
   `ApiTestSession`; generate migration `AddQaLoopFreeTextContext`. **AC:** B; migration applies on
   startup; three columns present on `ApiTestSessions`; no other schema change.
-- [ ] **QLV2-102** — `ModuleAnalyzerAgent.AnalyzeInventoryAsync`/`BuildInventoryPrompt` accept
+- [x] **QLV2-102** — `ModuleAnalyzerAgent.AnalyzeInventoryAsync`/`BuildInventoryPrompt` accept
   `additionalContext` and inject `## Additional Context (from tester)` when non-empty. **AC:** B/T; prompt
   contains the section only when non-empty; system prompt untouched.
-- [ ] **QLV2-103** — Add `ModuleAnalyzerAgent.RefineInventoryAsync(prior inventory+surface, feedback, …)`
+- [x] **QLV2-103** — Add `ModuleAnalyzerAgent.RefineInventoryAsync(prior inventory+surface, feedback, …)`
   returning `ModuleAnalysis` (reuses `ParseAnalysis`). **AC:** B/T; unit test parses a refined
   inventory+matrix; malformed JSON throws `AgentException`.
-- [ ] **QLV2-104** — Contract/Endpoint/Workflow generators: add `extraContext` param (user-prompt
+- [x] **QLV2-104** — Contract/Endpoint/Workflow generators: add `extraContext` param (user-prompt
   injection) + a `RefineAsync` overload (prior spec/steps + feedback → re-emit). **AC:** B/T;
   `AdoGoldenTests` green; system prompts byte-exact.
-- [ ] **QLV2-105** — `QaLoopOrchestrator`: thread `session.AdditionalContext` into the analyze call and
+- [x] **QLV2-105** — `QaLoopOrchestrator`: thread `session.AdditionalContext` into the analyze call and
   `session.GenerateContext` into all three generator calls. **AC:** B/T; live scan with prose reaches the
   analyzer prompt.
-- [ ] **QLV2-106** — `QaLoopOrchestrator.RerunAnalyzeAsync` + `RerunAnalyzeInnerAsync` + `IQaLoopOrchestrator`
+- [x] **QLV2-106** — `QaLoopOrchestrator.RerunAnalyzeAsync` + `RerunAnalyzeInnerAsync` + `IQaLoopOrchestrator`
   entry. **AC:** B/T; `Analyzing → AwaitingReview`; `InventoryJson`/`AnalysisJson`/`LastFeedback` persisted;
   gap-selected default re-applied.
-- [ ] **QLV2-107** — `QaLoopOrchestrator.RefineDraftsAsync` + `RefineDraftsInnerAsync` + `ReconcileApiDrafts`
+- [x] **QLV2-107** — `QaLoopOrchestrator.RefineDraftsAsync` + `RefineDraftsInnerAsync` + `ReconcileApiDrafts`
   + interface entry. **AC:** B/T; targeted Draft/Rejected rows updated in place + on-disk spec rewritten;
   `ref:"new"` inserted; flagged removed; **Approved + Pushed untouched**; `Drafting → Drafted`.
-- [ ] **QLV2-108** — Contracts: `ScanStartRequest.AdditionalContext`, generate-drafts `GenerateContext`,
+- [x] **QLV2-108** — Contracts: `ScanStartRequest.AdditionalContext`, generate-drafts `GenerateContext`,
   `RerunAnalyzeRequest`, `RefineDraftsRequest`, `ApiDraftFeedback`; `ApiSessionDetail` surfaces the three
   context fields. **AC:** B.
 - [ ] **QLV2-109** — `QaLoopController`: persist `AdditionalContext` on `scan/start`; write `GenerateContext`

@@ -128,6 +128,9 @@ namespace QaAutomation.Migrations.Npgsql.Migrations
                         .HasDefaultValue(true)
                         .HasColumnName("ActivityEnabled");
 
+                    b.Property<string>("AdditionalContext")
+                        .HasColumnType("text");
+
                     b.Property<string>("AnalysisJson")
                         .HasColumnType("text")
                         .HasColumnName("AnalysisJson");
@@ -160,9 +163,15 @@ namespace QaAutomation.Migrations.Npgsql.Migrations
                         .HasColumnType("text")
                         .HasColumnName("FrontendPath");
 
+                    b.Property<string>("GenerateContext")
+                        .HasColumnType("text");
+
                     b.Property<string>("InventoryJson")
                         .HasColumnType("text")
                         .HasColumnName("InventoryJson");
+
+                    b.Property<string>("LastFeedback")
+                        .HasColumnType("text");
 
                     b.Property<string>("Module")
                         .IsRequired()

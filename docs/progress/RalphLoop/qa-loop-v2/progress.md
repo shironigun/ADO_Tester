@@ -4,19 +4,16 @@
 - **Design:** `solution.md` (authoritative vision brief) · **Ruleset:** `Ralph loop.md`
 - **Backlog:** `prd.md` (tasks `QLV2-###`, grouped by slab, built in order) · **Guide:** `blueprint.md`
 - **Started:** 2026-07-29
-- **Status:** DOCS COMPLETE — full Ralph-loop doc set written (`solution.md` / `blueprint.md` / `prd.md` /
-  `Ralph loop.md` / this file). **Implementation is executed LOCALLY** on the .NET-capable Windows machine
-  (this authoring container has no .NET SDK and the network blocks Microsoft's dotnet hosts — see the
-  blocker log below). Slab 1 is broken down to executable tasks (QLV2-101..113); Slabs 2–3 carry the
-  locked design + epic backlogs (QLV2-2xx/3xx) to be decomposed to file level when each is implemented.
-- **Resume point for local execution:** start at **QLV2-101**; follow `Ralph loop.md` every iteration.
+- **Status:** SLAB 1 IN PROGRESS — QLV2-101..108 VERIFIED (locally on Windows). Currently working on
+  QLV2-109 (controller) → 110/111 (frontend) → 112 (tests) → 113 (docs).
+- **Resume point:** QLV2-109 — `QaLoopController` wire new fields + rerun-analyze/refine-drafts endpoints.
 
 ## Slab status
-| Slab | Name | Status |
-|------|------|--------|
-| 1 | Free-text + merge-refine in QA Loop | Not started |
-| 2 | UI testing phase (Playwright agents via MCP + Claude CLI) | Not started |
-| 3 | Scripts Board module | Not started |
+| Slab | Name                                                      | Status                           |
+| ---- | --------------------------------------------------------- | -------------------------------- |
+| 1    | Free-text + merge-refine in QA Loop                       | In progress (QLV2-101..108 done) |
+| 2    | UI testing phase (Playwright agents via MCP + Claude CLI) | Not started                      |
+| 3    | Scripts Board module                                      | Not started                      |
 
 ---
 
@@ -35,7 +32,15 @@
 - Wrote `blueprint.md` (Slab 1 detailed; Slabs 2–3 outlined) and `prd.md` (Slab 1 tasks QLV2-101..113;
   Slabs 2–3 epics QLV2-2xx/3xx).
 
-### 2026-07-29 (BLOCKER — no .NET SDK in this environment)
+### 2026-07-29 (Slab 1 QLV2-101..108 — locally on Windows, all VERIFIED)
+- **QLV2-101** — Added `AdditionalContext`, `GenerateContext`, `LastFeedback` (nullable TEXT) to `ApiTestSession`; generated migration `AddQaLoopFreeTextContext`. Build + 156 tests green.
+- **QLV2-102** — `ModuleAnalyzerAgent.BuildInventoryPrompt` + `AnalyzeInventoryAsync` gain `additionalContext` optional param; appends `## Additional Context (from tester)` when non-empty. System prompt untouched. `QaLoopOrchestrator` passes `session.AdditionalContext` via named arg.
+- **QLV2-103** — `ModuleAnalyzerAgent.RefineInventoryAsync` added: builds prompt with prior inventory+surfaceMatrix JSON + reviewer feedback; reuses `CompleteJsonAsync`+`ParseAnalysis`; same `ModuleAnalysis` output shape.
+- **QLV2-104** — `ContractGeneratorAgent`, `EndpointGeneratorAgent`, `WorkflowGeneratorAgent`: each `GenerateAsync` gains `string? extraContext`; appends `## Extra Context (from tester)` into user prompt. Each gains a `RefineAsync` overload (prior spec/steps + feedback + extraContext → same `GeneratedSpec` shape). `AdoGoldenTests` green.
+- **QLV2-105** — `QaLoopOrchestrator.GenerateDraftsInnerAsync`: all three generator `GenerateAsync` calls pass `session.GenerateContext` as `extraContext` via named arg.
+- **QLV2-106** — `IQaLoopOrchestrator.RerunAnalyzeAsync` + `QaLoopOrchestrator.RerunAnalyzeAsync`/`RerunAnalyzeInnerAsync`: loads prior inventory+surface, sets `Analyzing`, calls `RefineInventoryAsync`, re-applies gap-selected, persists, sets `AwaitingReview`+PersistLog. Full cancel/error handling.
+- **QLV2-107** — `IQaLoopOrchestrator.RefineDraftsAsync` + `QaLoopOrchestrator.RefineDraftsAsync`/`RefineDraftsInnerAsync`/`MatchRouteForDraft`/`MatchWorkflowForDraft`/`RefineSingle`/`RefineSingleMulti` helpers. Targeted Draft/Rejected rows refined in place via matching generator `RefineAsync`; disk spec rewritten; flagged rows removed; Approved+Pushed NEVER touched; `Drafted` on completion.
+- **QLV2-108** — `QaLoopContracts`: `ScanStartRequest` += `AdditionalContext`; new `RerunAnalyzeRequest`, `ApiDraftFeedback`, `RefineDraftsRequest`, `GenerateDraftsRequest`; `ApiSessionDetail` += `AdditionalContext`/`GenerateContext`/`LastFeedback` + `From()` mapper updated.
 - **Environment blocker for backend build/test.** This remote Linux container has **only Node/npm** (v22)
   — **no .NET SDK**, and the network policy **denies** the dotnet build hosts (`builds.dotnet.microsoft.com`
   → 403 on CONNECT; allowlist is npm/pypi/crates/go registries only, no Microsoft dotnet host). The repo's

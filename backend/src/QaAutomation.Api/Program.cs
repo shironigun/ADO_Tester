@@ -7,7 +7,9 @@ using QaAutomation.Infrastructure;
 
 // Load local secrets (ADOACCESS_PAT, ANTHROPIC_API_KEY, …) from a .env file into process env vars.
 // TraversePath searches up the directory tree so it works from the repo root or the project folder.
-DotNetEnv.Env.TraversePath().Load();
+// NoClobber: existing env vars (set in the shell / Docker / EF tools) take precedence over .env — this
+// is standard 12-factor behavior and lets DATABASE_PROVIDER=postgres be set externally for Postgres.
+DotNetEnv.Env.TraversePath().NoClobber().Load();
 
 var builder = WebApplication.CreateBuilder(args);
 
