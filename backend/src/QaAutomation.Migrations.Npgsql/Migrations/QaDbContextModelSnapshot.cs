@@ -1174,6 +1174,96 @@ namespace QaAutomation.Migrations.Npgsql.Migrations
                     b.ToTable("SchemaTables", (string)null);
                 });
 
+            modelBuilder.Entity("QaAutomation.Core.Models.ScriptBoardRun", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("Id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone")
+                        .HasColumnName("CreatedAt");
+
+                    b.Property<long>("DurationMs")
+                        .HasColumnType("bigint")
+                        .HasColumnName("DurationMs");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("text")
+                        .HasColumnName("ErrorMessage");
+
+                    b.Property<string>("EventLogJson")
+                        .HasColumnType("text")
+                        .HasColumnName("EventLogJson");
+
+                    b.Property<int>("Failed")
+                        .HasColumnType("integer")
+                        .HasColumnName("Failed");
+
+                    b.Property<DateTime?>("FinishedAt")
+                        .HasColumnType("timestamp without time zone")
+                        .HasColumnName("FinishedAt");
+
+                    b.Property<bool>("Headed")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("Headed");
+
+                    b.Property<string>("JunitPath")
+                        .HasColumnType("text")
+                        .HasColumnName("JunitPath");
+
+                    b.Property<int>("Passed")
+                        .HasColumnType("integer")
+                        .HasColumnName("Passed");
+
+                    b.Property<int>("ProjectId")
+                        .HasColumnType("integer")
+                        .HasColumnName("ProjectId");
+
+                    b.Property<string>("ReportPath")
+                        .HasColumnType("text")
+                        .HasColumnName("ReportPath");
+
+                    b.Property<string>("SelectionSummary")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("SelectionSummary");
+
+                    b.Property<int>("Skipped")
+                        .HasColumnType("integer")
+                        .HasColumnName("Skipped");
+
+                    b.Property<string>("SpecFilePathsJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("SpecFilePathsJson");
+
+                    b.Property<DateTime?>("StartedAt")
+                        .HasColumnType("timestamp without time zone")
+                        .HasColumnName("StartedAt");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("Status");
+
+                    b.Property<int?>("Workers")
+                        .HasColumnType("integer")
+                        .HasColumnName("Workers");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "CreatedAt")
+                        .HasDatabaseName("ix_ScriptBoardRuns_ProjectId_CreatedAt");
+
+                    b.ToTable("ScriptBoardRuns", (string)null);
+                });
+
             modelBuilder.Entity("QaAutomation.Core.Models.TestCaseDraft", b =>
                 {
                     b.Property<int>("Id")

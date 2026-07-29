@@ -332,6 +332,7 @@ public static class DependencyInjection
         services.AddSingleton<IPlaywrightRunner, PlaywrightRunner>();
         services.AddScoped<RunExecutionService>();
         services.AddSingleton<ITeamsNotifier, TeamsNotifier>();
+        services.AddScoped<IScriptInventoryService, ScriptsBoard.ScriptInventoryService>();
         // Registered as its own concrete type (not just AddHostedService<T>, which only exposes T as
         // IHostedService) so QaPipelinesController can inject the SAME singleton instance directly —
         // AddHostedService<T> alone leaves T unresolvable by its own type and crashes every controller action.

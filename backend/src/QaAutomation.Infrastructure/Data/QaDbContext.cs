@@ -37,6 +37,9 @@ public sealed class QaDbContext : DbContext
     public DbSet<TestFailure> TestFailures => Set<TestFailure>();
     public DbSet<PipelineWatch> PipelineWatches => Set<PipelineWatch>();
 
+    // ── Scripts Board DbSets (Slab 3, QLV2-302) ──────────────────────────────
+    public DbSet<ScriptBoardRun> ScriptBoardRuns => Set<ScriptBoardRun>();
+
     // ── DB Schema Explorer DbSets ─────────────────────────────────────────────
     public DbSet<SchemaProduct> SchemaProducts => Set<SchemaProduct>();
     public DbSet<SchemaScan> SchemaScans => Set<SchemaScan>();
@@ -404,6 +407,35 @@ public sealed class QaDbContext : DbContext
             e.Property(x => x.UpdatedAt).HasColumnName("UpdatedAt").IsRequired();
             e.HasIndex(x => new { x.ProjectId, x.AdoPipelineId }).IsUnique().HasDatabaseName("ix_PipelineWatches_ProjectId_AdoPipelineId");
             e.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── Scripts Board tables (AddScriptBoardRuns migration, QLV2-302) ─────
+        // Deliberately NO FK to Projects/ApiTestSessions — an ad-hoc run can span multiple modules
+        // (Type=null selection filter → "_all"), so ProjectId is a plain indexed int, not a constraint.
+
+        model.Entity<ScriptBoardRun>(e =>
+        {
+            e.ToTable("ScriptBoardRuns");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("Id").ValueGeneratedOnAdd();
+            e.Property(x => x.ProjectId).HasColumnName("ProjectId").IsRequired();
+            e.Property(x => x.SelectionSummary).HasColumnName("SelectionSummary").IsRequired();
+            e.Property(x => x.SpecFilePathsJson).HasColumnName("SpecFilePathsJson").IsRequired();
+            e.Property(x => x.Headed).HasColumnName("Headed").IsRequired().HasDefaultValue(false);
+            e.Property(x => x.Workers).HasColumnName("Workers");
+            e.Property(x => x.Status).HasColumnName("Status").HasConversion<string>().IsRequired();
+            e.Property(x => x.Passed).HasColumnName("Passed").IsRequired();
+            e.Property(x => x.Failed).HasColumnName("Failed").IsRequired();
+            e.Property(x => x.Skipped).HasColumnName("Skipped").IsRequired();
+            e.Property(x => x.DurationMs).HasColumnName("DurationMs").IsRequired();
+            e.Property(x => x.JunitPath).HasColumnName("JunitPath");
+            e.Property(x => x.ReportPath).HasColumnName("ReportPath");
+            e.Property(x => x.EventLogJson).HasColumnName("EventLogJson");
+            e.Property(x => x.ErrorMessage).HasColumnName("ErrorMessage");
+            e.Property(x => x.StartedAt).HasColumnName("StartedAt");
+            e.Property(x => x.FinishedAt).HasColumnName("FinishedAt");
+            e.Property(x => x.CreatedAt).HasColumnName("CreatedAt").IsRequired();
+            e.HasIndex(x => new { x.ProjectId, x.CreatedAt }).HasDatabaseName("ix_ScriptBoardRuns_ProjectId_CreatedAt");
         });
 
         // ── DB Schema Explorer tables (AddSchemaExplorer migration) ───────────

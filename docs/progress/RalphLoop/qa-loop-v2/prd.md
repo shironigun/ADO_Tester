@@ -122,7 +122,7 @@ run against standing test story **177540** (see `.cursor/rules/ralph-loop-ops.md
   persist path (`QaLoopOrchestrator.PersistDraft`, incl. `RefineDraftsAsync` rewrites) and the UI
   script-gen path (`PlaywrightAgentService.GenerateScriptAsync` + `HealAsync`). **AC:** B/T; fresh API and
   UI specs both start with a valid `// @qa-meta` line; legacy specs parse as `null`, not an error.
-- [ ] **QLV2-302** — `ScriptBoardRun` entity + migration `AddScriptBoardRuns`; `IScriptInventoryService`/
+- [x] **QLV2-302** — `ScriptBoardRun` entity + migration `AddScriptBoardRuns`; `IScriptInventoryService`/
   `ScriptInventoryService` scanning both spec roots, parsing `@qa-meta`, cross-referencing `ApiTestDraft`,
   producing `linked`/`orphan_disk`/`orphan_db`/`no_meta` reconcile states. **AC:** B/T; all four reconcile
   states covered by tests; UI-root scan no-ops gracefully when `PlaywrightRoot` unset.

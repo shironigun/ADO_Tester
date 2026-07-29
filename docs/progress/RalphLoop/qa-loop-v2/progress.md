@@ -4,8 +4,8 @@
 - **Design:** `solution.md` (authoritative vision brief) · **Ruleset:** `Ralph loop.md`
 - **Backlog:** `prd.md` (tasks `QLV2-###`, grouped by slab, built in order) · **Guide:** `blueprint.md`
 - **Started:** 2026-07-29
-- **Status:** SLAB 2 COMPLETE. Slab 3 decomposed (QLV2-301..309) and **QLV2-301 VERIFIED**
-  (170/170 tests pass). Resume point: **QLV2-302**. ADO PAT is currently expired (401) — see blocker note.
+- **Status:** SLAB 2 COMPLETE. Slab 3 decomposed (QLV2-301..309). **QLV2-301 + QLV2-302 VERIFIED**
+  (176/176 tests pass). Resume point: **QLV2-303**. ADO PAT is currently expired (401) — see blocker note.
 
 ## Operational note (2026-07-29)
 - This machine's `Shell` tool cannot enforce the sandbox policy without `required_permissions: ["all"]`
@@ -19,7 +19,7 @@
 | ---- | --------------------------------------------------------- | ------------------------------------------ |
 | 1    | Free-text + merge-refine in QA Loop                       | **COMPLETE** (QLV2-101..113, all VERIFIED) |
 | 2    | UI testing phase (Playwright agents via MCP + Claude CLI) | **COMPLETE** (QLV2-201..208, all VERIFIED) |
-| 3    | Scripts Board module                                      | In progress — QLV2-301 VERIFIED, 302 next  |
+| 3    | Scripts Board module                                      | In progress — 301+302 VERIFIED, 303 next   |
 
 ---
 
@@ -200,3 +200,26 @@
   `.spec.ts` file contents) so `dotnet test` is a legitimate substitute for this task specifically, but
   **the PAT needs refreshing before any task with real ADO reads/writes (QA Loop push, Author Tests,
   Find Bugs) can get its live-run verification** — flag this to the user, don't fake the check.
+
+### 2026-07-29 (QLV2-302 — inventory/reconcile service)
+- **QLV2-302** — `ScriptBoardRun` entity (`Core/Models/ScriptBoardRun.cs`, deliberately ADO-optional —
+  no `AdoTestRunId`/`TriggerSource`) + `QaDbContext` mapping + migrations `AddScriptBoardRuns` generated
+  for **both** providers (`dotnet ef migrations add AddScriptBoardRuns --project src\QaAutomation.Infrastructure`
+  for SQLite, and the Npgsql equivalent with `DATABASE_PROVIDER=postgres --project
+  src\QaAutomation.Migrations.Npgsql`). `IScriptInventoryService`/`ScriptInventoryService`
+  (`Infrastructure/ScriptsBoard/`): scans `{DataDirectory}/scripts/**/*.spec.ts` (API) +
+  `{PlaywrightRoot}/generated/ui/**/*.ui.spec.ts` (UI, skipped gracefully when `PlaywrightRoot` unset/
+  missing), parses `@qa-meta` per file, cross-references `ApiTestDraft` rows by normalized absolute path,
+  and classifies each into `linked`/`no_meta`/`orphan_disk`/`orphan_db`. Registered scoped in
+  `DependencyInjection.cs`. New `ScriptInventoryServiceTests.cs` (6 tests, one per reconcile state + two
+  `PlaywrightRoot` edge cases). **176/176 tests pass** (163 + 7 QLV2-301 + 6 QLV2-302), `dotnet build` clean.
+- **No UI/endpoint surface yet** — this task is a backend service with no controller (that's QLV2-303).
+  Nothing new to click through in the app yet; verified via the automated test suite only.
+- **Live boot-check attempted, inconclusive (not a code issue):** tried starting the local backend to
+  confirm `AddScriptBoardRuns` applies cleanly on boot; hit a pre-existing `address already in use` on
+  port 5250 from two PIDs neither `Get-Process` nor `Get-NetTCPConnection`-then-`Get-Process` could
+  resolve on this machine (visible via `netstat` only) — didn't force-kill unidentified PIDs. The
+  migration itself is a plain additive `CREATE TABLE` (mirrors `TestRuns`' shape) with no manual-testing
+  risk; `dotnet build`+`dotnet test` (which spin up their own temp SQLite DBs via `DatabaseInitializer`)
+  are sufficient confidence for this task. **If you still have a stuck backend process from an earlier
+  manual test session, restart it** to pick up the new table.
