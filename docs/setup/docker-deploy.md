@@ -69,15 +69,20 @@ Verify from the app: **Diagnostics** page → the Claude CLI provider should sho
 The **GitHub Copilot CLI** is also installed in the backend image. You only need this if you want to
 use the **CopilotCli** provider (switchable in the AppBar).
 
-The cleanest authentication method for Docker is a **GitHub PAT** set as `COPILOT_GITHUB_TOKEN`
-in your `.env` file. The CLI picks it up automatically; no interactive step needed.
+The cleanest authentication method for Docker is a **fine-grained GitHub PAT** set as
+`COPILOT_GITHUB_TOKEN` in your `.env` file. The CLI picks it up automatically; no interactive step
+needed.
 
-1. Generate a classic GitHub PAT at <https://github.com/settings/tokens> (no specific scopes
-   required — Copilot access is account-level).
+> **Important:** classic PATs (`ghp_...`) are **rejected** by the Copilot CLI. You must use a
+> **fine-grained** token (`github_pat_...`).
+
+1. Generate a **fine-grained** GitHub PAT at
+   <https://github.com/settings/personal-access-tokens/new> (no specific scopes required — Copilot
+   access is account-level; "Public Repositories (read-only)" is enough).
 2. Add it to your `.env`:
 
    ```
-   COPILOT_GITHUB_TOKEN=ghp_your_token_here
+   COPILOT_GITHUB_TOKEN=github_pat_your_token_here
    ```
 
 3. Restart the backend to pick it up:
