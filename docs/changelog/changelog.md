@@ -4,6 +4,29 @@ Newest entries first.
 
 ---
 
+## 2026-07-30
+
+### fix(qa-loop): surface silent source-fetch degradation in the Agent Console
+A QA Loop scan against a live module (`orders`) completed with **0 routes / 0 surfaces / 0 drafts** and
+no visible error — `FetchSourceAsync` had silently degraded to its bare `"Module: {name}"` placeholder
+(no code fetched at all) while every failure reason (missing Repository/Branch, a moved/missing frontend
+`apis/` folder, an ADO Git 401/403, zero files under the configured paths) was only ever logged
+server-side (`_log.LogDebug`/`LogWarning`) and never published to the session's event bus, so the
+console showed a plain "Fetched source (14 chars)" **Success** line with no clue why.
+- `QaLoopOrchestrator.FetchSourceAsync`/`FetchFrontendApisAsync` now take the session's event key and
+  publish a `Warn`-level `System` event at every point they degrade or hit a partial failure: missing
+  Repository/Branch; the frontend `apis/` folder not found (with a hint to check the module's Frontend
+  Path); per-directory/module-name ADO Git read failures (rolled up, with a hint to check the PAT's
+  `Code (Read)` scope); and the final zero-files-found case.
+- The `RunPipelineInnerAsync` "Fetched source (N chars)" line itself now renders as **Warn** (not
+  Success) when the result is exactly the bare-placeholder text, instead of an all-green checkmark that
+  hides a completely code-context-free run.
+- No behavior change to a *successful* fetch — this is pure observability; 182/182 tests pass.
+- **Root cause still open** for the reported `orders` run specifically — the fix makes the *next* run
+  self-diagnosing (the console will now say exactly which of the above happened) but this instance
+  couldn't be re-verified live in this session (see `docs/progress/RalphLoop/qa-loop-v2/progress.md` for
+  the investigation notes and what to check).
+
 ## 2026-07-29
 
 ### feat(qa-runs): Cancel + delete for QA Loop run entries

@@ -759,8 +759,17 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
 
             // Fetch source from ADO repo
             Pub(key, EventKinds.Phase, EventPhases.Fetch, $"Fetching source for module '{session.Module}'");
-            var source = await FetchSourceAsync(session, ct);
-            Pub(key, EventKinds.Result, EventPhases.Fetch, $"Fetched source ({source.Length:N0} chars)", EventLevels.Success);
+            var source = await FetchSourceAsync(session, key, ct);
+            // QAL-xxx: a source fetch that degrades to the bare "Module: {name}" placeholder (no code
+            // context at all) used to log as a plain Success here, indistinguishable from a real fetch —
+            // the analyzer would then silently find 0 routes with no visible explanation. FetchSourceAsync
+            // now publishes the WHY as its own Warn event(s); this just makes the final line honest.
+            var isDegenerate = source == $"Module: {session.Module}";
+            Pub(key, EventKinds.Result, EventPhases.Fetch,
+                isDegenerate
+                    ? $"Fetched source ({source.Length:N0} chars) — NO CODE CONTEXT; analysis will be text-only"
+                    : $"Fetched source ({source.Length:N0} chars)",
+                isDegenerate ? EventLevels.Warn : EventLevels.Success);
 
             // Existing test cases for reconciliation against the chosen suite
             IReadOnlyList<LinkedTestCase> existingCases = [];
@@ -1146,18 +1155,30 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
 
     // ── Source fetch ─────────────────────────────────────────────────────────
 
-    private async Task<string> FetchSourceAsync(ApiTestSession session, CancellationToken ct)
+    private async Task<string> FetchSourceAsync(ApiTestSession session, string key, CancellationToken ct)
     {
         if (string.IsNullOrEmpty(session.Repository) || string.IsNullOrEmpty(session.Branch))
+        {
+            Pub(key, EventKinds.System, EventPhases.Fetch,
+                "No Repository/Branch configured for this session — skipping code-aware source fetch " +
+                "(the analyzer will only see the module name + any free-text context). Set them on the " +
+                "scan-start form (or re-run with a repository/branch selected) to get real coverage analysis.",
+                EventLevels.Warn);
             return $"Module: {session.Module}";
+        }
 
         // Frontend-module-driven scan: seed with the module's frontend apis/ so the analyzer can read the
         // backend endpoints it calls and request the backend handlers via additionalFilesNeeded. Falls
         // back to the SourceDirs / module-name path below if the module has no apis/ folder.
         if (!string.IsNullOrEmpty(session.FrontendPath))
         {
-            var seeded = await FetchFrontendApisAsync(session, ct);
+            var seeded = await FetchFrontendApisAsync(session, key, ct);
             if (seeded is not null) return seeded;
+            Pub(key, EventKinds.System, EventPhases.Fetch,
+                $"No frontend api-client files found under '{session.FrontendPath}/apis' — falling back " +
+                "to Source Dirs / module-name lookup. If the frontend folder layout moved, update the " +
+                "module's Frontend Path (re-run the module scan) or supply Source Dirs explicitly.",
+                EventLevels.Warn);
         }
 
         var sourceDirs = ParseSourceDirs(session.SourceDirsJson);
@@ -1165,6 +1186,7 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
         try
         {
             var paths = new List<string>();
+            var failedDirs = new List<string>();
             if (sourceDirs.Count > 0)
             {
                 // Fetch each supplied directory — this is the only reliable way to find a module
@@ -1175,18 +1197,44 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
                     {
                         paths.AddRange(await _ado.ListRepoFilePathsAsync(dir, branch: session.Branch, repoId: session.Repository, ct));
                     }
-                    catch (Exception ex) { _log.LogDebug(ex, "Skipping unreadable source dir {Dir}", dir); }
+                    catch (Exception ex)
+                    {
+                        _log.LogDebug(ex, "Skipping unreadable source dir {Dir}", dir);
+                        failedDirs.Add($"{dir} ({ex.Message})");
+                    }
                 }
             }
             else
             {
                 // Fallback: treat the module name itself as a top-level scopePath. Only correct when
                 // the module happens to live at the repo root — supply SourceDirs for anything nested.
-                paths.AddRange(await _ado.ListRepoFilePathsAsync(session.Module, branch: session.Branch, repoId: session.Repository, ct));
+                try
+                {
+                    paths.AddRange(await _ado.ListRepoFilePathsAsync(session.Module, branch: session.Branch, repoId: session.Repository, ct));
+                }
+                catch (Exception ex)
+                {
+                    _log.LogDebug(ex, "Module-name fallback path unreadable for {Module}", session.Module);
+                    failedDirs.Add($"{session.Module} ({ex.Message})");
+                }
             }
 
+            if (failedDirs.Count > 0)
+                Pub(key, EventKinds.System, EventPhases.Fetch,
+                    $"Could not read {failedDirs.Count} source path(s) from ADO Git: {string.Join("; ", failedDirs.Take(3))}" +
+                    (failedDirs.Count > 3 ? $" (+{failedDirs.Count - 3} more)" : "") +
+                    ". If this is a 401/403, check the ADO PAT has the 'Code (Read)' scope.",
+                    EventLevels.Warn);
+
             if (paths.Count == 0)
+            {
+                Pub(key, EventKinds.System, EventPhases.Fetch,
+                    $"No source files found for module '{session.Module}' under the configured paths " +
+                    (sourceDirs.Count > 0 ? $"({string.Join(", ", sourceDirs)})" : $"('{session.Module}' as a top-level repo folder)") +
+                    " — check Repository/Branch/Source Dirs/Frontend Path in the session's scan config.",
+                    EventLevels.Warn);
                 return $"Module: {session.Module}";
+            }
 
             var sb = new StringBuilder();
             sb.Append($"# Module: {session.Module}\n# Repository: {session.Repository} Branch: {session.Branch}\n\n");
@@ -1205,6 +1253,8 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
         catch (Exception ex)
         {
             _log.LogWarning(ex, "Source fetch failed for module '{Module}'", session.Module);
+            Pub(key, EventKinds.Error, EventPhases.Fetch,
+                $"Source fetch failed for module '{session.Module}': {ex.Message}", EventLevels.Warn);
             return $"Module: {session.Module}";
         }
     }
@@ -1220,7 +1270,7 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
     /// calls that name the backend endpoints). Returns null when there's no apis/ folder so the caller
     /// falls back to the SourceDirs/module-name path. The analyzer then requests the backend handlers via
     /// additionalFilesNeeded (resolved by the search-aware fetchFile in RunPipelineInnerAsync).</summary>
-    private async Task<string?> FetchFrontendApisAsync(ApiTestSession session, CancellationToken ct)
+    private async Task<string?> FetchFrontendApisAsync(ApiTestSession session, string key, CancellationToken ct)
     {
         try
         {
@@ -1252,6 +1302,10 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
         catch (Exception ex)
         {
             _log.LogWarning(ex, "Frontend apis fetch failed for module '{Module}'", session.Module);
+            Pub(key, EventKinds.System, EventPhases.Fetch,
+                $"Frontend apis/ fetch failed for '{session.FrontendPath}': {ex.Message}" +
+                " — check the ADO PAT scope (needs 'Code (Read)') and that the path still exists on the target branch.",
+                EventLevels.Warn);
             return null;
         }
     }

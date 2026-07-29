@@ -7,6 +7,45 @@
 - **Status:** SLAB 2 COMPLETE. Slab 3 decomposed (QLV2-301..309). **QLV2-301/302/303 VERIFIED**
   (182/182 tests pass). Resume point: **QLV2-304**. ADO PAT is currently expired (401) — see blocker note.
 
+## Aside: QA Loop scan silently produced 0 routes/0 drafts (2026-07-30)
+
+User-reported bug (not a Slab 3 task): a scan against the `orders` module (session viewed at
+`/qa-loop/2` — note: that exact session id does **not** exist in the local `backend/data/qa.db`, which
+only has `orders`/`deals`/`messaging` sessions 27/29/31/32 from 2026-07-02/07; the live session the user
+saw must be in whatever DB their running backend process was actually pointed at) completed with
+`Fetched source (14 chars)` → `Analyzer: 0 route(s) · 0 surface(s)` → `Drafted 0 test case(s)`, with
+**no error visible anywhere in the console**.
+
+- **`"14 chars"` is the exact length of `"Module: orders"`** — `QaLoopOrchestrator.FetchSourceAsync`'s
+  bare degenerate-fallback string. Confirmed by code inspection (not a live repro — see blocker below).
+- Three code paths return that exact fallback, **all silent** before this fix: (1) `session.Repository`/
+  `Branch` empty; (2) the module's `FrontendPath/apis` folder not found (normal fallback path, but the
+  *subsequent* module-name/SourceDirs fallback then also failing is not); (3) `ListRepoFilePathsAsync`
+  throwing (e.g. ADO Git 401/403) for every candidate path, swallowed per-directory to `_log.LogDebug`
+  only. Existing DB rows for `orders` (session 31, 2026-07-07) **do** have `Repository`/`Branch` set, so
+  (1) is unlikely for a re-run of the same module unless this run used a fresh session with those fields
+  left blank on the start form.
+- Given the user said "there have been many changes since last time" and existing-test-case suite
+  scanning (Test Management API) succeeded (3314 cases found) while code fetch produced nothing, the two
+  most likely root causes are: **(a)** the frontend module's configured Frontend Path / `apis/` folder
+  moved or was refactored away in the product repo, so both the frontend-apis fetch AND the module-name
+  fallback resolve to zero files, or **(b)** the ADO PAT's `Code (Read)` scope is missing/expired even
+  though its Work Items/Test Management scopes still work (CLI-observed 401 on `GetWorkItemAsync` earlier
+  in this same day's session — see the `ralph-loop-ops.mdc` PAT blocker note — is a **different** ADO API
+  area than Git, so doesn't confirm or rule this out on its own).
+- **Fix shipped (this commit):** `FetchSourceAsync`/`FetchFrontendApisAsync` now publish a `Warn` event
+  for every one of the above cases instead of failing silently; the final "Fetched source" line renders
+  Warn (not Success) when the result is the bare placeholder. This doesn't fix a possible PAT-scope or
+  moved-folder issue — it makes the **next run tell you which one it is**, straight in the Agent Console.
+- **Blocked from live-repro/verify:** the user's own backend dev server (PID discovered listening on
+  :5250) is (a) the process actively serving their debugging session — did not kill it to rebuild against
+  it — and (b) now requires authentication end-to-end (the "add authentication and authorization
+  features" commit landed since this doc's last update), so `curl`/`Invoke-RestMethod` diagnostics no
+  longer work unauthenticated even against `/api/diagnostics/*`. Verified the fix compiles + 182/182 tests
+  pass by building/testing the `QaAutomation.Tests` project directly (sidesteps the locked `Api` project
+  output). **User action needed:** restart the backend to pick up the fix, re-run the `orders` scan, and
+  read the new Warn line(s) in the Agent Console — that will pinpoint the exact cause.
+
 ## Operational note (2026-07-29)
 - This machine's `Shell` tool cannot enforce the sandbox policy without `required_permissions: ["all"]`
   on every call (fails to spawn otherwise) — see `.cursor/rules/ralph-loop-ops.mdc`.
