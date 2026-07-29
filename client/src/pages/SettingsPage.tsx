@@ -36,7 +36,7 @@ import { MONO_FONT } from '../theme/tokens'
 import { apiUrl } from '../config/env'
 import { axiosMessage } from '../common/errors'
 import {
-  getConfig, saveConfig, getClaudeCliModels, getCopilotCliModels, getAdoOrgs, getAdoProjects, getAdoAreaPaths, getAdoBranches, getAdoRepositories,
+  getConfig, saveConfig, getClaudeCliModels, getCopilotCliModels, getAdoOrgs, getAdoProjects, getAdoAreaPaths, getAdoWorkItemTypes, getAdoBranches, getAdoRepositories,
   type Config, type AdoProject,
 } from '../api/settings'
 import { getEnvStatus, getWorkItem, pingLlm, type EnvStatus, type WorkItem } from '../api/diagnostics'
@@ -71,6 +71,7 @@ const K = {
   DEFAULT_RANGE: 'reports.default_range_days',
   REPORT_TEAM_NAME: 'reports.team_name',
   REPORT_TYPES: 'reports.ticket_types',
+  REPORT_DATE_FIELDS: 'reports.date_filter_fields',
   VERIFY_DETAIL: 'find_bugs.verify_detail',
   VERIFY_STEP_SCOPE: 'find_bugs.verify_step_scope',
   BUG_FROM_CASE_MODE: 'find_bugs.bug_from_case_mode',
@@ -85,7 +86,10 @@ const K = {
   QALOOP_DEFAULT_SUITE: 'qaloop.default_suite_id',
 }
 
+// Fallback suggestions for the Reports "Ticket types" picker when the project's real work-item
+// types can't be loaded from ADO (e.g. no connection yet). Replaced live by getAdoWorkItemTypes.
 const REPORT_TYPE_OPTIONS = ['User Story', 'Bug', 'Defect', 'Task', 'Issue', 'Feature']
+const DATE_FIELD_OPTIONS = ['Changed', 'Created', 'Closed']
 
 // ── Reusable parts ─────────────────────────────────────────────────────────
 
@@ -248,6 +252,8 @@ export default function SettingsPage() {
   const [defaultRange, setDefaultRange] = useState('7')
   const [teamName, setTeamName] = useState('')
   const [typesList, setTypesList] = useState<string[]>([])
+  const [typeOptions, setTypeOptions] = useState<string[]>(REPORT_TYPE_OPTIONS)
+  const [dateFieldsList, setDateFieldsList] = useState<string[]>([])
   const [previewTheme, setPreviewTheme] = useState('Executive')
   const [verifyDetail, setVerifyDetail] = useState('step')
   const [verifyScope, setVerifyScope] = useState('fails_only')
@@ -319,6 +325,7 @@ export default function SettingsPage() {
       setDefaultRange(String(data[K.DEFAULT_RANGE] ?? '7'))
       setTeamName(String(data[K.REPORT_TEAM_NAME] ?? ''))
       setTypesList(String(data[K.REPORT_TYPES] ?? '').split(';').map(s => s.trim()).filter(Boolean))
+      setDateFieldsList(String(data[K.REPORT_DATE_FIELDS] ?? '').split(';').map(s => s.trim()).filter(Boolean))
       setVerifyDetail(String(data[K.VERIFY_DETAIL] ?? 'step'))
       setVerifyScope(String(data[K.VERIFY_STEP_SCOPE] ?? 'fails_only'))
       setBugFromMode(String(data[K.BUG_FROM_CASE_MODE] ?? 'instant'))
@@ -383,6 +390,15 @@ export default function SettingsPage() {
       .then(setAreaPaths)
       .catch(() => setAreaPaths([]))
       .finally(() => setAreasLoading(false))
+  }, [adoOrg, adoProject, config[`${K.ADO_PAT}.set`]])
+
+  // Reports "Ticket types" picker — load the project's real work-item types. On failure/empty
+  // (e.g. no connection), keep the static fallback so the picker is never empty.
+  useEffect(() => {
+    if (!adoOrg || !adoProject) return
+    getAdoWorkItemTypes(adoOrg, adoProject)
+      .then(t => { if (t.length) setTypeOptions(t) })
+      .catch(() => {})
   }, [adoOrg, adoProject, config[`${K.ADO_PAT}.set`]])
 
   // Branches for the configured repo (drives the Default branch dropdown). Reloads when the saved
@@ -932,11 +948,20 @@ export default function SettingsPage() {
                         value={defaultRange} onChange={e => setDefaultRange(e.target.value)} />
 
                       <Autocomplete<string, true, false, true>
-                        multiple freeSolo options={REPORT_TYPE_OPTIONS} value={typesList}
+                        multiple freeSolo options={typeOptions} value={typesList}
                         onChange={(_, v) => setTypesList(v as string[])}
                         renderInput={p => (
                           <TextField {...p} label="Ticket types" size="small"
-                            helperText="Empty = default set." />
+                            helperText={adoOrg && adoProject ? "From your project's work-item types. Empty = default set." : 'Empty = default set.'} />
+                        )}
+                      />
+
+                      <Autocomplete<string, true, true, false>
+                        multiple disableClearable options={DATE_FIELD_OPTIONS} value={dateFieldsList}
+                        onChange={(_, v) => setDateFieldsList(v as string[])}
+                        renderInput={p => (
+                          <TextField {...p} label="Include tickets by" size="small"
+                            helperText="Which date counts as “in range” — changed (any touch), created, and/or closed. Empty = Changed." />
                         )}
                       />
 
@@ -957,6 +982,7 @@ export default function SettingsPage() {
                       [K.DEFAULT_RANGE]: defaultRange,
                       [K.DEFAULT_BOARDS]: boardsList.join('; '),
                       [K.REPORT_TYPES]: typesList.join('; '),
+                      [K.REPORT_DATE_FIELDS]: dateFieldsList.join('; '),
                     })} />
                   </Panel>
                 </Box>

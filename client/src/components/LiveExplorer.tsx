@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Chip, CircularProgress,
   FormControl, IconButton, InputLabel, MenuItem, Paper, Select, Stack, Table, TableBody,
@@ -7,10 +8,8 @@ import {
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ContentCopyIcon from '@mui/icons-material/ContentCopyOutlined'
 import StorageIcon from '@mui/icons-material/StorageOutlined'
-import { Link as RouterLink } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { axiosMessage } from '../common/errors'
-import { paths } from '../routes/paths'
 import {
   listConnections, listEntities, traceEntity,
   type SchemaProduct, type TableTrace, type TraceResult,
@@ -92,7 +91,9 @@ function LinkedCard({ trace }: { trace: TableTrace }) {
 }
 
 // ── Live Explorer ─────────────────────────────────────────────────────────────
-export default function LiveExplorer({ product }: { product: SchemaProduct }) {
+export default function LiveExplorer(
+  { product, toolbarContainer }: { product: SchemaProduct; toolbarContainer?: HTMLElement | null },
+) {
   const productId = product.id
   const { data: entities = [], isLoading: entLoading } = useQuery({
     queryKey: ['schema-entities', productId], queryFn: () => listEntities(productId),
@@ -131,47 +132,44 @@ export default function LiveExplorer({ product }: { product: SchemaProduct }) {
 
   const selected = entities.find(e => e.key === entityKey)
   const hasEnv = connections.length > 0
-  const activeServer = connections.find(c => c.environment === environment)?.server
+
+  // Trace controls (Entity / id / Trace) — portaled next to the page tabs when a
+  // container is provided, otherwise rendered inline.
+  const traceControls = (
+    <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+      <FormControl size="small" sx={{ minWidth: 160 }}>
+        <InputLabel id="entity-label">Entity</InputLabel>
+        <Select labelId="entity-label" label="Entity" value={entityKey} onChange={e => setEntityKey(e.target.value)}>
+          {entities.map(e => <MenuItem key={e.key} value={e.key}>{e.displayName}</MenuItem>)}
+        </Select>
+      </FormControl>
+      <TextField size="small" label={selected?.idColumn || 'id'} value={idValue}
+        onChange={e => setIdValue(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') doTrace() }}
+        placeholder="record id" sx={{ width: 180 }} />
+      <Button variant="contained" size="small" onClick={doTrace}
+        disabled={tracing || !hasEnv || !idValue.trim()}
+        startIcon={tracing ? <CircularProgress size={14} /> : undefined}>
+        Trace
+      </Button>
+    </Stack>
+  )
 
   return (
     <Stack spacing={2}>
+      {toolbarContainer ? createPortal(traceControls, toolbarContainer) : traceControls}
+
       {/* Environment bar (connections are configured in Settings → Database) */}
       <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
         <StorageIcon fontSize="small" color={hasEnv ? 'success' : 'disabled'} />
         {hasEnv ? (
-          <>
-            <FormControl size="small" sx={{ minWidth: 160 }}>
-              <InputLabel id="env-label">Environment</InputLabel>
-              <Select labelId="env-label" label="Environment" value={environment} onChange={e => setEnvironment(e.target.value)}>
-                {connections.map(c => <MenuItem key={c.environment} value={c.environment}>{c.environment}</MenuItem>)}
-              </Select>
-            </FormControl>
-            {activeServer && <Chip size="small" variant="outlined" label={activeServer} sx={{ fontFamily: 'monospace' }} />}
-          </>
+          <FormControl size="small" sx={{ minWidth: 160 }}>
+            <InputLabel id="env-label">Environment</InputLabel>
+            <Select labelId="env-label" label="Environment" value={environment} onChange={e => setEnvironment(e.target.value)}>
+              {connections.map(c => <MenuItem key={c.environment} value={c.environment}>{c.environment}</MenuItem>)}
+            </Select>
+          </FormControl>
         ) : (
           <Chip size="small" color="warning" variant="outlined" label="No environments configured" />
-        )}
-        <Button size="small" component={RouterLink} to={paths.settings}>Manage in Settings → Database</Button>
-      </Stack>
-
-      {/* Trace controls */}
-      <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1.5 }}>
-        <FormControl size="small" sx={{ minWidth: 200 }}>
-          <InputLabel id="entity-label">Entity</InputLabel>
-          <Select labelId="entity-label" label="Entity" value={entityKey} onChange={e => setEntityKey(e.target.value)}>
-            {entities.map(e => <MenuItem key={e.key} value={e.key}>{e.displayName}</MenuItem>)}
-          </Select>
-        </FormControl>
-        <TextField size="small" label={selected?.idColumn || 'id'} value={idValue}
-          onChange={e => setIdValue(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') doTrace() }}
-          placeholder="record id" sx={{ width: 220 }} />
-        <Button variant="contained" onClick={doTrace}
-          disabled={tracing || !hasEnv || !idValue.trim()}
-          startIcon={tracing ? <CircularProgress size={14} /> : undefined}>
-          Trace
-        </Button>
-        {selected?.scopeColumn && (
-          <Typography variant="caption" color="text.secondary">Dealer-scoped via {selected.scopeColumn}</Typography>
         )}
       </Stack>
 

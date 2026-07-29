@@ -14,6 +14,11 @@ public interface IAzureDevOpsClient
     Task<IReadOnlyList<AdoNamedRef>> DiscoverProjectsAsync(string organization, CancellationToken ct = default);
     Task<IReadOnlyList<string>> DiscoverAreaPathsAsync(string organization, string project, CancellationToken ct = default);
 
+    /// <summary>Work-item type names defined in the project (e.g. "User Story", "Bug", "Defect",
+    /// "Support"), excluding disabled types and the test-management containers. Drives the Reports
+    /// "Ticket types" picker so it always reflects the project's real process.</summary>
+    Task<IReadOnlyList<string>> DiscoverWorkItemTypesAsync(string organization, string project, CancellationToken ct = default);
+
     /// <summary>List branch (head) names for the given repository, or the configured ado.repository when null.</summary>
     Task<IReadOnlyList<string>> DiscoverBranchesAsync(string? repository = null, CancellationToken ct = default);
 
@@ -35,9 +40,13 @@ public interface IAzureDevOpsClient
     Task<IReadOnlyList<LinkedTestCase>> GetSuiteTestCasesAsync(int planId, int suiteId, bool recurse = true, CancellationToken ct = default);
 
     // ── Reports query + enrichment ──────────────────────────────────────────
+    /// <summary>
+    /// <paramref name="dateFields"/> selects which date defines "in range": any of "changed", "created",
+    /// "closed" (OR'd together); defaults to "changed" (any touch) when empty/null.
+    /// </summary>
     Task<IReadOnlyList<ReportTicket>> GetTicketsInRangeAsync(
         DateTime fromUtc, DateTime toUtc, IReadOnlyList<string> boards,
-        IReadOnlyList<string>? types = null, CancellationToken ct = default);
+        IReadOnlyList<string>? types = null, IReadOnlyList<string>? dateFields = null, CancellationToken ct = default);
     Task<IReadOnlyList<TicketComment>> GetWorkItemCommentsAsync(int workItemId, CancellationToken ct = default);
     Task<IReadOnlyList<TimelineEvent>> GetWorkItemUpdatesAsync(int workItemId, CancellationToken ct = default);
     Task<IReadOnlyList<ReportTicket>> EnrichTicketsForReportAsync(
