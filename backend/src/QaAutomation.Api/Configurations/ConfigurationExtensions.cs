@@ -1,5 +1,9 @@
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using QaAutomation.Core.Configuration;
 
 namespace QaAutomation.Api.Configurations;
 
@@ -30,6 +34,55 @@ public static class ConfigurationExtensions
     {
         services.AddCors(o => o.AddPolicy(DevCorsPolicy, p =>
             p.WithOrigins(DevOrigins).AllowAnyHeader().AllowAnyMethod()));
+        return services;
+    }
+
+    /// <summary>
+    /// JWT bearer login gate. On login the client receives a signed token; every request must carry it
+    /// (Authorization: Bearer …). Because EventSource/iframe requests can't set that header, the token
+    /// is also accepted from an <c>?access_token=</c> query param. When auth is enabled a global fallback
+    /// policy protects every endpoint except those marked <c>[AllowAnonymous]</c> (the auth endpoints +
+    /// <c>/api/health</c>). The <c>AuthOptions</c> instance is registered for <c>AuthController</c>.
+    /// </summary>
+    public static IServiceCollection AddCustomAuth(this IServiceCollection services, AuthOptions auth)
+    {
+        services.AddSingleton(auth);
+
+        services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+            .AddJwtBearer(options =>
+            {
+                options.TokenValidationParameters = new TokenValidationParameters
+                {
+                    ValidateIssuer = true,
+                    ValidIssuer = AuthOptions.Issuer,
+                    ValidateAudience = true,
+                    ValidAudience = AuthOptions.Audience,
+                    ValidateIssuerSigningKey = true,
+                    IssuerSigningKey = new SymmetricSecurityKey(auth.GetSigningKeyBytes()),
+                    ValidateLifetime = true,
+                    ClockSkew = TimeSpan.FromMinutes(1),
+                };
+                // SSE/EventSource and iframe/download requests can't send an Authorization header —
+                // accept the token from ?access_token= as well (apiUrl() adds it to every direct URL).
+                options.Events = new JwtBearerEvents
+                {
+                    OnMessageReceived = ctx =>
+                    {
+                        var fromQuery = ctx.Request.Query["access_token"];
+                        if (!string.IsNullOrEmpty(fromQuery))
+                            ctx.Token = fromQuery;
+                        return Task.CompletedTask;
+                    },
+                };
+            });
+
+        services.AddAuthorization(options =>
+        {
+            if (auth.Enabled)
+                options.FallbackPolicy = new AuthorizationPolicyBuilder()
+                    .RequireAuthenticatedUser()
+                    .Build();
+        });
         return services;
     }
 

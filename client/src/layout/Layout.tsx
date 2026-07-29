@@ -1,4 +1,4 @@
-import { AppBar, Box, Drawer, IconButton, Stack, Toolbar, Tooltip, Typography } from '@mui/material'
+import { AppBar, Box, Divider, Drawer, IconButton, Menu, MenuItem, Stack, Toolbar, Tooltip, Typography } from '@mui/material'
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import LightModeIcon from '@mui/icons-material/LightModeOutlined'
@@ -14,12 +14,15 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesomeOutlined'
 import PlayCircleIcon from '@mui/icons-material/PlayCircleOutlined'
 import AccountTreeIcon from '@mui/icons-material/AccountTreeOutlined'
 import HubIcon from '@mui/icons-material/HubOutlined'
+import AccountCircleIcon from '@mui/icons-material/AccountCircleOutlined'
+import LogoutIcon from '@mui/icons-material/LogoutOutlined'
 import { useState, type ReactNode } from 'react'
 
 import ProviderSwitcher from '../components/ProviderSwitcher'
 import EmptyState from '../components/EmptyState'
 import { PageTransition } from '../motion/primitives'
 import { useColorMode } from '../theme/ColorModeContext'
+import { useAuth } from '../app/AuthContext'
 import { paths } from '../routes/paths'
 
 import SettingsPage from '../pages/SettingsPage'
@@ -63,6 +66,36 @@ function ColorModeToggle() {
         </Box>
       </IconButton>
     </Tooltip>
+  )
+}
+
+// Account menu (only when the login gate is active): shows the signed-in user + a Sign out action.
+function AccountMenu() {
+  const { session, logout } = useAuth()
+  const [anchor, setAnchor] = useState<null | HTMLElement>(null)
+
+  if (!session?.authRequired) return null
+
+  return (
+    <>
+      <Tooltip title={session.username ?? 'Account'}>
+        <IconButton color="inherit" onClick={e => setAnchor(e.currentTarget)} sx={{ ml: 0.5 }}>
+          <AccountCircleIcon />
+        </IconButton>
+      </Tooltip>
+      <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={() => setAnchor(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'right' }}>
+        <Box sx={{ px: 2, py: 0.5 }}>
+          <Typography variant="caption" color="text.secondary">Signed in as</Typography>
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>{session.username}</Typography>
+        </Box>
+        <Divider sx={{ my: 0.5 }} />
+        <MenuItem onClick={() => { setAnchor(null); void logout() }}>
+          <LogoutIcon fontSize="small" style={{ marginRight: 8 }} /> Sign out
+        </MenuItem>
+      </Menu>
+    </>
   )
 }
 
@@ -131,6 +164,7 @@ export default function Layout() {
           </Typography>
           <ProviderSwitcher />
           <ColorModeToggle />
+          <AccountMenu />
         </Toolbar>
       </AppBar>
 

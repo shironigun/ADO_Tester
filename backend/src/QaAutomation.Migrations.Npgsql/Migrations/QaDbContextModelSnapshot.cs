@@ -1466,6 +1466,10 @@ namespace QaAutomation.Migrations.Npgsql.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("BatchId");
 
+                    b.Property<string>("CodeBehaviorJson")
+                        .HasColumnType("text")
+                        .HasColumnName("CodeBehaviorJson");
+
                     b.Property<string>("CodeContext")
                         .HasColumnType("text")
                         .HasColumnName("CodeContext");

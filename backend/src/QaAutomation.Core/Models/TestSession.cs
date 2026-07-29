@@ -25,6 +25,10 @@ public sealed class TestSession
     /// <summary>Repo code snippets discovered for the feature (linked PRs/commits + hint search),
     /// assembled by the code-context service and fed to the Analyst. Mirrors <c>BugSession.CodeContext</c>.</summary>
     public string? CodeContext { get; set; }
+    /// <summary>LLM analysis of the discovered <see cref="CodeContext"/> as a JSON array of behavior
+    /// bullets <c>[{ id, behavior, comment }]</c>. The reviewer can annotate each bullet at the
+    /// Analyst→Tester gate; the bullets + notes are fed to the Tester as extra guidance.</summary>
+    public string? CodeBehaviorJson { get; set; }
     /// <summary>Free-text context the tester supplies at the Analyst→Tester gate; feeds the Tester prompt.</summary>
     public string? TesterContext { get; set; }
 

@@ -73,10 +73,18 @@ function fmtTime(ts: number): string {
  * follow-pause when the user scrolls up.
  */
 export default function AgentConsole({
-  streamUrl, seedEvents = [], title = 'Agent console', fillHeight = false,
-}: { streamUrl: string | null; seedEvents?: ConsoleEvent[]; title?: string; fillHeight?: boolean }) {
+  streamUrl = null, seedEvents = [], title = 'Agent console', fillHeight = false,
+  events: controlledEvents, connected: controlledConnected,
+}: {
+  streamUrl?: string | null; seedEvents?: ConsoleEvent[]; title?: string; fillHeight?: boolean
+  events?: ConsoleEvent[]; connected?: boolean
+}) {
   const reduce = useReducedMotion()
-  const { events, connected } = useEventStream(streamUrl, seedEvents)
+  // Controlled mode: the parent owns the stream and passes events/connected (so we don't open a second
+  // EventSource). Uncontrolled mode: open our own stream from streamUrl + seedEvents.
+  const stream = useEventStream(controlledEvents ? null : streamUrl, seedEvents)
+  const events = controlledEvents ?? stream.events
+  const connected = controlledConnected ?? stream.connected
   const { lines, chars, elapsed } = useMemo(() => buildModel(events), [events])
 
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -95,7 +103,7 @@ export default function AgentConsole({
     setFollow(atBottom)
   }
 
-  if (!streamUrl && lines.length === 0) return null
+  if (lines.length === 0 && !streamUrl && !connected) return null
 
   return (
     <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', flex: fillHeight ? 1 : undefined, minHeight: 0 }}>

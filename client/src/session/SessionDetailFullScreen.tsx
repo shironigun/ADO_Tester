@@ -52,7 +52,7 @@ export default function SessionDetailFullScreen({ config }: { config: SessionMod
         {!session ? (
           <ThinkingShimmer label="Loading session…" />
         ) : tab === 'detail' ? (
-          <Body session={session} refetch={refetch} onError={onError} fullScreen />
+          <Body key={session.id} session={session} refetch={refetch} onError={onError} fullScreen />
         ) : (
           <SessionTimeline config={config} session={session} live={!!live} />
         )}

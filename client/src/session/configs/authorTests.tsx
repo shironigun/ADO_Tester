@@ -36,6 +36,7 @@ import type {
   StartFormProps, WorkItemOption,
 } from '../types'
 import { parseEventLog } from '../shared'
+import { useEventStream } from '../../hooks/useEventStream'
 import { axiosMessage } from '../../common/errors'
 import { useAdoWorkItemUrl } from '../../common/adoLinks'
 import { PROJECT_ID } from '../../config/env'
@@ -43,7 +44,7 @@ import {
   getPlans, getSuites, searchWorkItems, startSession, listSessionsPage, getSessionDetail,
   patchDraft, approveAllDrafts, runTester as apiRunTester, cancelSession, pushSession, pushDraft, saveAnalysis,
   rerunAnalyst as apiRerunAnalyst, refineTester as apiRefineTester,
-  rescanPlan, getScanStatus,
+  rescanPlan, getScanStatus, saveCodeBehavior, type CodeBehaviorItem,
   sessionStreamUrl, type TestPlan, type TestSuite, type TestFeedbackItem,
 } from '../../api/authorTests'
 import { getConfig } from '../../api/settings'
@@ -61,7 +62,7 @@ interface DraftPatch { title?: string; preconditions?: string; steps?: Step[] }
 const PIPELINE_STEPS: PipelineStep[] = [
   { key: 'fetch',    label: 'Fetch ticket',  icon: <SearchIcon /> },
   { key: 'retrieve', label: 'Retrieve KB',   icon: <MenuBookIcon /> },
-  { key: 'discover', label: 'Discover code', icon: <TravelExploreIcon /> },
+  { key: 'discover', label: 'Code behavior', icon: <TravelExploreIcon /> },
   { key: 'analyst',  label: 'Analyst',       icon: <PsychologyIcon /> },
   { key: 'tester',   label: 'Tester',        icon: <RuleIcon /> },
 ]
@@ -301,6 +302,88 @@ function TestPushResults({ session, context }: {
   )
 }
 
+interface CodeBehaviorRow { id: string; behavior: string; comment: string }
+
+// Code-behavior findings panel (pipeline step "Code behavior"). Shows the analyzed "what the code
+// does" bullets; at the Analyst→Tester gate (AwaitingTester) each bullet gets a note box the reviewer
+// can use to flag suspected misbehavior — the notes are fed to the Tester.
+function CodeBehaviorPanel({ session, inFlight, onSaved, onError }: {
+  session: SessionDetail; inFlight: boolean
+  onSaved: () => void; onError: (e: unknown, fallback: string) => void
+}) {
+  const rows = useMemo<CodeBehaviorRow[]>(() => {
+    try {
+      const arr = JSON.parse(session.codeBehaviorJson || '[]')
+      return Array.isArray(arr)
+        ? arr.map((x, i) => ({
+            id: String(x?.id ?? `b${i + 1}`),
+            behavior: String(x?.behavior ?? ''),
+            comment: String(x?.comment ?? ''),
+          })).filter(r => r.behavior)
+        : []
+    } catch { return [] }
+  }, [session.codeBehaviorJson])
+
+  const editable = session.status === 'AwaitingTester'
+  const [comments, setComments] = useState<Record<string, string>>({})
+  useEffect(() => { setComments(Object.fromEntries(rows.map(r => [r.id, r.comment]))) }, [rows])
+  const [saving, setSaving] = useState(false)
+
+  const dirty = rows.some(r => (comments[r.id] ?? '') !== r.comment)
+  const save = async () => {
+    setSaving(true)
+    try {
+      const items: CodeBehaviorItem[] = rows.map(r => ({ ...r, comment: (comments[r.id] ?? '').trim() }))
+      await saveCodeBehavior(session.id, items)
+      onSaved()
+    } catch (e) { onError(e, 'Save notes failed') } finally { setSaving(false) }
+  }
+
+  return (
+    <Card variant="outlined"><CardContent>
+      <Typography variant="subtitle2" gutterBottom>Code behavior ({rows.length})</Typography>
+      {rows.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          {inFlight ? 'Analyzing code…' : 'No code was discovered or analyzed for this story.'}
+        </Typography>
+      ) : (
+        <>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
+            What the current implementation actually does, distilled from the repo.
+            {editable ? ' Add a note on any bullet to flag suspected misbehavior — your notes steer the Tester.' : ''}
+          </Typography>
+          <Stack spacing={1.5}>
+            {rows.map((r, i) => (
+              <Box key={r.id} sx={{ borderLeft: 2, borderColor: 'divider', pl: 1.5 }}>
+                <Typography variant="body2" sx={{ mb: editable || r.comment ? 0.75 : 0 }}>
+                  <b>{i + 1}.</b> {r.behavior}
+                </Typography>
+                {editable ? (
+                  <TextField size="small" fullWidth value={comments[r.id] ?? ''}
+                    onChange={e => setComments(c => ({ ...c, [r.id]: e.target.value }))}
+                    placeholder="Add a note (optional) — e.g. this looks wrong: should reject empty names" />
+                ) : r.comment ? (
+                  <Alert severity="warning" icon={false} sx={{ py: 0, px: 1 }}>
+                    <Typography variant="caption"><b>Note:</b> {r.comment}</Typography>
+                  </Alert>
+                ) : null}
+              </Box>
+            ))}
+          </Stack>
+          {editable && (
+            <Box sx={{ textAlign: 'right', mt: 1.5 }}>
+              <Button size="small" variant="outlined" startIcon={<SaveIcon />}
+                disabled={saving || !dirty} onClick={save}>
+                {saving ? 'Saving…' : 'Save notes'}
+              </Button>
+            </Box>
+          )}
+        </>
+      )}
+    </CardContent></Card>
+  )
+}
+
 // ── Detail body (pipeline + gate + tiles→popup + push) ───────────────────────
 function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
   const wiUrl = useAdoWorkItemUrl()
@@ -457,14 +540,19 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
 
   // ── Phase navigation: clicking a pipeline circle selects which phase's findings to show.
   const persisted = useMemo(() => parseEventLog(session.eventLogJson), [session.eventLogJson])
-  const fetchEv = persisted.find(e => e.phase === 'fetch')
+  const streamUrl = sessionStreamUrl(session.id)
+  // Merge the durable log with the LIVE SSE stream so findings (KB chunks, fetch, dedup) update in
+  // real time. EventLogJson only persists at phase boundaries — the retrieve event isn't saved until
+  // after code-discovery — so poll-only findings lag the console by a whole phase.
+  const { events, connected } = useEventStream(inFlight ? streamUrl : null, persisted)
+  const fetchEv = events.find(e => e.phase === 'fetch')
   const wiType = (fetchEv?.data as Record<string, unknown> | null | undefined)?.type as string | undefined
-  const kbEv = persisted.find(e => e.phase === 'retrieve' && Array.isArray((e.data as Record<string, unknown> | null | undefined)?.files))
+  const kbEv = events.find(e => e.phase === 'retrieve' && Array.isArray((e.data as Record<string, unknown> | null | undefined)?.files))
   const kbFiles = ((kbEv?.data as Record<string, unknown> | undefined)?.files as string[] | undefined) ?? []
   // On a terminal failure/cancel currentActivity is a generic "Failed: …" string, so infer the
   // furthest phase reached from durable data, landing the failed circle + default panel there.
   const terminalFailed = session.status === 'Failed' || session.status === 'Cancelled'
-  const dedupEv = persisted.find(e => e.phase === 'dedup')
+  const dedupEv = events.find(e => e.phase === 'dedup')
   const skippedDups = ((dedupEv?.data as Record<string, unknown> | undefined)?.skipped as Array<{ title: string; matchedTitle?: string; matchedAdoId?: number }> | undefined) ?? []
   const flaggedDups = ((dedupEv?.data as Record<string, unknown> | undefined)?.flagged as Array<{ title: string; matchedTitle?: string; matchedAdoId?: number }> | undefined) ?? []
   const reachedIdx = drafts.length > 0 ? 4 : session.analysisJson ? 3 : session.codeContext ? 2 : kbFiles.length > 0 ? 1 : 0
@@ -472,7 +560,6 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
   const [picked, setPicked] = useState<number | null>(null)
   const sel = Math.min(picked ?? activeIdx, PIPELINE_STEPS.length - 1)
   const [view, setView] = useState<'findings' | 'activity'>('findings')
-  const streamUrl = sessionStreamUrl(session.id)
 
   const phaseLabel = PIPELINE_STEPS[sel]?.label ?? ''
 
@@ -559,7 +646,7 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
       </Stack>
 
       {view === 'activity' && (
-        <AgentConsole title="Activity log" streamUrl={inFlight ? streamUrl : null} seedEvents={persisted} />
+        <AgentConsole title="Activity log" events={events} connected={connected} />
       )}
 
       {view === 'findings' && sel === 0 && (
@@ -590,18 +677,7 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
       )}
 
       {view === 'findings' && sel === 2 && (
-        <Card variant="outlined"><CardContent>
-          <Typography variant="subtitle2" gutterBottom>Code discovery</Typography>
-          {session.codeContext ? (
-            <Box component="pre" sx={{ fontFamily: 'monospace', fontSize: '0.75rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 400, overflowY: 'auto', bgcolor: 'action.hover', p: 1.5, borderRadius: 1 }}>
-              {session.codeContext}
-            </Box>
-          ) : (
-            <Typography variant="body2" color="text.secondary">
-              {inFlight ? 'Discovering code…' : 'No code context was discovered for this story.'}
-            </Typography>
-          )}
-        </CardContent></Card>
+        <CodeBehaviorPanel session={session} inFlight={inFlight} onSaved={refetch} onError={onError} />
       )}
 
       {view === 'findings' && sel === 3 && (

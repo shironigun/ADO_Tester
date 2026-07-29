@@ -33,6 +33,7 @@ export interface SessionDetail {
   // bug-only (optional, tolerated)
   actualBehavior?: string | null
   codeContext?: string | null
+  codeBehaviorJson?: string | null
   codeVerificationJson?: string | null
   // qa-loop only (optional, tolerated)
   module?: string | null

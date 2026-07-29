@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { API_BASE } from '../config/env'
+import { getToken, setToken } from './authToken'
 import { logger } from '../logger'
 
 // Centralized axios instance (F1). Every per-feature api/* module makes its calls through this client,
@@ -11,11 +12,24 @@ import { logger } from '../logger'
 // removed. (Instance interceptors don't fire for global-axios calls and vice-versa, so no double-log.)
 export const api = axios.create({ baseURL: API_BASE })
 
+// Attach the JWT (login gate) as a Bearer header on every request. No-op before login / when auth is off.
+api.interceptors.request.use((config) => {
+  const token = getToken()
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
+
 api.interceptors.response.use(
   (r) => r,
   (error) => {
     const cfg = error?.config ?? {}
     const status: number | undefined = error?.response?.status
+    // 401 = token missing/expired/invalid → drop it and signal the app to return to the login screen.
+    // (A failed login also 401s; that's harmless here — LoginPage shows the error, we're already logged out.)
+    if (status === 401) {
+      setToken(null)
+      window.dispatchEvent(new Event('auth:unauthorized'))
+    }
     const url = `${cfg.baseURL ?? ''}${cfg.url ?? ''}`
     const method = (cfg.method ?? '').toUpperCase()
     const msg = `API ${method} ${url} failed${status ? ` (${status})` : ''}: ${error?.message ?? ''}`

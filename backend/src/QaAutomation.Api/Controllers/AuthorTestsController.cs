@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using QaAutomation.Api.Streaming;
@@ -215,6 +216,42 @@ public sealed class AuthorTestsController : ControllerBase
             if (session is null)
                 return StatusCode(404, new { detail = "Session not found." });
             session.AnalysisJson = request.ToAnalystOutput().ToJson();   // stored as camelCase AnalystOutput JSON
+            session.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(cancellationToken);
+            var drafts = await _db.TestCaseDrafts.Where(d => d.SessionId == sessionId).ToListAsync(cancellationToken);
+            return Ok(TestSessionDetail.From(session, drafts));
+        }
+        catch (Exception e)
+        {
+            return StatusCode(500, new { detail = e.Message });
+        }
+    }
+
+    [HttpPut("sessions/{sessionId:int}/code-behavior")]
+    public async Task<IActionResult> UpdateCodeBehavior(int sessionId, [FromBody] UpdateCodeBehaviorRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var session = await _db.TestSessions.FindAsync([sessionId], cancellationToken);
+            if (session is null)
+                return StatusCode(404, new { detail = "Session not found." });
+            if (session.Status != SessionStatus.AwaitingTester)
+                return StatusCode(409, new { detail = "Code-behavior notes can only be edited at the Analyst→Tester gate." });
+
+            var arr = new JsonArray();
+            var idx = 1;
+            foreach (var it in request.Items ?? [])
+            {
+                if (string.IsNullOrWhiteSpace(it.Behavior)) continue;
+                arr.Add(new JsonObject
+                {
+                    ["id"] = string.IsNullOrWhiteSpace(it.Id) ? $"b{idx}" : it.Id,
+                    ["behavior"] = it.Behavior.Trim(),
+                    ["comment"] = (it.Comment ?? "").Trim(),
+                });
+                idx++;
+            }
+            session.CodeBehaviorJson = arr.Count > 0 ? arr.ToJsonString() : null;
             session.UpdatedAt = DateTime.UtcNow;
             await _db.SaveChangesAsync(cancellationToken);
             var drafts = await _db.TestCaseDrafts.Where(d => d.SessionId == sessionId).ToListAsync(cancellationToken);

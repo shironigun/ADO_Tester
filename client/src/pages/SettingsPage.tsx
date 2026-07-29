@@ -31,6 +31,7 @@ import StorageOutlinedIcon from '@mui/icons-material/StorageOutlined'
 import PageHeader from '../components/PageHeader'
 import DatabaseSettings from '../components/DatabaseSettings'
 import Section from '../components/Section'
+import ClaudeAuthControls from '../components/ClaudeAuthControls'
 import { FadeIn, Stagger, StaggerItem } from '../motion/primitives'
 import { MONO_FONT } from '../theme/tokens'
 import { apiUrl } from '../config/env'
@@ -644,6 +645,7 @@ export default function SettingsPage() {
                             ? `Local CLI ${env.claudeCliVersion} — uses your Pro/Max login, no key.`
                             : 'Local `claude` CLI not detected — install Claude Code and log in.'}
                           active={activeProvider === 'ClaudeCli'} ready={!!env?.claudeCliAvailable}>
+                          <ClaudeAuthControls />
                           <TextField label="CLI path" size="small" fullWidth value={claudeCliPath}
                             onChange={e => setClaudeCliPath(e.target.value)} placeholder="claude" />
                           <Autocomplete

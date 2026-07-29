@@ -1415,6 +1415,10 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                         .HasColumnType("INTEGER")
                         .HasColumnName("BatchId");
 
+                    b.Property<string>("CodeBehaviorJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("CodeBehaviorJson");
+
                     b.Property<string>("CodeContext")
                         .HasColumnType("TEXT")
                         .HasColumnName("CodeContext");

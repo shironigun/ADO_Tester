@@ -4,11 +4,19 @@
 //
 // Empty VITE_QA_API → same-origin (the Vite dev proxy forwards /api → :5250 in dev; a reverse proxy
 // or static-host rewrite serves /api in prod). A set value (e.g. https://api.example.com) is used verbatim.
+import { getToken } from '../api/authToken'
+
 const API_BASE = (import.meta.env.VITE_QA_API ?? '').replace(/\/+$/, '')
 
-/** Build an API URL from a path. Accepts "/api/..." or "api/..." and prefixes the configured base. */
+/** Build an API URL from a path. Accepts "/api/..." or "api/..." and prefixes the configured base.
+ *  When a JWT is stored, it's appended as ?access_token= — these are the header-less browser requests
+ *  (EventSource/SSE, the Reports iframe/download, the Settings preview window) that can't send an
+ *  Authorization header. Axios calls do NOT use this helper; they send the Bearer header instead. */
 export function apiUrl(path: string): string {
-  return `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`
+  const url = `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`
+  const token = getToken()
+  if (!token) return url
+  return `${url}${url.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(token)}`
 }
 
 export { API_BASE }

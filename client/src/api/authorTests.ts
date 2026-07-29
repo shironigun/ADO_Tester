@@ -118,6 +118,14 @@ export async function saveAnalysis(sessionId: number, analysis: unknown): Promis
   await api.patch(`/api/author-tests/sessions/${sessionId}/analysis`, analysis)
 }
 
+// ── Code behavior: analyzed "what the code does" bullets + reviewer notes (Analyst→Tester gate) ──
+export interface CodeBehaviorItem { id: string; behavior: string; comment: string }
+
+export async function saveCodeBehavior(sessionId: number, items: CodeBehaviorItem[]): Promise<SessionDetail> {
+  const { data } = await api.put<SessionDetail>(`/api/author-tests/sessions/${sessionId}/code-behavior`, { items })
+  return data
+}
+
 export const sessionStreamUrl = (id: number) => apiUrl(`/api/author-tests/sessions/${id}/stream`)
 
 export interface RescanPlanResponse { scanId: number; caseCount: number; scannedAt: string }

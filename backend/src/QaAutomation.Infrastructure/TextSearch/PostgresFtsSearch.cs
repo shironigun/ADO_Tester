@@ -6,11 +6,13 @@ namespace QaAutomation.Infrastructure.TextSearch;
 
 /// <summary>
 /// PostgreSQL full-text implementation. <c>doc_chunks</c> and <c>test_case_index</c> are real tables
-/// with a generated <c>tsvector</c> column + GIN index, ranked with <c>ts_rank</c> over
-/// <c>websearch_to_tsquery</c>. Like the SQLite fts5 tables, they live OUTSIDE EF and are created by
-/// idempotent DDL in <see cref="EnsureSchema"/> — so the Npgsql EF migration only owns the relational
-/// tables. Insert/delete use provider-agnostic <c>ExecuteSqlRaw</c> (the generated <c>tsv</c> column
-/// maintains itself); only the ranked reads are Postgres-specific.
+/// with a generated <c>tsvector</c> column + GIN index, ranked with <c>ts_rank</c>. The query is built
+/// as an OR-joined <c>to_tsquery('english', …)</c> from <see cref="FtsMatch.PostgresOrTsQuery"/> so
+/// retrieval is broad match-any — mirroring the SQLite fts5 OR behavior (using <c>websearch_to_tsquery</c>,
+/// which ANDs every term, made the pipeline's long "title + acceptance criteria" query match zero chunks).
+/// Like the SQLite tables they live OUTSIDE EF and are created by idempotent DDL in <see cref="EnsureSchema"/>.
+/// Insert/delete use provider-agnostic <c>ExecuteSqlRaw</c> (the generated <c>tsv</c> column maintains
+/// itself); only the ranked reads are Postgres-specific.
 /// </summary>
 public sealed class PostgresFtsSearch : ITextSearchProvider
 {
@@ -56,7 +58,9 @@ public sealed class PostgresFtsSearch : ITextSearchProvider
     public async Task<IReadOnlyList<DocChunkHit>> SearchDocChunksAsync(
         QaDbContext db, int projectId, string query, int topK, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(query))
+        // OR-join the query tokens (broad match-any), mirroring SQLite. Null = no usable token.
+        var tsQuery = FtsMatch.PostgresOrTsQuery(query);
+        if (tsQuery is null)
             return [];
 
         var conn = (NpgsqlConnection)db.Database.GetDbConnection();
@@ -66,16 +70,16 @@ public sealed class PostgresFtsSearch : ITextSearchProvider
         try
         {
             await using var cmd = conn.CreateCommand();
-            // websearch_to_tsquery is robust to arbitrary user text (never throws); higher ts_rank = better.
+            // Tokens are [A-Za-z0-9_]+ OR-joined with ' | ', so to_tsquery never throws; higher ts_rank = better.
             cmd.CommandText =
                 """
-                SELECT doc_id, content, ts_rank(tsv, websearch_to_tsquery('english', @q)) AS score
+                SELECT doc_id, content, ts_rank(tsv, to_tsquery('english', @q)) AS score
                 FROM doc_chunks
-                WHERE tsv @@ websearch_to_tsquery('english', @q) AND project_id = @p
+                WHERE tsv @@ to_tsquery('english', @q) AND project_id = @p
                 ORDER BY score DESC
                 LIMIT @k
                 """;
-            cmd.Parameters.AddWithValue("@q", query);
+            cmd.Parameters.AddWithValue("@q", tsQuery);
             cmd.Parameters.AddWithValue("@p", projectId);
             cmd.Parameters.AddWithValue("@k", topK);
 
@@ -107,7 +111,8 @@ public sealed class PostgresFtsSearch : ITextSearchProvider
     public async Task<IReadOnlyList<int>> SearchTestCaseEntryIdsAsync(
         QaDbContext db, int scanId, string query, int top, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(query))
+        var tsQuery = FtsMatch.PostgresOrTsQuery(query);
+        if (tsQuery is null)
             return [];
 
         var conn = (NpgsqlConnection)db.Database.GetDbConnection();
@@ -121,11 +126,11 @@ public sealed class PostgresFtsSearch : ITextSearchProvider
                 """
                 SELECT entry_id
                 FROM test_case_index
-                WHERE tsv @@ websearch_to_tsquery('english', @q) AND scan_id = @sid
-                ORDER BY ts_rank(tsv, websearch_to_tsquery('english', @q)) DESC
+                WHERE tsv @@ to_tsquery('english', @q) AND scan_id = @sid
+                ORDER BY ts_rank(tsv, to_tsquery('english', @q)) DESC
                 LIMIT @top
                 """;
-            cmd.Parameters.AddWithValue("@q", query);
+            cmd.Parameters.AddWithValue("@q", tsQuery);
             cmd.Parameters.AddWithValue("@sid", scanId);
             cmd.Parameters.AddWithValue("@top", top);
 

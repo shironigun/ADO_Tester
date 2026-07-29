@@ -255,6 +255,30 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 Pub(key, EventKinds.Result, EventPhases.Discover,
                     string.IsNullOrEmpty(codeCtx) ? "No code context found" : "Code context discovered",
                     EventLevels.Success, new() { ["hasCode"] = !string.IsNullOrEmpty(codeCtx) });
+
+                // Distill the discovered code into plain-English behavior bullets for the reviewer to
+                // annotate at the Analyst→Tester gate (fed to the Tester as extra guidance). Runs on the
+                // already byte-budgeted code, so it's one cheap extra call; failures never block the run.
+                if (!string.IsNullOrEmpty(codeCtx))
+                {
+                    try
+                    {
+                        var bullets = await RunStreamingAsync(db, session, "Analyzing code behavior",
+                            (p, c) => new CodeBehaviorAgent(llm).AnalyzeAsync(wi, codeCtx!, p, EmitClosure(key, EventPhases.Discover), c),
+                            key, EventPhases.Discover, ct);
+                        session.CodeBehaviorJson = BuildCodeBehaviorJson(bullets);
+                        session.UpdatedAt = DateTime.UtcNow;
+                        await db.SaveChangesAsync(ct);
+                        Pub(key, EventKinds.Result, EventPhases.Discover,
+                            $"Analyzed code behavior — {bullets.Count} point(s)",
+                            EventLevels.Success, new() { ["points"] = bullets.Count });
+                    }
+                    catch (Exception behaviorEx) when (behaviorEx is not OperationCanceledException)
+                    {
+                        _log.LogWarning(behaviorEx, "Code behavior analysis failed for session {SessionId} — continuing", sessionId);
+                        Pub(key, EventKinds.System, EventPhases.Discover, $"Code behavior analysis skipped: {behaviorEx.Message}", EventLevels.Warn);
+                    }
+                }
             }
             catch (Exception discoverEx) when (discoverEx is not OperationCanceledException)
             {
@@ -399,7 +423,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         Pub(key, EventKinds.Phase, EventPhases.Tester, "Tester started — generating test cases in QA style");
         var generated = await RunStreamingAsync(db, session, "Tester — generating test cases",
             (p, c) => new TesterAgent(llm).GenerateAsync(
-                analysis, wi, session.TesterContext, existingTestsBlock,
+                analysis, wi, EffectiveTesterContext(session), existingTestsBlock,
                 p, EmitClosure(key, EventPhases.Tester), c),
             key, EventPhases.Tester, ct);
 
@@ -597,7 +621,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             Pub(key, EventKinds.Phase, EventPhases.Tester, "Tester refine started — merging your feedback");
             var refined = await RunStreamingAsync(db, session, "Tester — refining test cases",
                 (p, c) => new TesterAgent(llm).RefineAsync(
-                    analysis, wi, existing, removedTitles, overallFeedback, session.TesterContext,
+                    analysis, wi, existing, removedTitles, overallFeedback, EffectiveTesterContext(session),
                     existingTestsBlock, p, EmitClosure(key, EventPhases.Tester), c),
                 key, EventPhases.Tester, ct);
 
@@ -890,6 +914,64 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     {
         try { session.EventLogJson = JsonSerializer.Serialize(_bus.Narrative(key)); }
         catch { /* never block the pipeline on log persistence */ }
+    }
+
+    /// <summary>Serialize behavior bullets into the stored JSON array <c>[{ id, behavior, comment }]</c>
+    /// (empty comments). Returns null when there are no bullets.</summary>
+    private static string? BuildCodeBehaviorJson(IReadOnlyList<string> bullets)
+    {
+        var arr = new JsonArray();
+        var i = 1;
+        foreach (var b in bullets)
+        {
+            if (string.IsNullOrWhiteSpace(b)) continue;
+            arr.Add(new JsonObject { ["id"] = $"b{i++}", ["behavior"] = b.Trim(), ["comment"] = "" });
+        }
+        return arr.Count > 0 ? arr.ToJsonString() : null;
+    }
+
+    /// <summary>Combine the tester's free-text gate context with the annotated code-behavior bullets
+    /// (behavior + reviewer notes) into one labeled block fed to the Tester. Null when both are empty.</summary>
+    private static string? EffectiveTesterContext(TestSession session)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(session.TesterContext))
+            parts.Add(session.TesterContext!.Trim());
+
+        var behaviorBlock = BuildCodeBehaviorBlock(session.CodeBehaviorJson);
+        if (behaviorBlock is not null)
+            parts.Add(behaviorBlock);
+
+        return parts.Count == 0 ? null : string.Join("\n\n", parts);
+    }
+
+    private static string? BuildCodeBehaviorBlock(string? codeBehaviorJson)
+    {
+        if (string.IsNullOrWhiteSpace(codeBehaviorJson))
+            return null;
+        try
+        {
+            if (JsonNode.Parse(codeBehaviorJson) is not JsonArray arr || arr.Count == 0)
+                return null;
+            var lines = new List<string>
+            {
+                "Code behavior analysis — what the current implementation actually does (derived from the " +
+                "repo). Ground the test cases in this real behavior, and pay special attention to any " +
+                "reviewer notes flagging suspected misbehavior (write cases that would catch them):",
+            };
+            foreach (var n in arr)
+            {
+                if (n is not JsonObject o) continue;
+                var behavior = JsonUtils.StrOr(o, "behavior", "Behavior");
+                if (string.IsNullOrWhiteSpace(behavior)) continue;
+                var comment = JsonUtils.StrOr(o, "comment", "Comment");
+                lines.Add(string.IsNullOrWhiteSpace(comment)
+                    ? $"- {behavior.Trim()}"
+                    : $"- {behavior.Trim()} [Reviewer note: {comment.Trim()}]");
+            }
+            return lines.Count > 1 ? string.Join("\n", lines) : null;
+        }
+        catch { return null; }
     }
 
     private static async Task UpdateActivityAsync(QaDbContext db, TestSession session, string message, CancellationToken ct)

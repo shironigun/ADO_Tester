@@ -230,6 +230,8 @@ public static class DependencyInjection
         // Provider state + factory are singletons; the factory builds a fresh client per call (spec §5.6).
         services.AddSingleton<ILlmProviderState, LlmProviderState>();
         services.AddSingleton<ILlmClientFactory, LlmClientFactory>();
+        // Drives `claude auth login/logout/status` for the UI (holds the one pending login process).
+        services.AddSingleton<IClaudeAuthService, ClaudeAuthService>();
         return services;
     }
 

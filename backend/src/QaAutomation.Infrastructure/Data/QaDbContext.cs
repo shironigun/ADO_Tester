@@ -123,6 +123,7 @@ public sealed class QaDbContext : DbContext
             // Author Tests enhancements (AuthorTestsContextAndIndex migration).
             e.Property(x => x.AdditionalContext).HasColumnName("AdditionalContext");
             e.Property(x => x.CodeContext).HasColumnName("CodeContext");
+            e.Property(x => x.CodeBehaviorJson).HasColumnName("CodeBehaviorJson");
             e.Property(x => x.TesterContext).HasColumnName("TesterContext");
             e.Property(x => x.ReferenceTestPlanId).HasColumnName("ReferenceTestPlanId");
             e.Property(x => x.ReferenceTestSuiteId).HasColumnName("ReferenceTestSuiteId");

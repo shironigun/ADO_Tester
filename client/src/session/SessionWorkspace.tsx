@@ -144,7 +144,7 @@ function SessionDetailPanel({ config, sessionId, onClose, onError, onTerminal, o
           </Box>
           <Box sx={{ flex: 1, overflowY: 'auto', p: 2 }}>
             {tab === 'detail'
-              ? <Body session={session} refetch={refetch} onError={onError} />
+              ? <Body key={session.id} session={session} refetch={refetch} onError={onError} />
               : <SessionTimeline config={config} session={session} live={!!live} />}
           </Box>
         </Box>

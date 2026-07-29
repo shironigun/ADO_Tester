@@ -35,6 +35,10 @@ builder.Configuration["Storage:DataDirectory"] = dataDir;
 // Program.cs stays a list of AddCustom*/Configure* one-liners (house style — see ConfigurationExtensions).
 builder.Services.AddCustomControllers();
 builder.Services.AddCustomCors();
+// Web-UI login gate (cookie auth). Credentials + on/off come from the .env (APP_LOGIN_*); resolved
+// once at boot. When disabled the app is fully open (unchanged behavior).
+var authOptions = AuthOptions.FromEnvironment();
+builder.Services.AddCustomAuth(authOptions);
 builder.Services.AddCustomSwagger();
 builder.Services.AddProblemDetails();
 
@@ -79,9 +83,11 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCustomCors();
+app.UseAuthentication();
+app.UseAuthorization();
 app.MapControllers();
 
-// Liveness probe (spec §5.4): GET /api/health → { "status": "ok" }.
-app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
+// Liveness probe (spec §5.4): GET /api/health → { "status": "ok" }. Anonymous so it works pre-login.
+app.MapGet("/api/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
 
 app.Run();

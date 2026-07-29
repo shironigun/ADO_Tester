@@ -164,6 +164,7 @@ public sealed class TestSessionDetail
     public string? EventLogJson { get; set; }
     public string? AdditionalContext { get; set; }
     public string? CodeContext { get; set; }
+    public string? CodeBehaviorJson { get; set; }
     public string? TesterContext { get; set; }
     public int? ReferenceTestPlanId { get; set; }
     public int? ReferenceTestSuiteId { get; set; }
@@ -177,12 +178,27 @@ public sealed class TestSessionDetail
         Id = s.Id, ProjectId = s.ProjectId, WorkItemId = s.WorkItemId, WorkItemTitle = s.WorkItemTitle,
         Status = s.Status, CurrentActivity = s.CurrentActivity, AnalysisJson = s.AnalysisJson,
         ErrorMessage = s.ErrorMessage, EventLogJson = s.EventLogJson,
-        AdditionalContext = s.AdditionalContext, CodeContext = s.CodeContext, TesterContext = s.TesterContext,
+        AdditionalContext = s.AdditionalContext, CodeContext = s.CodeContext, CodeBehaviorJson = s.CodeBehaviorJson,
+        TesterContext = s.TesterContext,
         ReferenceTestPlanId = s.ReferenceTestPlanId, ReferenceTestSuiteId = s.ReferenceTestSuiteId,
         PlanNavigationHint = s.PlanNavigationHint,
         CreatedAt = s.CreatedAt, UpdatedAt = s.UpdatedAt,
         Drafts = drafts.OrderBy(d => d.SortOrder).Select(TestCaseDraftDto.From).ToList(),
     };
+}
+
+/// <summary>One annotated code-behavior bullet: what the code does, plus an optional reviewer note.</summary>
+public sealed class CodeBehaviorItemDto
+{
+    public string Id { get; set; } = "";
+    public string Behavior { get; set; } = "";
+    public string? Comment { get; set; }
+}
+
+/// <summary>PUT body for saving reviewer notes on the code-behavior bullets (Analyst→Tester gate).</summary>
+public sealed class UpdateCodeBehaviorRequest
+{
+    public List<CodeBehaviorItemDto> Items { get; set; } = [];
 }
 
 /// <summary>Response from a force-rescan of a reference test plan index.</summary>
