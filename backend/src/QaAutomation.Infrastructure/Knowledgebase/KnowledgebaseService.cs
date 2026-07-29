@@ -82,24 +82,31 @@ public sealed class KnowledgebaseService : IKnowledgebaseService
 
         var chunks = ChunkMarkdown(markdown);
 
-        var doc = new KnowledgebaseDocument
+        KnowledgebaseDocument? doc = null;
+        await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
-            ProjectId = projectId,
-            FileName = safeName,
-            StoredPath = storedPath,
-            ChunkCount = chunks.Count,
-            SizeBytes = Encoding.UTF8.GetByteCount(markdown),
-            UploadedAt = DateTime.UtcNow,
-        };
+            if (doc is not null)
+                _db.Entry(doc).State = EntityState.Detached;
 
-        await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
-        _db.Documents.Add(doc);
-        await _db.SaveChangesAsync(cancellationToken);   // assigns doc.Id
+            doc = new KnowledgebaseDocument
+            {
+                ProjectId = projectId,
+                FileName = safeName,
+                StoredPath = storedPath,
+                ChunkCount = chunks.Count,
+                SizeBytes = Encoding.UTF8.GetByteCount(markdown),
+                UploadedAt = DateTime.UtcNow,
+            };
 
-        foreach (var chunk in chunks)
-            await _textSearch.IndexDocChunkAsync(_db, projectId, doc.Id, chunk, cancellationToken);
-        await tx.CommitAsync(cancellationToken);
-        return doc;
+            await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+            _db.Documents.Add(doc);
+            await _db.SaveChangesAsync(cancellationToken);   // assigns doc.Id
+
+            foreach (var chunk in chunks)
+                await _textSearch.IndexDocChunkAsync(_db, projectId, doc.Id, chunk, cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+        });
+        return doc!;
     }
 
     public async Task<IReadOnlyList<KnowledgebaseDocument>> ListAsync(
@@ -111,24 +118,32 @@ public sealed class KnowledgebaseService : IKnowledgebaseService
 
     public async Task DeleteAsync(int documentId, CancellationToken cancellationToken = default)
     {
-        var doc = await _db.Documents.FindAsync([documentId], cancellationToken);
-        if (doc is null)
-            return;   // idempotent
-
-        await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
-        await _textSearch.DeleteDocChunksAsync(_db, documentId, cancellationToken);
-
-        try
+        await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
-            if (!string.IsNullOrEmpty(doc.StoredPath) && File.Exists(doc.StoredPath))
-                File.Delete(doc.StoredPath);
-        }
-        catch (IOException) { /* file gone is fine — keep the DB delete idempotent */ }
-        catch (UnauthorizedAccessException) { /* idem */ }
+            // Detach any stale tracked state from a prior retry attempt.
+            foreach (var e in _db.ChangeTracker.Entries<KnowledgebaseDocument>()
+                         .Where(e => e.Entity.Id == documentId).ToList())
+                e.State = EntityState.Detached;
 
-        _db.Documents.Remove(doc);
-        await _db.SaveChangesAsync(cancellationToken);
-        await tx.CommitAsync(cancellationToken);
+            var doc = await _db.Documents.FindAsync([documentId], cancellationToken);
+            if (doc is null)
+                return;   // idempotent
+
+            await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+            await _textSearch.DeleteDocChunksAsync(_db, documentId, cancellationToken);
+
+            try
+            {
+                if (!string.IsNullOrEmpty(doc.StoredPath) && File.Exists(doc.StoredPath))
+                    File.Delete(doc.StoredPath);
+            }
+            catch (IOException) { /* file gone is fine — keep the DB delete idempotent */ }
+            catch (UnauthorizedAccessException) { /* idem */ }
+
+            _db.Documents.Remove(doc);
+            await _db.SaveChangesAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+        });
     }
 
     public async Task<IReadOnlyList<KnowledgebaseHit>> SearchAsync(
