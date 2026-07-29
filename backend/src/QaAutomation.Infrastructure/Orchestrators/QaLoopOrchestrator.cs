@@ -295,7 +295,14 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
                         uiCase.Title, uiCase.StepsJson, uiCase.Bucket ?? "regression",
                         uiCase.Id, progress, ct);
 
-                    var specCode = File.Exists(specPath) ? await File.ReadAllTextAsync(specPath, ct) : "";
+                    var rawCode = File.Exists(specPath) ? await File.ReadAllTextAsync(specPath, ct) : "";
+                    // QLV2-301: stamp @qa-meta (SourceDraftId null — the UiScript draft row doesn't
+                    // exist yet; reconcile matches by SpecFilePath, same tradeoff as the API path).
+                    var specCode = QaMetaHeader.Upsert(rawCode, new QaMeta(
+                        session.Module, "ui", "ui", uiCase.Bucket, TcId: null, SourceDraftId: null,
+                        DateTime.UtcNow, QaMetaHeader.ComputeHash(rawCode)));
+                    if (!string.IsNullOrEmpty(specPath) && specCode != rawCode)
+                        try { await File.WriteAllTextAsync(specPath, specCode, ct); } catch { /* best-effort */ }
 
                     db.ApiTestDrafts.Add(new ApiTestDraft
                     {
@@ -399,9 +406,23 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
                     await playwright.HealAsync(
                         draft.SpecFilePath, draft.ErrorMessage ?? "", progress, ct);
 
-                    draft.SpecCode = File.Exists(draft.SpecFilePath)
-                        ? await File.ReadAllTextAsync(draft.SpecFilePath, ct)
-                        : draft.SpecCode;
+                    if (File.Exists(draft.SpecFilePath))
+                    {
+                        var rawCode = await File.ReadAllTextAsync(draft.SpecFilePath, ct);
+                        // QLV2-301: re-stamp — carry forward the prior header's fields (module/type/
+                        // level/bucket/tcId/sourceDraftId) if the file had one, else mint a fresh one
+                        // now that draft.Id is known.
+                        var priorMeta = QaMetaHeader.TryParse(draft.SpecCode) ?? QaMetaHeader.TryParse(rawCode);
+                        var body = QaMetaHeader.StripHeader(rawCode);
+                        var meta = priorMeta is not null
+                            ? priorMeta with { GeneratedAt = DateTime.UtcNow, SpecHash = QaMetaHeader.ComputeHash(body) }
+                            : new QaMeta(session.Module, "ui", "ui", draft.Bucket, draft.AdoTestCaseId,
+                                draft.Id, DateTime.UtcNow, QaMetaHeader.ComputeHash(body));
+                        var stamped = QaMetaHeader.Upsert(body, meta);
+                        if (stamped != rawCode)
+                            try { await File.WriteAllTextAsync(draft.SpecFilePath, stamped, ct); } catch { /* best-effort */ }
+                        draft.SpecCode = stamped;
+                    }
                     draft.Status = ApiDraftStatus.Draft;
                     draft.ErrorMessage = null;
                     draft.UpdatedAt = DateTime.UtcNow;
@@ -545,7 +566,15 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
                 if (refined.SchemaJson is not null) draft.SchemaJson = refined.SchemaJson;
                 // Rewrite disk spec (case 0 or single)
                 if (draft.SpecFilePath is not null && (draft.CaseIndex is null or 0))
-                    try { File.WriteAllText(draft.SpecFilePath, refined.SpecCode); } catch (Exception ex) { _log.LogWarning(ex, "Spec rewrite failed for draft {DraftId}", draft.Id); }
+                {
+                    // QLV2-301: re-stamp @qa-meta — draft.Id is known here, so SourceDraftId is filled
+                    // in (unlike the initial-generate path). Preserve TcId if the draft was already pushed.
+                    var stamped = QaMetaHeader.Upsert(refined.SpecCode, new QaMeta(
+                        session.Module, "api", draft.Level.ToWire(), Bucket: null, draft.AdoTestCaseId,
+                        draft.Id, DateTime.UtcNow, QaMetaHeader.ComputeHash(refined.SpecCode)));
+                    draft.SpecCode = stamped;
+                    try { File.WriteAllText(draft.SpecFilePath, stamped); } catch (Exception ex) { _log.LogWarning(ex, "Spec rewrite failed for draft {DraftId}", draft.Id); }
+                }
                 draft.UpdatedAt = now;
                 Pub(key, EventKinds.Result, EventPhases.Generate, $"Refined: {draft.Title}");
             }
@@ -1288,6 +1317,12 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
                 // QAL-071b: resolve the schema import (if any) against a filename WE control, derived
                 // from the same slug as the spec file, before writing to disk — see RewriteSchemaImport.
                 var specCode = RewriteSchemaImport(levelDir, slug, spec.SpecCode, spec.SchemaJson, session.Id);
+                // QLV2-301: stamp @qa-meta identity (Scripts Board disk↔DB reconcile). SourceDraftId is
+                // null here — draft.Id isn't assigned until SaveChangesAsync — reconcile matches by
+                // SpecFilePath, not SourceDraftId, so this is a non-issue.
+                specCode = QaMetaHeader.Upsert(specCode, new QaMeta(
+                    session.Module, "api", level.ToWire(), Bucket: null, TcId: null, SourceDraftId: null,
+                    DateTime.UtcNow, QaMetaHeader.ComputeHash(specCode)));
                 draft.SpecCode = specCode;
 
                 // Only case 0 actually needs to write the (identical) shared file to disk; cases 1..N
@@ -1455,7 +1490,20 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
         try
         {
             var text = File.ReadAllText(draft.SpecFilePath);
-            if (RewriteTagText(text, tcId, draft.CaseIndex, out var updated) && updated != text)
+            var changed = RewriteTagText(text, tcId, draft.CaseIndex, out var updated);
+
+            // QLV2-301: opportunistically fill in TcId now that it's known. Only re-stamps specs that
+            // already carry a header (generated from this point forward) — a legacy header-less spec
+            // stays unstamped here (backfill is out of scope for v1; it'll get one on its next refine).
+            var priorMeta = QaMetaHeader.TryParse(updated);
+            if (priorMeta is not null && priorMeta.TcId != tcId)
+            {
+                var body = QaMetaHeader.StripHeader(updated);
+                updated = QaMetaHeader.Upsert(body, priorMeta with { TcId = tcId });
+                changed = true;
+            }
+
+            if (changed && updated != text)
                 File.WriteAllText(draft.SpecFilePath, updated);
         }
         catch { /* best-effort disk rewrite */ }

@@ -4,15 +4,22 @@
 - **Design:** `solution.md` (authoritative vision brief) · **Ruleset:** `Ralph loop.md`
 - **Backlog:** `prd.md` (tasks `QLV2-###`, grouped by slab, built in order) · **Guide:** `blueprint.md`
 - **Started:** 2026-07-29
-- **Status:** SLAB 2 COMPLETE — all 21 tasks (QLV2-101..208) VERIFIED. 163/163 tests pass.
-  Frontend build clean. Resume point for Slab 3: **QLV2-301** (decompose from epic in prd.md).
+- **Status:** SLAB 2 COMPLETE. Slab 3 decomposed (QLV2-301..309) and **QLV2-301 VERIFIED**
+  (170/170 tests pass). Resume point: **QLV2-302**. ADO PAT is currently expired (401) — see blocker note.
+
+## Operational note (2026-07-29)
+- This machine's `Shell` tool cannot enforce the sandbox policy without `required_permissions: ["all"]`
+  on every call (fails to spawn otherwise) — see `.cursor/rules/ralph-loop-ops.mdc`.
+- Standing verification story for every task in this Ralph loop from here on: **177540** (controlled ADO
+  story dedicated to exercising ADO_Tester features) — always use it for manual/agentic verification runs
+  instead of picking an arbitrary module/story. Same rule file.
 
 ## Slab status
 | Slab | Name                                                      | Status                                     |
 | ---- | --------------------------------------------------------- | ------------------------------------------ |
 | 1    | Free-text + merge-refine in QA Loop                       | **COMPLETE** (QLV2-101..113, all VERIFIED) |
 | 2    | UI testing phase (Playwright agents via MCP + Claude CLI) | **COMPLETE** (QLV2-201..208, all VERIFIED) |
-| 3    | Scripts Board module                                      | Not started                                |
+| 3    | Scripts Board module                                      | In progress — QLV2-301 VERIFIED, 302 next  |
 
 ---
 
@@ -143,3 +150,53 @@
 - **Resolution (user):** author the **documentation** here; **execute the implementation locally**
   afterwards on the Windows machine. No backend code is written in this container — the doc set is the
   deliverable, and the local Ralph-loop run builds/tests/commits each task with real `dotnet`.
+
+---
+
+## Slab 3 — QLV2-301..309 (in progress, running locally on Windows)
+
+### 2026-07-29 (Slab 3 decomposition)
+- Ran a dedicated explore agent against the current codebase to ground the Slab 3 design before writing
+  file-level detail: confirmed `PlaywrightRunner.RunAsync` needs no QA-Loop session (reusable for ad-hoc
+  execution); found the **disk-artifact collision risk** between a new `ScriptBoardRun` table and `TestRun`
+  (`{runsDir}/{RunId}` is a flat autoincrement int for both) — resolved via a **negative `RunId` namespace**
+  for Scripts Board runs, avoiding any change to `PlaywrightRunner`'s directory scheme; confirmed Allure
+  history is file-based (`allure-history/{module}/{pipeline|manual}/history.jsonl`) and already
+  module+pipeline-keyed, reusable for trends; confirmed `PlaywrightRunner.SpawnAsync` is line-buffered
+  (`BeginOutputReadLine`) so the raw-ANSI `term` stream needs a **separate spawn path** (new
+  `ScriptsBoardRunner`), not a modification of the golden-tested QA-Runs spawn code; confirmed no
+  `@qa-meta`-equivalent marker exists yet and line 1 (before any `import`) is a safe insertion point
+  (`SpecNormalizer` ignores comments); confirmed Slab 2's UI scripts live under
+  `{PlaywrightRoot}/generated/ui/{bucket}/…`, not the aspirational `scripts/{module}/ui/{bucket}/…` from
+  `solution.md` — Slab 3 v1 scans both roots as-is rather than relocating Slab-2 output.
+- Wrote full file-level blueprint for all 9 tasks (QLV2-301..309) in `blueprint.md` → "SLAB 3 (detailed)".
+  Expanded the Slab 3 epic into 9 tasks in `prd.md` (301 `@qa-meta` header, 302 inventory/reconcile
+  service, 303 execution service+controller, 304 raw-ANSI term stream via a separate runner, 305
+  trends/flakiness, 306 frontend scaffold, 307 xterm.js terminal, 308 trends UI, 309 tests+docs close-out).
+- Created `.cursor/rules/ralph-loop-ops.mdc`: (1) this machine's `Shell` tool requires
+  `required_permissions: ["all"]` on every call or it fails to spawn (no sandbox backend available); (2)
+  standing verification story **177540** for every task's runtime check from here on (superseding ad-hoc
+  module/story choices for QA_Tester feature verification; `CLAUDE.md`'s 171740 remains the older generic
+  reference, kept as a note in the rule for disambiguation).
+
+### 2026-07-29 (QLV2-301 — @qa-meta header)
+- **QLV2-301** — `QaMeta`/`QaMetaHeader` (`Core/Models/QaMeta.cs`): `Build`/`TryParse`/`StripHeader`/
+  `Upsert`/`ComputeHash`. Wired into `QaLoopOrchestrator`: `PersistDraft` (initial API spec write),
+  `RefineDraftsInnerAsync`'s disk rewrite, `RewriteSpecOnDisk` (push-time — opportunistically fills in
+  `TcId` on an already-stamped spec, does not backfill header-less legacy specs),
+  `GenerateUiScriptsInnerAsync` (stamps the Claude-CLI-generated `.ui.spec.ts` before persisting), and
+  `HealSpecsInnerAsync` (re-stamps carrying forward the prior header's fields, or mints a fresh one if the
+  spec had none). New `QaMetaHeaderTests.cs` (7 tests: round-trip, upsert-prepend, upsert-replace-in-place,
+  legacy/malformed → null not throw, strip-is-noop, hash stability). **170/170 tests pass** (163 + 7 new),
+  `dotnet build` clean (0 warnings/errors).
+- **Environment note:** the local `dotnet build`/`dotnet test` run needed the already-running
+  `QaAutomation.Api` dev-server process killed first (it holds a file lock on the build output DLLs) —
+  restart your `dotnet run --project src\QaAutomation.Api` afterward if you had it open for manual testing.
+- **Verification against story 177540 — blocked, not skipped.** Attempted a live check
+  (`GET /api/diagnostics/workitem/177540` against a locally-started backend) to ground a real
+  verification run per the new standing-story rule; discovered `ADOACCESS_PAT` in the repo-root `.env` is
+  **expired/invalid — every live ADO call returns 401**. Logged as a known blocker in
+  `.cursor/rules/ralph-loop-ops.mdc`. QLV2-301 has zero ADO-write surface (it only changes local
+  `.spec.ts` file contents) so `dotnet test` is a legitimate substitute for this task specifically, but
+  **the PAT needs refreshing before any task with real ADO reads/writes (QA Loop push, Author Tests,
+  Find Bugs) can get its live-run verification** — flag this to the user, don't fake the check.

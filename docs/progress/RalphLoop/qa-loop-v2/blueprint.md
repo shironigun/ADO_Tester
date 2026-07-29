@@ -375,18 +375,448 @@ Add to `IQaLoopOrchestrator` + controller `POST sessions/{id}/heal-specs` body `
 
 Feature doc: `docs/features/qa-loop-ui-phase.md` + `docs/changelog/` entry.
 
-## SLAB 3 — Scripts Board module  *(outline — expand when reached)*
+## SLAB 3 — Scripts Board module  *(detailed)*
 
-Locked design in `solution.md` → Slab 3. Expected file-level work:
-- **Identity:** bake a `// @qa-meta {module,type,level,bucket,tcId,sourceDraftId,generatedAt,specHash}`
-  header into every generated spec (generators + a backfill); a reconcile service (DB rows ⟷ disk scan)
-  flagging manual/drifted specs.
-- **Backend:** a scripts-board controller + service reusing `PlaywrightRunner` (its `testMatch`
-  selection already accepts arbitrary file sets) for execution by spec/bucket/level/type/module/tag/all +
-  headed/headless + workers; history/trends from the existing Allure history store; a flakiness metric
-  (pass-rate / retry deltas across runs); a **raw-ANSI `term` SSE stream** (spawn with `FORCE_COLOR=1`,
-  stream raw stdout/stderr chunks).
-- **Frontend:** new module = `routes/paths.ts` + `api/scriptsBoard.ts` + `pages/ScriptsBoardPage.tsx` +
-  nav/route in `layout/Layout.tsx` (Schema Explorer pattern); an `xterm.js` terminal component
-  (`xterm` + `xterm-addon-fit`) fed by the `term` stream; inventory grid + filtering + per-spec drawer +
-  trends + flakiness. Coexists with QA Runs.
+Pattern source: `PlaywrightRunner`/`RunExecutionService` (`backend/src/QaAutomation.Infrastructure/QaRuns/`)
+for execution + Allure history; `QaRunsController`'s `Task.Run` + own `CreateScope()` + `RunCancellationRegistry`
+(`Api/Controllers/QaRunsController.cs:99-133`) for the background-task pattern; `QaRunsPage.tsx` for the
+list+drawer archetype; Schema Explorer for the 4-file frontend module add. Verification: use story
+**177540** for every task's exercised run (see `.cursor/rules/ralph-loop-ops.mdc`).
+
+**Key grounding facts (see explore-agent report in `progress.md` Slab 3 decomposition entry):**
+- `PlaywrightRunner.RunAsync(PlaywrightRunSpec, eventKey, ct)` does **not** require a QA-Loop session —
+  only needs `SpecFilePaths` (or `GrepTags`) + `Module` (used for `testDir`/Allure history key only).
+  Reusable as-is for ad-hoc Scripts Board execution.
+- Artifacts live at `{DataDirectory}/{RunsFolderName=runs}/{spec.RunId}/` — a **flat int keyed by
+  `TestRun.Id`**. A brand-new `ScriptBoardRun` table would autoincrement from 1 too and **collide** on
+  disk with `TestRun` ids. Fix: Scripts Board always calls `PlaywrightRunner` with
+  **`spec.RunId = -scriptBoardRun.Id`** (negative) — guaranteed disjoint from `TestRun`'s positive ids,
+  zero changes needed to `PlaywrightRunner`'s directory scheme. `RunCancellationRegistry` is just an
+  `int`-keyed dictionary, so negative keys work there too (reuse the **same singleton registry**, do not
+  add a second one).
+- Allure history is file-based, not DB: `{DataDirectory}/allure-history/{module|_all}/{pipelineId|manual}/history.jsonl`,
+  written by `PlaywrightRunner.HistoryFile` (private) via `allure … --history-path`. Scripts Board ad-hoc
+  runs naturally land under `.../manual/` (no `TriggerPipelineId`) — already directly comparable/trend-able
+  against QA-Runs manual runs for the same module.
+- `ApiTestDraft` (`Core/Models/ApiTestSession.cs:52-83`) is the DB identity source: `Level`, `SpecFilePath`,
+  `DraftKind` (null/UiCase/UiScript), `Bucket`, `Tags`, `AdoTestCaseId`, `Status`.
+- On-disk today: API specs at `{DataDirectory}/scripts/{module}/{level.ToDirName()}/{slug}.spec.ts`
+  (`contracts|endpoints|workflows`); **UI scripts (Slab 2) live at `{PlaywrightRoot}/generated/ui/{bucket}/{slug}-{tcId}.ui.spec.ts`**
+  — a different root than the aspirational `scripts/{module}/ui/{bucket}/…` in `solution.md`. Slab 3 v1
+  does **not** relocate Slab-2 UI output; the inventory scanner reads **both** roots as they exist today
+  (documented deviation, follow-up if we ever move UI specs under `scripts/`).
+- SSE `ConsoleEvent.Kind` already discriminates (`Core/Models/ConsoleEvent.cs`); adding `EventKinds.Term`
+  is purely additive — existing `AgentConsole`/`Narrative` set (`{Phase,System,Result,Error,Stat}`)
+  is untouched, `Term` is deliberately **excluded from `Narrative`** (live-only, like `Token`) since raw
+  ANSI dumps aren't useful in a replayed narrative and would bloat `EventLogJson`.
+- No `xterm`/`xterm-addon-fit` in `client/package.json` yet; no `FORCE_COLOR` handling anywhere in the repo.
+- `PlaywrightRunner.SpawnAsync` (`:521-610`) uses `Process.BeginOutputReadLine()` (line-buffered events) —
+  this is the tested QA-Runs path and must **not** be touched. Scripts Board's raw-ANSI live terminal uses
+  a **separate, additive spawn path** in a new `ScriptsBoardRunner` (reads `process.StandardOutput.BaseStream`
+  as raw bytes/chunks with `FORCE_COLOR=1`), so QA Runs' golden-tested behavior has zero risk of regression.
+- No `@qa-meta`-style marker exists yet. Safe insertion point: **line 1 of the generated file, before any
+  `import`**. `SpecNormalizer.Normalize` only rewrites env-var/route strings and ignores comments, so a
+  leading `//` comment line survives untouched.
+
+---
+
+### QLV2-301: `@qa-meta` header convention
+
+#### 1. `backend/src/QaAutomation.Core/Models/QaMeta.cs` (new)
+
+```csharp
+public sealed record QaMeta(
+    string Module, string Type, string Level, string? Bucket,
+    int? TcId, int? SourceDraftId, DateTime GeneratedAt, string SpecHash);
+
+public static class QaMetaHeader
+{
+    // "// @qa-meta {"module":"leads","type":"api","level":"contract","bucket":null,"tcId":123,
+    //   "sourceDraftId":45,"generatedAt":"2026-07-29T12:00:00Z","specHash":"..."}"
+    public static string Build(QaMeta meta) => $"// @qa-meta {JsonSerializer.Serialize(meta, ...)}\n";
+
+    // Returns null if the first line isn't a well-formed @qa-meta comment (legacy/manual specs).
+    public static QaMeta? TryParse(string specCode) { /* read first line, strip "// @qa-meta ", JSON parse */ }
+
+    // Idempotent: replaces an existing header line in-place, else prepends.
+    public static string Upsert(string specCode, QaMeta meta) { ... }
+
+    public static string ComputeHash(string specCodeWithoutHeader) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(specCodeWithoutHeader)))[..12];
+}
+```
+`Type` is `"api"` or `"ui"`. `Level` is the wire string (`contract|endpoint|workflow|ui`). Hash excludes
+the header line itself (compute over the body, so re-serializing the header doesn't change the hash).
+
+#### 2. Bake into the API spec persist path
+
+`QaLoopOrchestrator.PersistDraft` (`:1278-1301`, wherever the on-disk `.spec.ts` is written for
+Contract/Endpoint/Workflow drafts) — before `File.WriteAllTextAsync`, call
+`QaMetaHeader.Upsert(specCode, new QaMeta(session.Module, "api", draft.Level.ToWire(), null,
+draft.AdoTestCaseId, draft.Id, DateTime.UtcNow, QaMetaHeader.ComputeHash(specCode)))`. Applies to both the
+initial generate path and `RefineDraftsAsync`'s rewrite (Slab 1, QLV2-107) — same helper, called every
+time the file is (re)written, so the hash/timestamp always reflect the latest content.
+
+#### 3. Bake into the UI script-gen path
+
+`PlaywrightAgentService.GenerateScriptAsync` (`Infrastructure/QaLoop/PlaywrightAgentService.cs`) — after
+the Claude CLI writes the `.ui.spec.ts` file and the method reads it back, call `QaMetaHeader.Upsert` with
+`Type="ui"`, `Level="ui"`, `Bucket=bucket`, and rewrite the file before returning the path. Same in
+`HealAsync` after the healer rewrites the spec (re-stamp `generatedAt`/`specHash`, keep the same `tcId`/
+`sourceDraftId`/`bucket` — read the prior header first via `TryParse` to carry those fields forward).
+
+#### 4. Unit tests
+
+`QaMetaHeaderTests.cs` (new, `backend/tests/QaAutomation.Tests/`): round-trip `Build`→`TryParse`;
+`Upsert` on a header-less file prepends; `Upsert` on an already-stamped file replaces in place (no
+duplicate header, body untouched); `TryParse` on a plain legacy spec (no header) returns `null`.
+
+**AC:** B/T; a freshly generated API and UI spec both start with a valid `// @qa-meta` line; `RefineDraftsAsync`
+rewrites keep exactly one header line; legacy specs from before this task parse as `null` (not an error).
+
+---
+
+### QLV2-302: Data + inventory/reconcile service
+
+#### 1. `backend/src/QaAutomation.Core/Models/ScriptBoardRun.cs` (new)
+
+```csharp
+public sealed class ScriptBoardRun
+{
+    public int Id { get; set; }
+    public int ProjectId { get; set; }
+    /// <summary>Human-readable description of what was selected, e.g. "module=leads, bucket=smoke".</summary>
+    public string SelectionSummary { get; set; } = "";
+    /// <summary>Resolved absolute spec file paths this run executed (JSON string[]), for re-run/audit.</summary>
+    public string SpecFilePathsJson { get; set; } = "[]";
+    public bool Headed { get; set; }
+    public int? Workers { get; set; }
+    public TestRunStatus Status { get; set; } = TestRunStatus.Queued;   // reuse existing enum
+    public int Passed { get; set; }
+    public int Failed { get; set; }
+    public int Skipped { get; set; }
+    public long DurationMs { get; set; }
+    public string? JunitPath { get; set; }
+    public string? ReportPath { get; set; }
+    public string? EventLogJson { get; set; }
+    public string? ErrorMessage { get; set; }
+    public DateTime? StartedAt { get; set; }
+    public DateTime? FinishedAt { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+```
+Deliberately **no** `AdoTestRunId`/`TriggerSource`/ADO fields — Scripts Board runs are ADO-optional by
+design (`solution.md` Slab 3: "Report + ADO Test Run deep links throughout" means *linking out* to a
+spec's existing `AdoTestCaseId` via the inventory join, not creating new ADO Test Runs here).
+
+#### 2. `QaDbContext` + migration
+
+Add `DbSet<ScriptBoardRun> ScriptBoardRuns`; entity config mirrors `TestRun`'s (string enum conversion
+for `Status` — reuse the existing `TestRunStatus` converter). Migration `AddScriptBoardRuns`.
+
+#### 3. `backend/src/QaAutomation.Core/Abstractions/IScriptInventoryService.cs` (new)
+
+```csharp
+public sealed record ScriptInventoryItem(
+    string SpecFilePath, string Module, string Type, string Level, string? Bucket,
+    int? AdoTestCaseId, int? DraftId, string? Tags, QaMeta? Meta,
+    string ReconcileState);  // "linked" | "orphan_disk" | "orphan_db" | "no_meta"
+
+public interface IScriptInventoryService
+{
+    Task<IReadOnlyList<ScriptInventoryItem>> GetInventoryAsync(CancellationToken ct = default);
+}
+```
+
+#### 4. `Infrastructure/ScriptsBoard/ScriptInventoryService.cs` (new, scoped — uses `QaDbContext`)
+
+1. Scan disk: `Directory.EnumerateFiles({DataDirectory}/{ScriptsFolderName}, "*.spec.ts", AllDirectories)`
+   (API) + `Directory.EnumerateFiles({PlaywrightRoot}/generated/ui, "*.ui.spec.ts", AllDirectories)` (UI,
+   skip if `PlaywrightRoot` unset). Derive `Module`/`Level`/`Bucket` from the path segments (mirrors the
+   known layout) as a fallback when `Meta` is null.
+2. Read each file, `QaMetaHeader.TryParse` → `Meta`.
+3. Load all `ApiTestDraft` rows with non-null `SpecFilePath` (+ join `ApiTestSession.Module`) into a
+   `Dictionary<string, ApiTestDraft>` keyed by normalized absolute path.
+4. Reconcile per disk file: DB row found + `Meta != null` → `"linked"`; DB row found + `Meta == null` →
+   `"no_meta"` (legacy, pre-QLV2-301); no DB row → `"orphan_disk"` (hand-added or DB row deleted).
+5. A second pass over DB rows whose `SpecFilePath` doesn't exist on disk anymore → synthetic
+   `"orphan_db"` items (drifted: DB thinks a script exists, disk doesn't).
+6. No caching (files are cheap to stat; call is on-demand from the controller, matches the "reconcile
+   scan" language in `solution.md` — a live scan, not a persisted registry table).
+
+#### 5. DI registration
+
+`services.AddScoped<IScriptInventoryService, ScriptInventoryService>();` in `DependencyInjection.cs`
+next to the other QaLoop/QaRuns registrations.
+
+#### 6. Tests
+
+`ScriptInventoryServiceTests.cs`: seed a temp scripts dir with a stamped spec (→ `linked` when a matching
+draft row exists), an unstamped legacy spec with a draft row (→ `no_meta`), a hand-added file with no
+draft row (→ `orphan_disk`), and a draft row whose `SpecFilePath` doesn't exist (→ `orphan_db`).
+
+**AC:** B/T; all four reconcile states produced correctly; UI-root scan is skipped gracefully when
+`PlaywrightRoot` is empty (no exception).
+
+---
+
+### QLV2-303: Execution service + controller
+
+#### 1. `PlaywrightRunSpec` — two additive fields (`Core/Abstractions/IPlaywrightRunner.cs`)
+
+```csharp
+public bool Headed { get; init; } = false;
+public int? Workers { get; init; }
+```
+`PlaywrightRunner.WriteRunConfig` — when `Headed`, add `use: { headless: false }`; `Workers` overrides
+the existing `AUTOMATION_WORKERS` env default when present. Both default to today's behavior (headless,
+env-driven workers) when unset — **zero behavior change for QA Runs**, which never sets these.
+
+#### 2. `Core/Abstractions/IScriptBoardExecutionService.cs` (new)
+
+```csharp
+public interface IScriptBoardExecutionService
+{
+    /// <summary>Resolves a selection filter to concrete spec paths, creates a queued ScriptBoardRun row,
+    /// launches it, and returns the row id immediately (fire-and-forget background execution).</summary>
+    Task<int> StartAsync(ScriptBoardRunFilter filter, CancellationToken ct = default);
+    Task ExecuteAsync(int runId, CancellationToken ct = default);   // called from the background Task
+}
+
+public sealed record ScriptBoardRunFilter(
+    string? Module, string? Level, string? Type, string? Bucket, string? Tag,
+    IReadOnlyList<string>? SpecFilePaths,   // explicit selection wins over the other filters
+    bool Headed, int? Workers);
+```
+
+#### 3. `Infrastructure/ScriptsBoard/ScriptBoardExecutionService.cs` (new, scoped)
+
+- `StartAsync`: if `filter.SpecFilePaths` non-empty, use them; else call `IScriptInventoryService.GetInventoryAsync`
+  and filter in-memory by `Module`/`Level`/`Type`/`Bucket`/`Tag` (all optional = "all"). Empty result →
+  throw a `400`-mappable `ArgumentException` ("no specs match the selection"). Insert `ScriptBoardRun`
+  (`Status=Queued`, `SelectionSummary` built from the filter, `SpecFilePathsJson` = resolved list) →
+  `SaveChangesAsync` → return `run.Id`.
+- `ExecuteAsync(runId, ct)`: load the row, set `Status=Running`/`StartedAt`; build a `PlaywrightRunSpec`
+  with `RunId = -runId` (the negative-namespace trick — see grounding above), `SpecFilePaths` from the
+  stored JSON, `Module` = first distinct module in selection (or `"_all"` for Allure history keying when
+  multi-module), `Headed`/`Workers` from the row; call `IPlaywrightRunner.RunAsync(spec, $"scripts-board-run:{runId}", ct)`;
+  map the result (`Passed`/`Failed`/`Skipped`/`DurationMs`/`JunitPath`/`ReportPath`) onto the row;
+  `Status=Completed` (or `Failed`/`Cancelled` per existing `TestRunStatus` semantics — mirror
+  `RunExecutionService.ExecuteAsync`'s try/catch/cancellation handling exactly); persist `EventLogJson`
+  from the bus narrative at completion (same pattern as `TestRun`).
+
+#### 4. `backend/src/QaAutomation.Api/Controllers/ScriptsBoardController.cs` (new)
+
+```
+GET  /api/scripts-board/inventory                         → IScriptInventoryService.GetInventoryAsync
+POST /api/scripts-board/runs        {ScriptBoardRunFilter} → StartAsync → 202 {runId}
+GET  /api/scripts-board/runs                               → paginated ScriptBoardRun list (mirror QaRunsController.ListRuns)
+GET  /api/scripts-board/runs/{id}                           → detail
+POST /api/scripts-board/runs/{id}/cancel                    → RunCancellationRegistry.Cancel(-id) (same singleton, negative key)
+GET  /api/scripts-board/runs/{id}/stream                    → SseWriter.StreamAsync(Response, bus, $"scripts-board-run:{id}", …)
+```
+`POST runs` background-task shape is a **direct copy** of `QaRunsController.Start`'s `Task.Run` block
+(`:99-133`): `_runCancel.Register(-runId)` → `Task.Run` → `using var scope = _scopeFactory.CreateScope()`
+→ resolve `IScriptBoardExecutionService` → `ExecuteAsync` → catch/log/finally `_runCancel.Remove(-runId)`.
+
+#### 5. DI registration
+
+`services.AddScoped<IScriptBoardExecutionService, ScriptBoardExecutionService>();`
+
+#### 6. Tests
+
+`ScriptBoardExecutionServiceTests.cs`: filter resolution (module+bucket narrows correctly; explicit
+`SpecFilePaths` bypasses inventory filtering); empty selection throws; `ExecuteAsync` against a stub
+`IPlaywrightRunner` updates the row to `Completed` with the stub's counts; a stub-thrown
+`OperationCanceledException` leaves the row `Cancelled`.
+
+**AC:** B/T; `POST /api/scripts-board/runs` round-trips end-to-end against a real tiny spec locally;
+negative `RunId` namespace verified to not collide with an existing `TestRun` artifact dir in a manual check.
+
+---
+
+### QLV2-304: Raw-ANSI live terminal stream
+
+#### 1. `EventKinds.Term` (`Core/Models/ConsoleEvent.cs`)
+
+```csharp
+public const string Term = "term";
+// Narrative set is unchanged — Term is deliberately live-only, like Token/Thinking.
+```
+
+#### 2. `Infrastructure/ScriptsBoard/ScriptsBoardRunner.cs` (new — separate from `PlaywrightRunner`)
+
+A thin sibling used **only** by `ScriptBoardExecutionService`, so `PlaywrightRunner`'s golden-tested
+`SpawnAsync` is never touched. Reuses `PlaywrightRunner`'s public config-writing by extracting the
+existing private `WriteRunConfig`/testDir/testMatch logic into an `internal static` helper class
+(`PlaywrightConfigWriter`) that both `PlaywrightRunner` and `ScriptsBoardRunner` call — a pure refactor
+of `PlaywrightRunner` (move code, no behavior change; existing `PlaywrightRunnerTests` must stay green).
+
+`ScriptsBoardRunner.RunWithLiveTermAsync(PlaywrightRunSpec spec, string eventKey, CancellationToken ct)`:
+- Writes the run config via the shared `PlaywrightConfigWriter` (same reporters: junit/json/allure).
+- Spawns `npx playwright test …` with `psi.Environment["FORCE_COLOR"] = "1"` added on top of
+  `PlaywrightRunner.ApplyAutomationEnv` (reused as-is, `internal` visibility already fits).
+- Instead of `BeginOutputReadLine()`, reads `process.StandardOutput.BaseStream` /
+  `process.StandardError.BaseStream` directly in a loop (`byte[4096]` buffer → UTF8 decode chunk →
+  `Pub(eventKey, EventKinds.Term, phase: null, chunk, EventLevels.Info)`), preserving raw ANSI escape
+  codes verbatim (no `TrimEnd`/line-splitting). Still accumulates a plain-text tail (strip ANSI via a
+  small regex) for the same "diagnose a fast crash" fallback `PlaywrightRunner` has.
+- After exit, parses `junit.xml`/`results.json` via the same (extracted, shared) parsing helpers
+  `PlaywrightRunner` already uses (`internal static` extraction, second half of the refactor above).
+
+#### 3. `ScriptBoardExecutionService.ExecuteAsync` — use `ScriptsBoardRunner`
+
+Calls `IScriptsBoardRunner.RunWithLiveTermAsync` (new interface, singleton — mirrors `IPlaywrightRunner`)
+instead of `IPlaywrightRunner.RunAsync`. Everything else (row updates, Allure history path, negative
+`RunId`) is identical to QLV2-303's design.
+
+#### 4. DI registration
+
+`services.AddSingleton<IScriptsBoardRunner, ScriptsBoardRunner>();`
+
+#### 5. Tests
+
+Extracted `PlaywrightConfigWriter`/parsing-helper unit tests continue to pass unchanged (proves the
+refactor is behavior-preserving). New `ScriptsBoardRunnerTests`: `ApplyAutomationEnv` + `FORCE_COLOR`
+combination sets both; a fake short-lived process (`cmd /c echo hi` on Windows) round-trips through the
+raw-chunk reader without throwing and produces at least one `Term` event via a captured `IEventBus`.
+
+**AC:** B/T; existing `PlaywrightRunnerTests` unchanged and green (proves the extraction didn't regress
+QA Runs); a manual Scripts Board run against story 177540's generated specs shows live colored ANSI output
+in a raw SSE capture (`curl -N .../stream`) before the frontend terminal exists.
+
+---
+
+### QLV2-305: Trends + flakiness
+
+#### 1. Expose Allure history reads
+
+`PlaywrightRunner.HistoryFile` is `private` — add a public `string GetHistoryFilePath(string? module, int? pipelineId)`
+wrapper (same logic, just exposed) to `IPlaywrightRunner` so a reader doesn't need write access.
+
+#### 2. `Core/Abstractions/IScriptTrendsService.cs` (new)
+
+```csharp
+public sealed record TrendPoint(DateTime Ts, int Passed, int Failed, long DurationMs);
+public sealed record FlakinessItem(string SpecTitle, int Runs, int Flips, double FlipRate);
+
+public interface IScriptTrendsService
+{
+    Task<IReadOnlyList<TrendPoint>> GetTrendsAsync(string? module, CancellationToken ct = default);
+    Task<IReadOnlyList<FlakinessItem>> GetFlakinessAsync(string? module, CancellationToken ct = default);
+}
+```
+
+#### 3. `Infrastructure/ScriptsBoard/ScriptTrendsService.cs` (new, scoped)
+
+- `GetTrendsAsync`: read+parse `history.jsonl` at `GetHistoryFilePath(module, null)` (manual/board runs)
+  — Allure's history entries already carry pass/fail/duration per historical execution; map to
+  `TrendPoint`. If the file doesn't exist, return `[]` (no runs yet — not an error).
+- `GetFlakinessAsync`: query `ScriptBoardRuns` (+ optionally `TestRuns` for the same module) ordered by
+  `CreatedAt`; for specs appearing in ≥2 runs, count pass→fail / fail→pass transitions per test title
+  (from the retained `junit.xml`/history per-test entries) → `FlipRate = Flips / (Runs-1)`. v1 scope: this
+  can start from the Allure history per-test breakdown (already has per-test pass/fail per run) rather
+  than re-parsing every historical `junit.xml` from disk.
+
+#### 4. Controller endpoints (`ScriptsBoardController.cs`)
+
+```
+GET /api/scripts-board/trends?module=
+GET /api/scripts-board/flakiness?module=
+```
+
+#### 5. DI + tests
+
+`services.AddScoped<IScriptTrendsService, ScriptTrendsService>();`. `ScriptTrendsServiceTests.cs`: a
+seeded `history.jsonl` with ≥2 entries produces ordered `TrendPoint`s; a spec flipping pass/fail across
+3 seeded entries computes the expected `FlipRate`; missing history file → empty lists, no throw.
+
+**AC:** B/T; trends/flakiness populate after ≥2 Scripts Board runs against the same module (verify
+manually against story 177540 by running twice).
+
+---
+
+### QLV2-306: Frontend module scaffold
+
+#### 1. `client/src/routes/paths.ts`
+
+Add `scriptsBoard: '/scripts-board'`.
+
+#### 2. `client/src/api/scriptsBoard.ts` (new)
+
+Axios wrappers: `getInventory()`, `startRun(filter)`, `listRuns(skip, take)`, `getRun(id)`,
+`cancelRun(id)`, `getTrends(module?)`, `getFlakiness(module?)`, plus the `runStreamUrl(id)` helper
+(mirrors `qaRuns.ts`'s pattern for `run:{id}` → here `scripts-board-run:{id}`).
+
+#### 3. `client/src/pages/ScriptsBoardPage.tsx` (new)
+
+Modeled on `QaRunsPage.tsx`'s list+drawer archetype, lighter:
+- Header + filter bar (module/level/type/bucket/tag dropdowns sourced from the inventory response) +
+  "Run selection" button (headed toggle + workers input) → `startRun`.
+- Inventory grid/table: one row per `ScriptInventoryItem` (path, module, type, level, bucket, ADO TC
+  link if `AdoTestCaseId`, a reconcile-state chip: linked/orphan-disk/orphan-db/no-meta) with per-spec
+  "Run this one" quick action (`SpecFilePaths: [path]`) and a click-through drawer (raw spec code viewer
+  via the existing code-viewer pattern used elsewhere, e.g. `qaLoop.tsx`'s spec viewer).
+- Runs history table below (or a tab): `ScriptBoardRun` rows, click → drawer with Console tab (QLV2-307's
+  terminal) + Passed/Failed/Skipped + report/junit links.
+- Trends/Flakiness tab (QLV2-308).
+
+#### 4. `client/src/layout/Layout.tsx`
+
+Nav item (`{ label: 'Scripts Board', path: paths.scriptsBoard, icon: <TerminalIcon /> }`) + `<Route
+path={paths.scriptsBoard} element={<ScriptsBoardPage />} />`, same shape as the Schema Explorer entry.
+
+**AC:** F (`npm run build` + `npm run lint`); page renders inventory + empty runs list against a live
+backend with zero Scripts Board runs yet.
+
+---
+
+### QLV2-307: xterm.js live terminal component
+
+#### 1. `client/package.json`
+
+`npm install xterm xterm-addon-fit` (in `client/`).
+
+#### 2. `client/src/components/TermConsole.tsx` (new)
+
+- `useRef` + `xterm.Terminal` + `FitAddon`; mounts into a div, disposes on unmount.
+- Subscribes to the run's SSE stream (reuse `hooks/useEventStream.ts` — extend its `ConsoleEvent.kind`
+  union type to include `'term'`) and calls `term.write(event.text)` for every `kind === 'term'` event
+  (raw ANSI passthrough — xterm.js renders escape codes natively, no parsing needed on the client side).
+- Non-`term` kinds (`phase`/`system`/`result`/`error`) can optionally still render above/below via the
+  existing `AgentConsole` for narrative context, or be ignored — decide based on how noisy raw Playwright
+  output already is (Playwright's own reporter output already narrates pass/fail).
+
+#### 3. Wire into `ScriptsBoardPage`'s run drawer
+
+Replace/augment the Console tab with `<TermConsole runId={run.id} streamUrl={runStreamUrl(run.id)} />`.
+
+**AC:** F; a real Scripts Board run against story 177540 shows live colored Playwright output in the
+terminal panel (manual visual check — screenshot or description in the verification note).
+
+---
+
+### QLV2-308: Trends + flakiness UI
+
+Add a "Trends" tab to `ScriptsBoardPage` (or a dedicated section): a simple line/bar rendering of
+`GetTrendsAsync` (passed/failed over time, duration) and a flakiness table (`GetFlakinessAsync`:
+spec title, runs, flips, flip rate — sort by flip rate desc, highlight >20% as flaky). No new chart
+dependency needed if a simple table + CSS bars suffice for v1 (avoid adding a charting library unless
+the existing `client/package.json` already has one — check `Reports`/`ReportSummarizer`'s frontend
+consumer first, since that page likely already renders some kind of stat visualization to copy from).
+
+**AC:** F; trends/flakiness tab renders real data after ≥2 Scripts Board runs on the same module.
+
+---
+
+### QLV2-309: Tests + docs (SLAB 3 close-out)
+
+- Full backend test sweep (`dotnet test`) including all new `*Tests.cs` from 301–305.
+- `npm run build` + `npm run lint` clean.
+- Manual verification pass against story **177540** end-to-end: scan → push specs → Scripts Board
+  inventory shows them `linked` with `@qa-meta` → run by module → live terminal shows raw output → run
+  again → trends/flakiness show 2 data points → hand-add a stray spec file → inventory flags it
+  `orphan_disk`.
+- Feature doc `docs/features/scripts-board.md` (what/why, data model, data flow, key files, config,
+  limitations — same shape as `docs/features/qa-loop-ui-phase.md`) + a `docs/changelog/` entry.
+- Flip all Slab 3 tasks `[x]` in `prd.md`; `progress.md` final entry: **SLAB 3 COMPLETE**.

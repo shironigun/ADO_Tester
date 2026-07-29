@@ -1,0 +1,42 @@
+---
+description: Operational guardrails for Ralph-loop execution on this Windows dev machine (shell sandbox workaround + standing verification story)
+alwaysApply: true
+---
+
+# Ralph-loop operational guardrails (this machine)
+
+## Shell tool requires full permissions on this machine
+This Windows machine cannot enforce the default `workspace_readwrite` sandbox policy (no sandbox
+backend available). Every `Shell` tool call **must** pass `required_permissions: ["all"]`, otherwise
+it fails immediately with "Command failed to spawn: Terminal unavailable" before running anything.
+This applies to *all* shell commands here (`git`, `dotnet`, `npm`, etc.) — don't retry without it,
+just always include it up front.
+
+## Standing verification story: 177540
+Work item **177540** is the controlled, dedicated ADO story created for exercising ADO_Tester
+features end-to-end (QA Loop, Author Tests, Find Bugs, etc.). It is safe to write to repeatedly.
+
+- Use story **177540** for every manual/agentic verification run during Ralph-loop task execution
+  (Author Tests runs, QA Loop scans, UI-phase runs, Scripts Board executions, etc.) — never invent
+  or reuse a different story/module for ad-hoc verification.
+- Note: `CLAUDE.md` separately references work item **171740** as "the standing test ticket" for
+  generic manual ADO checks — that is a different, older reference. For anything under the
+  `qa-loop-v2` Ralph loop (and going forward, ADO_Tester feature verification generally), prefer
+  **177540** per direct user instruction.
+- For UI-phase (Slab 2+) runs specifically, pair story 177540 with the Anthropic provider and model
+  `claude-haiku-4-5-20251001` (cheap/fast, already the established convention — see
+  `docs/progress/RalphLoop/qa-loop-v2/progress.md`).
+- After implementing each Ralph-loop task that has a runtime-verifiable surface (an endpoint, an
+  orchestrator step, a UI flow), exercise it against story 177540 as part of that task's
+  verification — in addition to `dotnet build`/`dotnet test`/`npm run build`/`npm run lint` — before
+  flipping `[ ]` → `[x]` in `prd.md`.
+- **QA Loop / Scripts Board nuance:** those two features select work by **module** (frontend route) or
+  **spec file**, not by ADO story — there is no "scan story 177540" flow for them. For those features,
+  target story 177540 specifically for anything that touches ADO (push a Test Case, link Tested-By, a
+  Scripts Board inventory item's ADO deep link) — pick any convenient local module for the
+  execution/generation part itself. Author Tests / Find Bugs (work-item-driven) always use 177540 directly.
+- **Known blocker (as of 2026-07-29):** `ADOACCESS_PAT` in the repo-root `.env` is expired/invalid — every
+  live ADO call returns 401 (confirmed via `GET /api/diagnostics/workitem/177540`). Live ADO-touching
+  verification is blocked until the PAT is refreshed; until then, rely on `dotnet test`/`npm run
+  build`+`lint` and flag ADO-touching verification as pending in `progress.md` rather than skipping the
+  task or faking the check.

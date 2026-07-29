@@ -113,14 +113,45 @@ Acceptance-criteria shorthand: **B** = `dotnet build` clean · **T** = `dotnet t
   `SpecFilePath` set); full B/T/F. Feature doc `docs/features/qa-loop-ui-phase.md` +
   `docs/changelog/` entry. **AC:** all green; docs written.
 
-## Slab 3 — Scripts Board module  *(epic — decompose into QLV2-3xx when reached)*
+## Slab 3 — Scripts Board module
 
-Locked in `solution.md` → Slab 3. High-level units to break down:
-- **QLV2-301** `@qa-meta` spec header (generators + backfill) + disk⟷DB reconcile service.
-- **QLV2-302** scripts-board backend: controller/service reusing `PlaywrightRunner`; execution by
-  spec/bucket/level/type/module/tag/all + headed/headless + workers.
-- **QLV2-303** history/trends (Allure store) + flakiness metric.
-- **QLV2-304** raw-ANSI `term` SSE stream (`FORCE_COLOR=1`, raw stdout chunks).
-- **QLV2-305** frontend module (paths/api/page/Layout) + `xterm.js` terminal + inventory grid + filtering
-  + per-spec drawer + trends + flakiness.
-- **QLV2-306** tests + docs.
+Full file-level detail in `blueprint.md` → "SLAB 3". Verification for every task in this slab includes a
+run against standing test story **177540** (see `.cursor/rules/ralph-loop-ops.mdc`).
+
+- [x] **QLV2-301** — `QaMeta`/`QaMetaHeader` (build/parse/upsert/hash) in Core; baked into the API spec
+  persist path (`QaLoopOrchestrator.PersistDraft`, incl. `RefineDraftsAsync` rewrites) and the UI
+  script-gen path (`PlaywrightAgentService.GenerateScriptAsync` + `HealAsync`). **AC:** B/T; fresh API and
+  UI specs both start with a valid `// @qa-meta` line; legacy specs parse as `null`, not an error.
+- [ ] **QLV2-302** — `ScriptBoardRun` entity + migration `AddScriptBoardRuns`; `IScriptInventoryService`/
+  `ScriptInventoryService` scanning both spec roots, parsing `@qa-meta`, cross-referencing `ApiTestDraft`,
+  producing `linked`/`orphan_disk`/`orphan_db`/`no_meta` reconcile states. **AC:** B/T; all four reconcile
+  states covered by tests; UI-root scan no-ops gracefully when `PlaywrightRoot` unset.
+- [ ] **QLV2-303** — `PlaywrightRunSpec` += `Headed`/`Workers` (additive, zero change for QA Runs);
+  `IScriptBoardExecutionService`/service (filter → resolve specs → `ScriptBoardRun` row → execute via
+  `IPlaywrightRunner`, `RunId = -runId` disk-namespace trick, reuses `RunCancellationRegistry`);
+  `ScriptsBoardController` (`inventory`, `runs` POST/GET/cancel/stream). **AC:** B/T; end-to-end
+  `POST /api/scripts-board/runs` round-trip locally; negative `RunId` verified non-colliding.
+- [ ] **QLV2-304** — Extract `PlaywrightRunner`'s config-writing + result-parsing into shared
+  `internal static` helpers (pure refactor, existing `PlaywrightRunnerTests` stay green); `EventKinds.Term`
+  (live-only, not narrative); new `IScriptsBoardRunner`/`ScriptsBoardRunner` — separate raw-byte-stream
+  spawn path (`FORCE_COLOR=1`, no line-buffering) used only by Scripts Board so the golden-tested QA-Runs
+  `PlaywrightRunner.SpawnAsync` is never touched. **AC:** B/T; existing `PlaywrightRunnerTests` unchanged
+  and green; manual raw-SSE capture of a run against story 177540 shows colored ANSI `term` events.
+- [ ] **QLV2-305** — `IPlaywrightRunner.GetHistoryFilePath` (expose existing private Allure history path
+  logic); `IScriptTrendsService`/service (`GetTrendsAsync` from `history.jsonl`, `GetFlakinessAsync` from
+  per-test pass/fail flips across runs); trends/flakiness controller endpoints. **AC:** B/T; trends/flakiness
+  populate after ≥2 runs against the same module (manual check against story 177540, run twice).
+- [ ] **QLV2-306** — Frontend module scaffold: `paths.scriptsBoard`, `api/scriptsBoard.ts`,
+  `pages/ScriptsBoardPage.tsx` (filter bar + inventory grid w/ reconcile-state chips + per-spec run action
+  + runs history table + drawer), nav+route in `Layout.tsx`. **AC:** F.
+- [ ] **QLV2-307** — `npm install xterm xterm-addon-fit`; `components/TermConsole.tsx` (raw ANSI
+  passthrough fed by the `term` SSE kind); wired into the Scripts Board run drawer. **AC:** F; manual
+  check — a run against story 177540 shows live colored output in the terminal panel.
+- [ ] **QLV2-308** — Trends tab: simple table/bar rendering of `GetTrendsAsync`/`GetFlakinessAsync` (no
+  new charting dependency unless one already exists for Reports). **AC:** F; renders real data after ≥2
+  runs on the same module.
+- [ ] **QLV2-309** — Full `dotnet test` + `npm run build`/`lint` sweep; end-to-end manual pass against
+  story 177540 (scan → push → inventory `linked` w/ `@qa-meta` → run by module → live terminal → run again
+  → trends/flakiness show 2 points → hand-added stray spec flagged `orphan_disk`); feature doc
+  `docs/features/scripts-board.md` + changelog entry; PRD all `[x]`. **AC:** all green; docs written.
+  **SLAB 3 COMPLETE.**
