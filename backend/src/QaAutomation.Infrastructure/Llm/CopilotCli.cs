@@ -22,11 +22,17 @@ public static class CopilotCli
 
     /// <summary>Locate a runnable GitHub Copilot CLI, or null. Order: configured value (exact) →
     /// PATH lookup on configured value → PATH lookup on the auto-names → common per-user install
-    /// directories (npm/pnpm/Volta/nvm/homebrew) × auto-names × PATHEXT variants.</summary>
+    /// directories (npm/pnpm/Volta/nvm/homebrew) × auto-names × PATHEXT variants.
+    /// Null (not-found) results are never cached so the probe retries automatically after install.</summary>
     public static string? ResolvePath(string? configuredPath)
     {
         var key = configuredPath ?? "";
-        return ResolveCache.GetOrAdd(key, DoResolve);
+        if (ResolveCache.TryGetValue(key, out var cached))
+            return cached;
+        var result = DoResolve(key);
+        if (result is not null)
+            ResolveCache[key] = result;
+        return result;
     }
 
     private static string? DoResolve(string configuredPath)

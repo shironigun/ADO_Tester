@@ -2,11 +2,11 @@
 
 Runs the whole app as three containers on one machine:
 
-| Service    | Image (built from) | Container port | Host port | Role |
-| ---------- | ------------------ | -------------- | --------- | ---- |
-| `frontend` | `client/Dockerfile` (nginx) | 80 | **8080** | Serves the SPA, reverse-proxies `/api` → backend |
-| `backend`  | `backend/Dockerfile` (.NET 8 + Claude CLI + Copilot CLI) | 8080 | 5250 | The API / agent pipelines |
-| `postgres` | `postgres:16` | 5432 | 5432 | Database |
+| Service    | Image (built from)                                       | Container port | Host port | Role                                             |
+| ---------- | -------------------------------------------------------- | -------------- | --------- | ------------------------------------------------ |
+| `frontend` | `client/Dockerfile` (nginx)                              | 80             | **8080**  | Serves the SPA, reverse-proxies `/api` → backend |
+| `backend`  | `backend/Dockerfile` (.NET 8 + Claude CLI + Copilot CLI) | 8080           | 5250      | The API / agent pipelines                        |
+| `postgres` | `postgres:16`                                            | 5432           | 5432      | Database                                         |
 
 The browser only talks to the **frontend** origin, so requests are same-origin (no CORS). You open
 **http://localhost:8080**.
@@ -114,15 +114,15 @@ before `docker compose up` (they flow into both the Postgres container and the c
 
 ## 8. Troubleshooting
 
-| Symptom | Fix |
-| --- | --- |
-| `env file .env not found` | Create it: `Copy-Item .env.example .env`, then fill in `ADOACCESS_PAT`. |
-| Frontend loads but every call 502s | Backend isn't up yet or crashed — `docker compose logs backend`. It waits for Postgres to be healthy first. |
-| LLM calls fail with "Claude CLI not found" / auth error | Run the login in step 3; confirm `docker compose exec backend claude --version` works and the `adotester_claude` volume is mounted. |
-| LLM calls fail with "Copilot CLI not found" / auth error | Run the login in step 4; confirm `docker compose exec backend copilot --version` works. |
-| LLM calls fail with "Invalid API key" | A real/placeholder `ANTHROPIC_API_KEY` in `.env` shouldn't matter (the CLI child strips it), but if you switched the provider to Anthropic, set a valid key or switch back to Claude CLI. |
-| Live agent console shows nothing (SSE) | Confirm you're hitting the app via the **frontend** (`:8080`), not the backend directly — nginx is configured to stream `/api` without buffering. |
-| Port 8080/5250/5432 already in use | Change the left-hand host port in `docker-compose.yml` (e.g. `"8090:80"`). |
+| Symptom                                                  | Fix                                                                                                                                                                                       |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `env file .env not found`                                | Create it: `Copy-Item .env.example .env`, then fill in `ADOACCESS_PAT`.                                                                                                                   |
+| Frontend loads but every call 502s                       | Backend isn't up yet or crashed — `docker compose logs backend`. It waits for Postgres to be healthy first.                                                                               |
+| LLM calls fail with "Claude CLI not found" / auth error  | Run the login in step 3; confirm `docker compose exec backend claude --version` works and the `adotester_claude` volume is mounted.                                                       |
+| LLM calls fail with "Copilot CLI not found" / auth error | Run the login in step 4; confirm `docker compose exec backend copilot --version` works.                                                                                                   |
+| LLM calls fail with "Invalid API key"                    | A real/placeholder `ANTHROPIC_API_KEY` in `.env` shouldn't matter (the CLI child strips it), but if you switched the provider to Anthropic, set a valid key or switch back to Claude CLI. |
+| Live agent console shows nothing (SSE)                   | Confirm you're hitting the app via the **frontend** (`:8080`), not the backend directly — nginx is configured to stream `/api` without buffering.                                         |
+| Port 8080/5250/5432 already in use                       | Change the left-hand host port in `docker-compose.yml` (e.g. `"8090:80"`).                                                                                                                |
 
 For a Postgres-only local setup (running the backend from source, not in Docker) see
 [`postgresql-docker.md`](./postgresql-docker.md).
