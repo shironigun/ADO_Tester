@@ -6,10 +6,8 @@
 - **PRD:** prd.md · **Design:** solution.md · **Guide:** blueprint.md
 - **Branch:** `claude/chat-session-flzhjh`
 - **Started:** 2026-07-28
-- **Status:** DESIGN COMPLETE. The RalphLoop doc set + both setup guides are written; **backend
-  implementation not started.** Backend/DB tasks will be CODE-COMPLETE once written+pushed and VERIFIED
-  only after the user runs `dotnet build`/`dotnet test`/Docker/Azure locally (no .NET SDK or Docker in
-  the container). Deadline: go live this week for the QA team.
+- **Status:** PGM-006 COMPLETE (Initial Npgsql migration generated 2026-07-29; solution updated; 156/156 tests pass).
+  **PGM-014 (Docker verify) and PGM-015 (feature doc) still pending** — Docker required to run Postgres round-trip.
 
 ## Status legend
 - **VERIFIED** — implemented + verified green in this environment (or trivially-verifiable docs).
@@ -27,7 +25,7 @@
 | PGM-003 | Design-time factory provider branch | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | QaDbContextFactory branches on DATABASE_PROVIDER |
 | PGM-004 | ITextSearchProvider abstraction | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | Interface + DocChunkHit in Infrastructure/TextSearch (see layering note in log) |
 | PGM-005 | SqliteFts5Search + PostgresFtsSearch | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | SQLite = bm25/MATCH moved verbatim; Postgres = tsvector/GIN/ts_rank; FtsMatch shared tokenizer |
-| PGM-006 | Generate the Npgsql migration | NOT STARTED | | | Local only — scaffold ready (PGM-016); run `dotnet sln add` + `dotnet ef migrations add` |
+| PGM-006 | Generate the Npgsql migration | VERIFIED | 2026-07-29 | 2026-07-29 | `dotnet sln add` + `dotnet ef migrations add Initial`; 156/156 tests pass |
 | PGM-007 | DatabaseInitializer provider branch | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | adopt-qa.db gated to IsSqlite(); EnsureFtsTable → _textSearch.EnsureSchema |
 | PGM-008 | KnowledgebaseService delegates FTS | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | upload/delete/search via provider; MatchExpression kept (delegates to FtsMatch) |
 | PGM-009 | ExistingTestsIndexService delegates FTS | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | write + FTS read via provider; also removed a latent non-partial-class regex issue |
