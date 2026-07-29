@@ -1,11 +1,11 @@
 # Feature: QA Loop v2 — Free-Text Context + Merge-Refine (Slab 1)
 
-| **Feature** | QA Loop v2 Slab 1 — Free-text context + merge-refine |
-|---|---|
-| **Date Shipped** | 2026-07-29 |
-| **Branch** | `staging` |
-| **PRD/Design** | `docs/progress/RalphLoop/qa-loop-v2/` |
-| **Test coverage** | `QaLoopOrchestratorTests` (158/158 pass) |
+| **Feature**       | QA Loop v2 Slab 1 — Free-text context + merge-refine |
+| ----------------- | ---------------------------------------------------- |
+| **Date Shipped**  | 2026-07-29                                           |
+| **Branch**        | `staging`                                            |
+| **PRD/Design**    | `docs/progress/RalphLoop/qa-loop-v2/`                |
+| **Test coverage** | `QaLoopOrchestratorTests` (158/158 pass)             |
 
 ## What it does
 
@@ -25,29 +25,29 @@ Layers three free-text touchpoints and a merge-refine loop onto the existing QA 
 ## Data changes (migration `AddQaLoopFreeTextContext`, 2026-07-29)
 
 **`ApiTestSessions` — 3 new nullable columns:**
-| Column | Type | Purpose |
-|---|---|---|
-| `AdditionalContext` | `TEXT?` | Free-text at scan start → Analyzer + generators |
-| `GenerateContext` | `TEXT?` | Free-text at Analyze→Generate gate → all generators |
-| `LastFeedback` | `TEXT?` | Most recent refine feedback (persisted for UI re-seed) |
+| Column              | Type    | Purpose                                                |
+| ------------------- | ------- | ------------------------------------------------------ |
+| `AdditionalContext` | `TEXT?` | Free-text at scan start → Analyzer + generators        |
+| `GenerateContext`   | `TEXT?` | Free-text at Analyze→Generate gate → all generators    |
+| `LastFeedback`      | `TEXT?` | Most recent refine feedback (persisted for UI re-seed) |
 
 Applies to both SQLite (default) and Postgres (`AddQaLoopFreeTextContext` Npgsql migration).
 
 ## Key files
 
-| Area | File(s) |
-|---|---|
-| Entity | `Core/Models/ApiTestSession.cs` |
-| Contracts | `Core/Contracts/QaLoopContracts.cs` (new: `RerunAnalyzeRequest`, `ApiDraftFeedback`, `RefineDraftsRequest`, `GenerateDraftsRequest`) |
-| Interface | `Core/Abstractions/IQaLoopOrchestrator.cs` |
-| Agents | `Infrastructure/Agents/ModuleAnalyzerAgent.cs` (additionalContext, `RefineInventoryAsync`) |
-| Agents | `Infrastructure/Agents/ContractGeneratorAgent.cs`, `EndpointGeneratorAgent.cs`, `WorkflowGeneratorAgent.cs` (extraContext, `RefineAsync`) |
-| Orchestrator | `Infrastructure/Orchestrators/QaLoopOrchestrator.cs` (`RerunAnalyzeAsync`, `RefineDraftsAsync`, route/workflow matchers) |
-| Controller | `Api/Controllers/QaLoopController.cs` |
-| Migrations | `Infrastructure/Data/Migrations/20260729013815_AddQaLoopFreeTextContext.cs` (SQLite) |
-| Migrations (Npgsql) | `Migrations.Npgsql/Migrations/20260729021455_AddQaLoopFreeTextContext.cs` |
-| Frontend API | `client/src/api/qaLoop.ts` |
-| Frontend UI | `client/src/session/configs/qaLoop.tsx` |
+| Area                | File(s)                                                                                                                                   |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Entity              | `Core/Models/ApiTestSession.cs`                                                                                                           |
+| Contracts           | `Core/Contracts/QaLoopContracts.cs` (new: `RerunAnalyzeRequest`, `ApiDraftFeedback`, `RefineDraftsRequest`, `GenerateDraftsRequest`)      |
+| Interface           | `Core/Abstractions/IQaLoopOrchestrator.cs`                                                                                                |
+| Agents              | `Infrastructure/Agents/ModuleAnalyzerAgent.cs` (additionalContext, `RefineInventoryAsync`)                                                |
+| Agents              | `Infrastructure/Agents/ContractGeneratorAgent.cs`, `EndpointGeneratorAgent.cs`, `WorkflowGeneratorAgent.cs` (extraContext, `RefineAsync`) |
+| Orchestrator        | `Infrastructure/Orchestrators/QaLoopOrchestrator.cs` (`RerunAnalyzeAsync`, `RefineDraftsAsync`, route/workflow matchers)                  |
+| Controller          | `Api/Controllers/QaLoopController.cs`                                                                                                     |
+| Migrations          | `Infrastructure/Data/Migrations/20260729013815_AddQaLoopFreeTextContext.cs` (SQLite)                                                      |
+| Migrations (Npgsql) | `Migrations.Npgsql/Migrations/20260729021455_AddQaLoopFreeTextContext.cs`                                                                 |
+| Frontend API        | `client/src/api/qaLoop.ts`                                                                                                                |
+| Frontend UI         | `client/src/session/configs/qaLoop.tsx`                                                                                                   |
 
 ## Parity guardrails preserved
 - System prompts (embedded `.txt` resources) are **not touched** — all new instructions are in user prompts only.

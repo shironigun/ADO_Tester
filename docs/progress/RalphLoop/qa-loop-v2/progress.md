@@ -8,11 +8,11 @@
   Frontend build clean. Resume point for Slab 2: **QLV2-201** (decompose from epic in prd.md).
 
 ## Slab status
-| Slab | Name | Status |
-|------|------|---------|
-| 1 | Free-text + merge-refine in QA Loop | **COMPLETE** (QLV2-101..113, all VERIFIED) |
-| 2 | UI testing phase (Playwright agents via MCP + Claude CLI) | Not started |
-| 3 | Scripts Board module | Not started |
+| Slab | Name                                                      | Status                                     |
+| ---- | --------------------------------------------------------- | ------------------------------------------ |
+| 1    | Free-text + merge-refine in QA Loop                       | **COMPLETE** (QLV2-101..113, all VERIFIED) |
+| 2    | UI testing phase (Playwright agents via MCP + Claude CLI) | Not started                                |
+| 3    | Scripts Board module                                      | Not started                                |
 
 ---
 
