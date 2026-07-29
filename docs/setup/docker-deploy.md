@@ -69,16 +69,20 @@ Verify from the app: **Diagnostics** page → the Claude CLI provider should sho
 The **GitHub Copilot CLI** is also installed in the backend image. You only need this if you want to
 use the **CopilotCli** provider (switchable in the AppBar). It uses your **GitHub Copilot subscription**.
 
+Authentication is triggered automatically the **first time you run a prompt**. Use `-it` so the
+device-flow code exchange can happen in your terminal:
+
 ```powershell
-docker compose exec backend copilot auth login
+docker compose exec -it backend copilot -p "hello"
 ```
 
-- Follow the device-flow prompt: visit the printed URL, enter the code, and approve in GitHub.
-- Credentials are stored under `$HOME/.config/github-copilot` inside the container and persist on the
-  same `adotester_claude` volume as the Claude login.
+- The CLI prints a GitHub device-flow **URL + code**. Open the URL in a browser, enter the code, and
+  approve with your GitHub account.
+- Credentials are stored under `$HOME/.config/github-copilot` and persist on the `adotester_claude`
+  volume across restarts.
 
-Verify: `docker compose exec backend copilot --version`. Then switch the provider in the app AppBar to
-**CopilotCli** and run a generation.
+Verify: run the command again — it should return a response without prompting for auth. Then switch
+the provider to **CopilotCli** in the app AppBar.
 
 ## 5. Everyday commands
 
