@@ -36,19 +36,19 @@ Acceptance-criteria shorthand: **B** = `dotnet build` clean · **T** = `dotnet t
 - [x] **QLV2-108** — Contracts: `ScanStartRequest.AdditionalContext`, generate-drafts `GenerateContext`,
   `RerunAnalyzeRequest`, `RefineDraftsRequest`, `ApiDraftFeedback`; `ApiSessionDetail` surfaces the three
   context fields. **AC:** B.
-- [ ] **QLV2-109** — `QaLoopController`: persist `AdditionalContext` on `scan/start`; write `GenerateContext`
+- [x] **QLV2-109** — `QaLoopController`: persist `AdditionalContext` on `scan/start`; write `GenerateContext`
   before `generate-drafts`; new `POST sessions/{id}/rerun-analyze` + `POST sessions/{id}/refine-drafts`
   (202). **AC:** B; endpoints resolve (curl round-trip).
-- [ ] **QLV2-110** — `client/src/api/qaLoop.ts`: extend `startScan`/`generateDrafts` bodies; add
+- [x] **QLV2-110** — `client/src/api/qaLoop.ts`: extend `startScan`/`generateDrafts` bodies; add
   `rerunAnalyze` + `refineDrafts`; add the three context fields to the detail type. **AC:** F.
-- [ ] **QLV2-111** — `client/src/session/configs/qaLoop.tsx`: start-form "Additional context" field;
+- [x] **QLV2-111** — `client/src/session/configs/qaLoop.tsx`: start-form "Additional context" field;
   coverage-step "Context for generators" + "Refine analysis with feedback"; drafts-step per-draft feedback
   + remove toggle + overall box + "Regenerate with feedback" (Approved/Pushed locked). **AC:** F; inputs
   re-seed from detail on reload.
-- [ ] **QLV2-112** — `QaLoopOrchestratorTests`: refine-merge (targeted updated, new inserted, flagged
+- [x] **QLV2-112** — `QaLoopOrchestratorTests`: refine-merge (targeted updated, new inserted, flagged
   removed, Approved+Pushed untouched) + analyzer-refine returns matrix → `AwaitingReview`. Full B/T/F. **AC:**
   all green.
-- [ ] **QLV2-113** — Docs after verification: `docs/features/qa-loop-free-text.md` + a `docs/changelog/`
+- [x] **QLV2-113** — Docs after verification: `docs/features/qa-loop-free-text.md` + a `docs/changelog/`
   entry. **AC:** docs match shipped behavior.
 
 ---

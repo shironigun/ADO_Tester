@@ -6,7 +6,19 @@ Newest entries first.
 
 ## 2026-07-29
 
-### fix(build): Merge-conflict resolution + build fixes (master sync)
+### feat(qlv2): QA Loop v2 Slab 1 — Free-text context + merge-refine (COMPLETE)
+All 13 tasks (QLV2-101..113) VERIFIED. See [`docs/features/qa-loop-free-text.md`](features/qa-loop-free-text.md) for details.
+- **DB:** 3 new columns on `ApiTestSessions` (`AdditionalContext`, `GenerateContext`, `LastFeedback`); SQLite + Npgsql migrations applied.
+- **Backend:** `ModuleAnalyzerAgent.RefineInventoryAsync` + `additionalContext` injection; generator `RefineAsync` overloads + `extraContext`; `QaLoopOrchestrator.RerunAnalyzeAsync`/`RefineDraftsAsync` + route/workflow matchers; `QaLoopController` three new endpoints; contracts.
+- **Frontend:** `qaLoop.ts` API additions; `qaLoop.tsx` — start form additional-context field, AwaitingReview refine-analysis panel, DraftsByLevel per-draft feedback + regenerate.
+- **Tests:** 2 new tests (`RefineDrafts_updates_targeted_removes_flagged_*` + `RerunAnalyze_returns_*`); 158/158 pass.
+
+### fix(pgm): PGM-014 — NoClobber DotNetEnv + Postgres Npgsql migration verified
+- `DotNetEnv.Env.TraversePath().NoClobber().Load()` — shell env vars win over `.env` (12-factor).
+- `AddQaLoopFreeTextContext` Npgsql migration generated + applied.
+- Docker Postgres round-trip verified with story 177540 (Author Tests haiku test run to AwaitingTester).
+
+
 - Merged `origin/master` (168 remote commits) into local `master` via `--allow-unrelated-histories`.
 - Fixed `GeneratedTestCase` CS0104 naming collision introduced by the merge: renamed the lightweight dedup record in `IExistingTestsIndexService` → `DedupTestCase` (`AgentOrchestrator` and `ExistingTestsIndexService` updated).
 - Fixed `QaAutomation.Migrations.Npgsql.csproj` XML comment containing illegal `--` sequences.

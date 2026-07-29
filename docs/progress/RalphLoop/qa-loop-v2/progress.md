@@ -4,16 +4,15 @@
 - **Design:** `solution.md` (authoritative vision brief) · **Ruleset:** `Ralph loop.md`
 - **Backlog:** `prd.md` (tasks `QLV2-###`, grouped by slab, built in order) · **Guide:** `blueprint.md`
 - **Started:** 2026-07-29
-- **Status:** SLAB 1 IN PROGRESS — QLV2-101..108 VERIFIED (locally on Windows). Currently working on
-  QLV2-109 (controller) → 110/111 (frontend) → 112 (tests) → 113 (docs).
-- **Resume point:** QLV2-109 — `QaLoopController` wire new fields + rerun-analyze/refine-drafts endpoints.
+- **Status:** SLAB 1 COMPLETE — all 13 tasks (QLV2-101..113) VERIFIED. 158/158 tests pass.
+  Frontend build clean. Resume point for Slab 2: **QLV2-201** (decompose from epic in prd.md).
 
 ## Slab status
-| Slab | Name                                                      | Status                           |
-| ---- | --------------------------------------------------------- | -------------------------------- |
-| 1    | Free-text + merge-refine in QA Loop                       | In progress (QLV2-101..108 done) |
-| 2    | UI testing phase (Playwright agents via MCP + Claude CLI) | Not started                      |
-| 3    | Scripts Board module                                      | Not started                      |
+| Slab | Name | Status |
+|------|------|---------|
+| 1 | Free-text + merge-refine in QA Loop | **COMPLETE** (QLV2-101..113, all VERIFIED) |
+| 2 | UI testing phase (Playwright agents via MCP + Claude CLI) | Not started |
+| 3 | Scripts Board module | Not started |
 
 ---
 
@@ -41,6 +40,13 @@
 - **QLV2-106** — `IQaLoopOrchestrator.RerunAnalyzeAsync` + `QaLoopOrchestrator.RerunAnalyzeAsync`/`RerunAnalyzeInnerAsync`: loads prior inventory+surface, sets `Analyzing`, calls `RefineInventoryAsync`, re-applies gap-selected, persists, sets `AwaitingReview`+PersistLog. Full cancel/error handling.
 - **QLV2-107** — `IQaLoopOrchestrator.RefineDraftsAsync` + `QaLoopOrchestrator.RefineDraftsAsync`/`RefineDraftsInnerAsync`/`MatchRouteForDraft`/`MatchWorkflowForDraft`/`RefineSingle`/`RefineSingleMulti` helpers. Targeted Draft/Rejected rows refined in place via matching generator `RefineAsync`; disk spec rewritten; flagged rows removed; Approved+Pushed NEVER touched; `Drafted` on completion.
 - **QLV2-108** — `QaLoopContracts`: `ScanStartRequest` += `AdditionalContext`; new `RerunAnalyzeRequest`, `ApiDraftFeedback`, `RefineDraftsRequest`, `GenerateDraftsRequest`; `ApiSessionDetail` += `AdditionalContext`/`GenerateContext`/`LastFeedback` + `From()` mapper updated.
+
+### 2026-07-29 (Slab 1 QLV2-109..113 — all VERIFIED)
+- **QLV2-109** — `QaLoopController`: `ScanStart` persists `AdditionalContext`; `GenerateDrafts` takes optional `GenerateDraftsRequest` body + persists `GenerateContext`; `POST sessions/{id}/rerun-analyze` + `POST sessions/{id}/refine-drafts` endpoints added (202). 158/158 tests.
+- **QLV2-110** — `client/src/api/qaLoop.ts`: `ScanStartRequest` += `additionalContext`; `ApiSessionDetail` += three context fields; `generateDrafts(id, ctx?)` sends context body; `rerunAnalyze(id, feedback)` + `refineDrafts(id, req)` + `ApiDraftFeedback` added. Frontend build clean.
+- **QLV2-111** — `client/src/session/configs/qaLoop.tsx`: start form `additionalContext` multiline field; `AwaitingReview` detail tab: `generateContext` TextField + `rerunAnalyze` box+button; `DraftsByLevel`: per-draft feedback+remove checkbox + overall feedback + `refineDrafts` button (locked for Approved/Pushed). Build clean.
+- **QLV2-112** — `QaLoopOrchestratorTests`: two new tests (`RefineDrafts_updates_targeted_removes_flagged_leaves_approved_and_pushed_untouched` + `RerunAnalyze_returns_session_to_AwaitingReview_with_refreshed_matrix`). Fixed `QaLoopAdoStub.GetLinkedTestCasesAsync` (returns empty). `SetInventoryAsync` + `sourceRoutes` param added to harness. 158/158 tests.
+- **QLV2-113** — Feature doc `docs/features/qa-loop-free-text.md` + changelog entry + PRD all 13 tasks flipped `[x]`. **SLAB 1 COMPLETE.**
 - **Environment blocker for backend build/test.** This remote Linux container has **only Node/npm** (v22)
   — **no .NET SDK**, and the network policy **denies** the dotnet build hosts (`builds.dotnet.microsoft.com`
   → 403 on CONNECT; allowlist is npm/pypi/crates/go registries only, no Microsoft dotnet host). The repo's
