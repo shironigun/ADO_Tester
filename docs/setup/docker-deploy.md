@@ -74,11 +74,12 @@ The cleanest authentication method for Docker is a **fine-grained GitHub PAT** s
 needed.
 
 > **Important:** classic PATs (`ghp_...`) are **rejected** by the Copilot CLI. You must use a
-> **fine-grained** token (`github_pat_...`).
+> **fine-grained** token (`github_pat_...`) with the **Copilot Requests** account permission.
 
 1. Generate a **fine-grained** GitHub PAT at
-   <https://github.com/settings/personal-access-tokens/new> (no specific scopes required — Copilot
-   access is account-level; "Public Repositories (read-only)" is enough).
+   <https://github.com/settings/personal-access-tokens/new>. Under **Account permissions**, set
+   **"Copilot Requests"** to **Read-only** (this is required — the CLI fails auth without it). No
+   repository scopes are needed.
 2. Add it to your `.env`:
 
    ```
