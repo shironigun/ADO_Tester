@@ -85,11 +85,16 @@ needed.
    COPILOT_GITHUB_TOKEN=github_pat_your_token_here
    ```
 
-3. Restart the backend to pick it up:
+3. Recreate the backend so it picks up the new `.env` value:
 
    ```powershell
-   docker compose restart backend
+   docker compose up -d --force-recreate backend
    ```
+
+   > **Gotcha:** `docker compose restart` does **not** reload `.env` — `env_file` values are baked in
+   > when the container is *created*. After editing `.env` you must recreate the container
+   > (`up -d --force-recreate`, or `up -d --build` after a code change). Verify the value landed with:
+   > `docker compose exec backend printenv COPILOT_GITHUB_TOKEN`.
 
 4. Switch the provider to **CopilotCli** in the app AppBar and run a generation to verify.
 
