@@ -43,6 +43,31 @@ public sealed class SettingsController : ControllerBase
     private const string CopilotModelNotes =
         "Leave blank to use the CLI's default. Run `copilot -p \"List all models\" --allow-all-tools` in a terminal to see your current entitlements — model availability depends on your Copilot plan.";
 
+    // Curated Copilot CLI model catalog: each model carries its selectable reasoning-effort levels and
+    // context-window sizes. Effort maps to `--effort <level>`, context to `--context <tier>` (verified
+    // against `copilot --help`: effort choices none/minimal/low/medium/high/xhigh/max; context default/long_context).
+    private static readonly object[] CopilotModelCatalog =
+    [
+        new
+        {
+            id = "claude-opus-4.8",
+            label = "Claude Opus 4.8",
+            efforts = new object[]
+            {
+                new { label = "Low", value = "low" },
+                new { label = "Medium", value = "medium" },
+                new { label = "High", value = "high" },
+                new { label = "Extra High", value = "xhigh" },
+                new { label = "Max", value = "max" },
+            },
+            contexts = new object[]
+            {
+                new { label = "200k", value = "default" },
+                new { label = "1M", value = "long_context" },
+            },
+        },
+    ];
+
     private readonly ILlmProviderState _providerState;
     private readonly IAppSettingsService _settings;
     private readonly IAzureDevOpsClient _ado;
@@ -127,6 +152,10 @@ public sealed class SettingsController : ControllerBase
     [HttpGet("copilot-cli/models")]
     public IActionResult CopilotModels()
         => Ok(new { suggestions = CopilotModelSuggestions, notes = CopilotModelNotes });
+
+    [HttpGet("copilot-cli/catalog")]
+    public IActionResult CopilotCatalog()
+        => Ok(new { models = CopilotModelCatalog });
 
     [HttpGet("ado/area-paths")]
     public async Task<IActionResult> AdoAreaPaths([FromQuery] string? organization, [FromQuery] string? project, CancellationToken cancellationToken)

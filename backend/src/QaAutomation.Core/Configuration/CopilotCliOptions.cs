@@ -18,6 +18,10 @@ public sealed class CopilotCliOptions
     /// Passed as <c>--context &lt;tier&gt;</c>. Choices: "default", "long_context".</summary>
     public string Context { get; set; } = "";
 
+    /// <summary>Reasoning effort level. Blank = CLI default. Passed as <c>--effort &lt;level&gt;</c>.
+    /// Choices: "none", "minimal", "low", "medium", "high", "xhigh", "max".</summary>
+    public string Effort { get; set; } = "";
+
     /// <summary>Idle-timeout floor: the effective idle timeout is <c>max(30, this)</c>. The settings
     /// layer clamps writes to <c>max(10, value)</c>.</summary>
     public int TimeoutSeconds { get; set; } = 180;

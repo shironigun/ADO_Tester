@@ -37,6 +37,16 @@ export async function getCopilotCliModels(): Promise<string[]> {
   return data.suggestions ?? []
 }
 
+// A selectable label/value option (effort level or context size), from the Copilot CLI catalog.
+export interface CopilotOption { label: string; value: string }
+// One Copilot model with its selectable reasoning-effort levels and context-window sizes.
+export interface CopilotCatalogModel { id: string; label: string; efforts: CopilotOption[]; contexts: CopilotOption[] }
+
+export async function getCopilotCliCatalog(): Promise<CopilotCatalogModel[]> {
+  const { data } = await api.get<{ models: CopilotCatalogModel[] }>('/api/settings/copilot-cli/catalog')
+  return data.models ?? []
+}
+
 export async function getAdoOrgs(): Promise<string[]> {
   const { data } = await api.get<{ organizations: string[] }>('/api/settings/ado/orgs')
   return data.organizations ?? []

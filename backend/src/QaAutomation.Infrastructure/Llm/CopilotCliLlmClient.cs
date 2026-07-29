@@ -156,6 +156,18 @@ public sealed class CopilotCliLlmClient : ILlmClient
 
         }
 
+        var chosenEffort = _options.Effort.Trim();
+
+        if (chosenEffort.Length > 0)
+
+        {
+
+            args.Add("--effort");
+
+            args.Add(chosenEffort);
+
+        }
+
 
 
         var idleTimeout = Math.Max(30, _options.TimeoutSeconds);

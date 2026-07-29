@@ -37,8 +37,8 @@ import { MONO_FONT } from '../theme/tokens'
 import { apiUrl } from '../config/env'
 import { axiosMessage } from '../common/errors'
 import {
-  getConfig, saveConfig, getClaudeCliModels, getCopilotCliModels, getAdoOrgs, getAdoProjects, getAdoAreaPaths, getAdoWorkItemTypes, getAdoBranches, getAdoRepositories,
-  type Config, type AdoProject,
+  getConfig, saveConfig, getClaudeCliModels, getCopilotCliCatalog, getAdoOrgs, getAdoProjects, getAdoAreaPaths, getAdoWorkItemTypes, getAdoBranches, getAdoRepositories,
+  type Config, type AdoProject, type CopilotCatalogModel,
 } from '../api/settings'
 import { getEnvStatus, getWorkItem, pingLlm, type EnvStatus, type WorkItem } from '../api/diagnostics'
 import { getPlans, getSuites, type TestPlan, type TestSuite } from '../api/authorTests'
@@ -64,6 +64,7 @@ const K = {
   COPILOT_CLI_PATH: 'copilot_cli.path',
   COPILOT_CLI_MODEL: 'copilot_cli.model',
   COPILOT_CLI_CONTEXT: 'copilot_cli.context',
+  COPILOT_CLI_EFFORT: 'copilot_cli.effort',
   COPILOT_CLI_TIMEOUT: 'copilot_cli.timeout_seconds',
   DEFAULT_PLAN_ID: 'defaults.test_plan_id',
   DEFAULT_SUITE_ID: 'defaults.test_suite_id',
@@ -245,8 +246,9 @@ export default function SettingsPage() {
   const [copilotCliPath, setCopilotCliPath] = useState('')
   const [copilotCliModel, setCopilotCliModel] = useState('')
   const [copilotCliContext, setCopilotCliContext] = useState('')
+  const [copilotCliEffort, setCopilotCliEffort] = useState('')
   const [copilotCliTimeout, setCopilotCliTimeout] = useState('180')
-  const [copilotCliModels, setCopilotCliModels] = useState<string[]>([])
+  const [copilotCliCatalog, setCopilotCliCatalog] = useState<CopilotCatalogModel[]>([])
   const [defaultPlan, setDefaultPlan] = useState<number | ''>('')
   const [defaultSuite, setDefaultSuite] = useState<number | ''>('')
   const [schedEnabled, setSchedEnabled] = useState(true)
@@ -317,6 +319,7 @@ export default function SettingsPage() {
       setCopilotCliPath(String(data[K.COPILOT_CLI_PATH] ?? ''))
       setCopilotCliModel(String(data[K.COPILOT_CLI_MODEL] ?? ''))
       setCopilotCliContext(String(data[K.COPILOT_CLI_CONTEXT] ?? ''))
+      setCopilotCliEffort(String(data[K.COPILOT_CLI_EFFORT] ?? ''))
       setCopilotCliTimeout(String(data[K.COPILOT_CLI_TIMEOUT] ?? '180'))
       setDefaultPlan(data[K.DEFAULT_PLAN_ID] ? Number(data[K.DEFAULT_PLAN_ID]) : '')
       setDefaultSuite(data[K.DEFAULT_SUITE_ID] ? Number(data[K.DEFAULT_SUITE_ID]) : '')
@@ -363,7 +366,7 @@ export default function SettingsPage() {
   }, [])
 
   useEffect(() => {
-    getCopilotCliModels().then(setCopilotCliModels).catch(() => setCopilotCliModels([]))
+    getCopilotCliCatalog().then(setCopilotCliCatalog).catch(() => setCopilotCliCatalog([]))
   }, [])
 
   // Auto-fetch env so the status strip renders without clicking "Re-check".
@@ -673,26 +676,58 @@ export default function SettingsPage() {
                           <TextField label="CLI path (blank = auto-detect)" size="small" fullWidth value={copilotCliPath}
                             onChange={e => setCopilotCliPath(e.target.value)} placeholder="copilot"
                             helperText="Leave blank to auto-find copilot / github-copilot-cli / gh-copilot on PATH, in %APPDATA%\npm, pnpm, Volta, or npm's global prefix." />
-                          <Autocomplete
-                            freeSolo options={copilotCliModels} value={copilotCliModel}
-                            onChange={(_, v) => setCopilotCliModel(v || '')}
-                            onInputChange={(_, v) => setCopilotCliModel(v)}
-                            renderInput={p => <TextField {...p} label="Model" size="small" placeholder="(blank = CLI default)" />}
-                          />
-                          <FormControl size="small" fullWidth>
-                            <InputLabel>Context window</InputLabel>
-                            <Select label="Context window" value={copilotCliContext}
-                              onChange={e => setCopilotCliContext(e.target.value)}>
-                              <MenuItem value="">Default (CLI decides)</MenuItem>
-                              <MenuItem value="long_context">long_context — maximum context window</MenuItem>
-                            </Select>
-                          </FormControl>
+                          {(() => {
+                            const entry = copilotCliCatalog.find(m => m.id === copilotCliModel)
+                            const inCatalog = copilotCliCatalog.some(m => m.id === copilotCliModel)
+                            const efforts = entry?.efforts ?? []
+                            const contexts = entry?.contexts ?? []
+                            const effortVal = efforts.some(o => o.value === copilotCliEffort) ? copilotCliEffort : ''
+                            const contextVal = contexts.some(o => o.value === copilotCliContext) ? copilotCliContext : ''
+                            return (
+                              <>
+                                <FormControl size="small" fullWidth>
+                                  <InputLabel>Model</InputLabel>
+                                  <Select label="Model" value={copilotCliModel}
+                                    onChange={e => {
+                                      const v = e.target.value
+                                      setCopilotCliModel(v)
+                                      // Refresh effort + context to the picked model's options; drop values it doesn't support.
+                                      const m = copilotCliCatalog.find(x => x.id === v)
+                                      if (!m || !m.efforts.some(o => o.value === copilotCliEffort)) setCopilotCliEffort('')
+                                      if (!m || !m.contexts.some(o => o.value === copilotCliContext)) setCopilotCliContext('')
+                                    }}>
+                                    <MenuItem value="">(blank = CLI default)</MenuItem>
+                                    {/* Preserve a saved model that isn't in the curated catalog. */}
+                                    {copilotCliModel && !inCatalog && <MenuItem value={copilotCliModel}>{copilotCliModel}</MenuItem>}
+                                    {copilotCliCatalog.map(m => <MenuItem key={m.id} value={m.id}>{m.label}</MenuItem>)}
+                                  </Select>
+                                </FormControl>
+                                <FormControl size="small" fullWidth disabled={efforts.length === 0}>
+                                  <InputLabel>Reasoning effort</InputLabel>
+                                  <Select label="Reasoning effort" value={effortVal}
+                                    onChange={e => setCopilotCliEffort(e.target.value)}>
+                                    <MenuItem value="">(blank = CLI default)</MenuItem>
+                                    {efforts.map(o => <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>)}
+                                  </Select>
+                                </FormControl>
+                                <FormControl size="small" fullWidth disabled={contexts.length === 0}>
+                                  <InputLabel>Context size</InputLabel>
+                                  <Select label="Context size" value={contextVal}
+                                    onChange={e => setCopilotCliContext(e.target.value)}>
+                                    <MenuItem value="">(blank = CLI default)</MenuItem>
+                                    {contexts.map(o => <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>)}
+                                  </Select>
+                                </FormControl>
+                              </>
+                            )
+                          })()}
                           <TextField label="Timeout (seconds)" size="small" type="number" fullWidth
                             value={copilotCliTimeout} onChange={e => setCopilotCliTimeout(e.target.value)} />
                           <Button size="small" variant="text" sx={{ alignSelf: 'flex-end' }}
                             onClick={() => save({
                               [K.COPILOT_CLI_PATH]: copilotCliPath, [K.COPILOT_CLI_MODEL]: copilotCliModel,
-                              [K.COPILOT_CLI_CONTEXT]: copilotCliContext, [K.COPILOT_CLI_TIMEOUT]: copilotCliTimeout,
+                              [K.COPILOT_CLI_CONTEXT]: copilotCliContext, [K.COPILOT_CLI_EFFORT]: copilotCliEffort,
+                              [K.COPILOT_CLI_TIMEOUT]: copilotCliTimeout,
                             })}>Save</Button>
                         </ProviderCard>
                       </StaggerItem>

@@ -130,6 +130,7 @@ public static class DependencyInjection
             o.Path = rt.Get("copilot_cli.path") ?? o.Path;
             o.Model = rt.Get("copilot_cli.model") ?? o.Model;
             o.Context = rt.Get("copilot_cli.context") ?? o.Context;
+            o.Effort = rt.Get("copilot_cli.effort") ?? o.Effort;
             if (rt.Get("copilot_cli.timeout_seconds") is { } ts && int.TryParse(ts, out var t))
                 o.TimeoutSeconds = Math.Max(10, t);
         });
@@ -221,6 +222,7 @@ public static class DependencyInjection
                 o.Path = Env("COPILOT_CLI_PATH") ?? o.Path;
                 o.Model = Env("COPILOT_CLI_MODEL") ?? o.Model;
                 o.Context = Env("COPILOT_CLI_CONTEXT") ?? o.Context;
+                o.Effort = Env("COPILOT_CLI_EFFORT") ?? o.Effort;
                 if (int.TryParse(Env("COPILOT_CLI_TIMEOUT_SECONDS"), out var t)) o.TimeoutSeconds = t;
             });
 
