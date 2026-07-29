@@ -6,8 +6,8 @@
 - **PRD:** prd.md · **Design:** solution.md · **Guide:** blueprint.md
 - **Branch:** `claude/chat-session-flzhjh`
 - **Started:** 2026-07-28
-- **Status:** PGM-006 COMPLETE (Initial Npgsql migration generated 2026-07-29; solution updated; 156/156 tests pass).
-  **PGM-014 (Docker verify) and PGM-015 (feature doc) still pending** — Docker required to run Postgres round-trip.
+- **Status:** PGM-014 VERIFIED (2026-07-29). Docker Postgres round-trip confirmed with story 177540.
+  NoClobber DotNetEnv fix + AddQaLoopFreeTextContext Npgsql migration added. **PGM-015 (feature doc) still pending.**
 
 ## Status legend
 - **VERIFIED** — implemented + verified green in this environment (or trivially-verifiable docs).
@@ -33,7 +33,7 @@
 | PGM-011 | .env keys                                         | VERIFIED      | 2026-07-28 | 2026-07-28 | DATABASE_PROVIDER + POSTGRES_CONNECTION_STRING documented in .env.example (config text)                                                         |
 | PGM-012 | Local Docker setup guide                          | VERIFIED      | 2026-07-28 | 2026-07-28 | docs/setup/postgresql-docker.md written                                                                                                         |
 | PGM-013 | Azure deployment guide                            | VERIFIED      | 2026-07-28 | 2026-07-28 | docs/setup/postgresql-azure.md written                                                                                                          |
-| PGM-014 | Local verification (SQLite green + PG round-trip) | NOT STARTED   |            |            | User-run                                                                                                                                        |
+| PGM-014 | Local verification (SQLite green + PG round-trip) | VERIFIED | 2026-07-29 | 2026-07-29 | Story 177540 Author Tests on Docker Postgres; 25 tables; NoClobber fix; 156 tests |
 | PGM-015 | Feature doc + changelog                           | NOT STARTED   |            |            | After verification                                                                                                                              |
 | PGM-016 | Scaffold the Npgsql migrations assembly           | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | New QaAutomation.Migrations.Npgsql project + MigrationsAssembly wiring + Api ref + docker-compose.yml                                           |
 
