@@ -95,6 +95,7 @@ public sealed class QaLoopController : ControllerBase
             FrontendPath = req.FrontendPath,
             AutoHandoff = req.AutoHandoff,
             ActivityEnabled = _opts.Value.ActivityEnabled,
+            AdditionalContext = req.AdditionalContext,
             Status = ApiSessionStatus.Analyzing,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
@@ -140,11 +141,43 @@ public sealed class QaLoopController : ControllerBase
     }
 
     [HttpPost("sessions/{sessionId:int}/generate-drafts")]
-    public async Task<IActionResult> GenerateDrafts(int sessionId, CancellationToken ct)
+    public async Task<IActionResult> GenerateDrafts(int sessionId, [FromBody] GenerateDraftsRequest? req, CancellationToken ct)
     {
         try
         {
+            if (req?.GenerateContext is { Length: > 0 })
+            {
+                var session = await _db.ApiTestSessions.FindAsync([sessionId], ct);
+                if (session is null) return StatusCode(404, new { detail = "Session not found." });
+                session.GenerateContext = req.GenerateContext;
+                session.UpdatedAt = DateTime.UtcNow;
+                await _db.SaveChangesAsync(ct);
+            }
             await _orchestrator.GenerateDraftsAsync(sessionId, ct);
+            return StatusCode(202, new AcceptedResponse { Started = true });
+        }
+        catch (InvalidOperationException e) { return StatusCode(404, new { detail = e.Message }); }
+        catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
+    }
+
+    [HttpPost("sessions/{sessionId:int}/rerun-analyze")]
+    public async Task<IActionResult> RerunAnalyze(int sessionId, [FromBody] RerunAnalyzeRequest req, CancellationToken ct)
+    {
+        try
+        {
+            await _orchestrator.RerunAnalyzeAsync(sessionId, req.Feedback, ct);
+            return StatusCode(202, new AcceptedResponse { Started = true });
+        }
+        catch (InvalidOperationException e) { return StatusCode(404, new { detail = e.Message }); }
+        catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
+    }
+
+    [HttpPost("sessions/{sessionId:int}/refine-drafts")]
+    public async Task<IActionResult> RefineDrafts(int sessionId, [FromBody] RefineDraftsRequest req, CancellationToken ct)
+    {
+        try
+        {
+            await _orchestrator.RefineDraftsAsync(sessionId, req.OverallFeedback, req.PerDraft, ct);
             return StatusCode(202, new AcceptedResponse { Started = true });
         }
         catch (InvalidOperationException e) { return StatusCode(404, new { detail = e.Message }); }
