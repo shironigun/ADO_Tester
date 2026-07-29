@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using QaAutomation.Core.Models;
 using QaAutomation.Infrastructure.Data;
+using QaAutomation.Infrastructure.TextSearch;
 
 namespace QaAutomation.Tests;
 
@@ -22,7 +23,7 @@ public sealed class DatabaseInitializerTests
     private static void Initialize(string dbPath)
     {
         using var ctx = NewContext(dbPath);
-        new DatabaseInitializer(ctx, NullLogger<DatabaseInitializer>.Instance).Initialize();
+        new DatabaseInitializer(ctx, new SqliteFts5Search(), NullLogger<DatabaseInitializer>.Instance).Initialize();
     }
 
     [Fact]
@@ -85,9 +86,9 @@ public sealed class DatabaseInitializerTests
             {
                 var project = Assert.Single(ctx.Projects);
                 Assert.Equal(1, project.Id);
-                Assert.Equal("Ideal Agile", project.Name);
-                Assert.Equal("ConstellationDealer", project.AdoOrganization);
-                Assert.Equal("Ideal Agile", project.AdoProject);
+                Assert.Equal("Default Project", project.Name);
+                Assert.Equal("", project.AdoOrganization);
+                Assert.Equal("", project.AdoProject);
                 Assert.Equal(0, ctx.TestSessions.Count());
             }
 

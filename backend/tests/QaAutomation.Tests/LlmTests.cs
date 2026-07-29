@@ -88,4 +88,61 @@ public sealed class LlmTests
         try { Assert.Equal(tmp, ClaudeCli.ResolvePath(tmp)); }
         finally { File.Delete(tmp); }
     }
+
+    // QAL-062: PlaywrightRunner reuses ClaudeCli.Which to resolve npm/npx — on Windows a bare
+    // ProcessStartInfo("npm", ...) can't find the .cmd shim, so this PATHEXT-aware lookup is load-bearing.
+    [Fact]
+    public void Which_resolves_a_pathext_shim_via_path_lookup()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"which_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        var shimExt = OperatingSystem.IsWindows() ? ".CMD" : "";
+        var shim = Path.Combine(dir, $"fakenpm{shimExt}");
+        File.WriteAllText(shim, "");
+        var originalPath = Environment.GetEnvironmentVariable("PATH");
+        try
+        {
+            Environment.SetEnvironmentVariable("PATH", dir + Path.PathSeparator + originalPath);
+            Assert.Equal(shim, ClaudeCli.Which("fakenpm"));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", originalPath);
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Which_returns_null_for_an_unresolvable_name()
+        => Assert.Null(ClaudeCli.Which($"definitely-not-a-real-binary-{Guid.NewGuid():N}"));
+
+    // QAL-062 regression: node.js on Windows ships a bare POSIX shell-script "npm" (not a valid
+    // Win32 executable) alongside the real "npm.cmd" shim in the same directory. A bare-name-first
+    // search resolves to the unusable decoy and every spawn fails with "not a valid application for
+    // this OS platform" — extensions must be tried first.
+    [Fact]
+    public void Which_prefers_a_pathext_shim_over_a_same_named_bare_decoy()
+    {
+        if (!OperatingSystem.IsWindows()) return; // decoy-vs-shim ordering is a Windows-only concern
+
+        var dir = Path.Combine(Path.GetTempPath(), $"which_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        var bareDecoy = Path.Combine(dir, "fakenpm");
+        var cmdShim = Path.Combine(dir, "fakenpm.cmd");
+        File.WriteAllText(bareDecoy, "#!/bin/sh\n"); // exists, but not a Win32 executable
+        File.WriteAllText(cmdShim, "");
+        var originalPath = Environment.GetEnvironmentVariable("PATH");
+        try
+        {
+            Environment.SetEnvironmentVariable("PATH", dir + Path.PathSeparator + originalPath);
+            // Windows paths are case-insensitive; Which()'s result casing follows PATHEXT (".CMD"),
+            // not necessarily the on-disk file's casing.
+            Assert.Equal(cmdShim, ClaudeCli.Which("fakenpm"), ignoreCase: true);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", originalPath);
+            Directory.Delete(dir, recursive: true);
+        }
+    }
 }

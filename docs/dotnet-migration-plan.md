@@ -1,9 +1,11 @@
-# QA Automation — Migration Plan: Python → .NET backend + target-crm-aligned frontend
+# QA Automation — Migration Plan: Python → .NET backend + your-product-aligned frontend
 
-**Goal.** Re-platform the QA Automation app (`ADO_Tester`) so it conforms to the ConstellationDealer / *Ideal Agile* org stack and can be hosted as its **own Azure DevOps project**:
+> **Status — migration executed (as of 2026-06-22).** This plan has been carried out: the .NET backend scaffolded under `dotnet/` now lives in **`backend/`** and is the sole backend; the Python FastAPI app was **retired 2026-06-21** (recover from git history for a parity reference). The frontend re-architecture (F0–F5) is done. References below to "the live Python wins / source of truth" are now historical — the contract is preserved by the golden-file tests and ported frozen literals. The execution spec [`dotnet-migration-spec.md`](dotnet-migration-spec.md) supersedes this plan; runtime status + open issues are in [`manual-verification-and-open-issues.md`](manual-verification-and-open-issues.md).
+
+**Goal.** Re-platform the QA Automation app (`ADO_Tester`) so it conforms to the YourOrg / *Your Project* org stack and can be hosted as its **own Azure DevOps project**:
 
 - **Backend:** rewrite the Python FastAPI/agent backend in **.NET**, following the CRM monorepo's .NET conventions.
-- **Frontend:** keep the existing React client's newer versions, but adopt **target-crm's architecture** (Redux Toolkit + React Query + feature-module folders + centralized axios client + config layer). *Architecture only* — no tooling/i18n/Formik/multi-env parity.
+- **Frontend:** keep the existing React client's newer versions, but adopt **your-product's architecture** (Redux Toolkit + React Query + feature-module folders + centralized axios client + config layer). *Architecture only* — no tooling/i18n/Formik/multi-env parity.
 - **Constraint:** preserve all user-facing behavior and the frozen contracts (endpoints, camelCase JSON, enum spellings, table/column names, ADO REST JSON literals, agent prompts). This is the inverse of `docs/python-migration-plan.md`.
 
 This document is the companion/inverse of `docs/python-migration-plan.md`. Read that for the full behavior contract; this plan focuses on the .NET target shape and sequencing.
@@ -31,7 +33,7 @@ This document is the companion/inverse of `docs/python-migration-plan.md`. Read 
 | Config | pydantic-settings (.env) + Settings table | Options pattern (`IOptions<T>`) + `appsettings.{Env}.json` + Settings table |
 
 ### Frontend
-| | Current (`client/`) | Target architecture (target-crm) |
+| | Current (`client/`) | Target architecture (your-product) |
 |---|---|---|
 | Build / lang | Vite 8, TS 6, React 19 | **keep** (target uses Vite 6/TS 5.9 — do not downgrade) |
 | UI | MUI 9 + Emotion + Framer Motion | **keep** MUI 9 (target is MUI 7 — do not downgrade) |
@@ -48,7 +50,7 @@ This document is the companion/inverse of `docs/python-migration-plan.md`. Read 
 ### D1 — Hosting model: **ASP.NET Core 8 on Azure App Service** (recommended) vs. Azure Functions
 The CRM *microservices* (customer, lead, …) are **Azure Functions v4 in-process (.NET 6)**. But this app's defining traits — minutes-long background pipelines, an **SSE live console**, an in-memory **EventBus ring buffer**, an in-memory **cancellation registry** + **`Semaphore(4)`**, and a **weekly scheduler** — are fundamentally incompatible with Functions-on-consumption (≈230s request cap, no durable in-memory state across scale-in, no native long-lived streaming responses).
 
-> **Recommendation: build as an ASP.NET Core 8 Web API on Azure App Service** (Always On, single instance). This is *already an org pattern* — `TargetCrm.WebAPI` is net8 ASP.NET Core on App Service — and it is what the **original** QaAutomation .NET solution was (net8 ASP.NET Core). It preserves SSE + background + in-memory state with the least semantic change and lets us recover the original `QaAutomation.*` code.
+> **Recommendation: build as an ASP.NET Core 8 Web API on Azure App Service** (Always On, single instance). This is *already an org pattern* — `YourProduct.WebAPI` is net8 ASP.NET Core on App Service — and it is what the **original** QaAutomation .NET solution was (net8 ASP.NET Core). It preserves SSE + background + in-memory state with the least semantic change and lets us recover the original `QaAutomation.*` code.
 
 **Alternative (only if strict microservice parity is required):** Azure Functions v4 + **Durable Functions** (orchestration/fan-out) + **Azure SignalR Service** (replacing SSE) + a **Timer trigger** (scheduler), with all in-memory state externalized (Durable entities / table storage). This is a materially larger rewrite and changes the live-update transport on the frontend. *Not recommended.*
 
@@ -79,7 +81,7 @@ qa-automation/
   QaAutomation.sln
   src/
     QaAutomation.Api/                      # ASP.NET Core 8 Web API host
-      Program.cs                           # WebApplication + AddCustom* extensions (mirror TargetCrm.WebAPI)
+      Program.cs                           # WebApplication + AddCustom* extensions (mirror YourProduct.WebAPI)
       Configurations/
         ConfigurationExtensions.cs         # AddCustomSwaggerGen / CorsPolicy / Versioning / DbContext / Services
         *Options.cs                        # strongly-typed [Required] options (bound + ValidateDataAnnotations)
@@ -114,7 +116,7 @@ qa-automation/
   build/                                   # build-branch/develop/qa/main.yml (see §6)
 ```
 
-**Org conventions to adopt** (from `TargetCrm.WebAPI` + `TargetCrm.Shared`): `Program.cs` reads as a list of `AddCustom*`/`Configure*` one-liners; strongly-typed `required`/`[Required]` options with `ValidateDataAnnotations()`; `nameof`-based config-key constants; `ExceptionHandlingMiddleware` registered first; Swagger w/ Bearer; EF `EnableRetryOnFailure` (if SQL Server). **[audit] Do NOT adopt the org's URL-segment API versioning** (`api/v{version}/...`) — routes must stay **flat under `/api/<router>`** to match the contract the React client hardcodes; versioning here 404s every call. Use `IOptionsMonitor`/a mutable settings snapshot (not immutable `IOptions`) so UI settings edits rebuild the ADO/LLM clients at runtime, and re-read the PAT per request (IHttpClientFactory pools handlers → stale-PAT 401s otherwise). **Skip** the org's anti-patterns: committed plaintext secrets (use Key Vault / env vars), and the obsolete in-process `FunctionBase`. The centralized **Logging API** integration is optional for a standalone tool (recommend local `ILogger` + App Insights; wire the Logging API only if required for org parity).
+**Org conventions to adopt** (from `YourProduct.WebAPI` + `YourProduct.Shared`): `Program.cs` reads as a list of `AddCustom*`/`Configure*` one-liners; strongly-typed `required`/`[Required]` options with `ValidateDataAnnotations()`; `nameof`-based config-key constants; `ExceptionHandlingMiddleware` registered first; Swagger w/ Bearer; EF `EnableRetryOnFailure` (if SQL Server). **[audit] Do NOT adopt the org's URL-segment API versioning** (`api/v{version}/...`) — routes must stay **flat under `/api/<router>`** to match the contract the React client hardcodes; versioning here 404s every call. Use `IOptionsMonitor`/a mutable settings snapshot (not immutable `IOptions`) so UI settings edits rebuild the ADO/LLM clients at runtime, and re-read the PAT per request (IHttpClientFactory pools handlers → stale-PAT 401s otherwise). **Skip** the org's anti-patterns: committed plaintext secrets (use Key Vault / env vars), and the obsolete in-process `FunctionBase`. The centralized **Logging API** integration is optional for a standalone tool (recommend local `ILogger` + App Insights; wire the Logging API only if required for org parity).
 
 ---
 
@@ -128,7 +130,7 @@ The original `QaAutomation.*` tree was deleted at the Python cutover; **recover 
 
 ### Phases
 - **B0 — Solution skeleton.** Create solution + 4 projects; `Program.cs` with `AddCustom*` extensions, Swagger, versioning, CORS (`:5173`,`:5174`), ProblemDetails, exception middleware, `GET /api/health`. Recover original `QaAutomation.Core` options/models as the starting point.
-- **B1 — Data layer.** EF Core 8 `QaDbContext` + entities with **frozen PascalCase table/column names** (the initial Alembic schema `1e39a44b971c` is the baseline) + enums with **exact string spellings**. First EF Migration. `FtsBootstrapper` creates the `doc_chunks` FTS5 vtable at startup. Seed `Project Id=1 'Ideal Agile'`.
+- **B1 — Data layer.** EF Core 8 `QaDbContext` + entities with **frozen PascalCase table/column names** (the initial Alembic schema `1e39a44b971c` is the baseline) + enums with **exact string spellings**. First EF Migration. `FtsBootstrapper` creates the `doc_chunks` FTS5 vtable at startup. Seed `Project Id=1 'Your Project'`.
 - **B2 — ADO client (contract-frozen).** Port `AzureDevOpsClient` verbatim re: URLs, api-version 7.1, Basic auth, Steps XML (byte-identical), json-patch bodies, severity map (`1 - Critical`…), standing house-style bug fields (AreaPath, Custom.QA, Custom.FoundWith, etc.), WIQL date-only, sanitizer. Include the new Git/Code-Search reads.
 - **B3 — LLM layer.** `ILlmClient` + 4 providers + factory + `LlmProviderState` (persist `llm.provider` in Settings). Streaming → `progress`/`emit` callbacks.
 - **B4 — Agents + JsonUtils.** Port the **verbatim** Analyst/Tester/BugWriter/CodeVerifier system prompts (house style — character-for-character). **[audit] The live Python prompts are authoritative — diff the recovered .NET (`7b16806`) against them, never trust it (it predates today's house style).** Also freeze the two orchestrator-embedded prompts (code-discovery **triage** + verify_steps `_ACTUAL_RULE_FULL`/`_LITE`) and the **Reports "Insights" summarizer** prompt. Lenient JSON parse (fence strip, **string-aware** bracket extract, 3× retry, string coercion) applies to **Analyst/Tester/BugWriter only** — **CodeVerifier `verify()` is single-shot and raises on bad JSON; `verify_steps()` never raises** (degrades to all-inconclusive). See checklist §3.
@@ -143,7 +145,7 @@ The original `QaAutomation.*` tree was deleted at the Python cutover; **recover 
 
 ## 5. Frontend migration — architecture alignment (architecture only)
 
-Keep MUI 9 / Vite 8 / TS 6 / React 19 / Framer Motion. Restructure to target-crm's layering and introduce RTK + React Query. The current `session/` config-driven engine maps cleanly onto a feature module.
+Keep MUI 9 / Vite 8 / TS 6 / React 19 / Framer Motion. Restructure to your-product's layering and introduce RTK + React Query. The current `session/` config-driven engine maps cleanly onto a feature module.
 
 **Target `client/src` shape:**
 ```
@@ -164,19 +166,19 @@ src/
     layouts/       { Layout (AppBar + Drawer) }
 ```
 
-**Mapping rules (from target-crm conventions):**
+**Mapping rules (from your-product conventions):**
 - **API layer = pure, typed, no UI.** Each `components/<feature>/api/<feature>-api.ts` exports a named object of `async` methods that call `{ get, post, put, patch, del }` from `api/`, build the URL from `config.get('api.qa')`, and return typed data. No auth handling in feature APIs (interceptors do it). No data transforms in components.
 - **React Query owns server state.** Replace `useSessionsLive`/`useSessionDetail` (`setInterval` polling) with `useQuery` + `refetchInterval` (gated while a session is in-flight) + `useMutation` + `queryClient.invalidateQueries`. Array query keys scoped by id (e.g. `['author-tests','sessions',projectId]`).
 - **Redux owns global UI state** (selection, dialogs, color mode, cross-feature flags). Never store server data that React Query can own. Keep the config-driven `SessionModuleConfig` idea but feed it RTK/RQ instead of bespoke hooks.
 - **SSE stays custom** (`common/hooks/useEventStream.ts`) — no React Query equivalent; optionally push frames into `queryClient.setQueryData`.
-- **Provider shell** in `app/` mirrors target-crm: `ErrorBoundary > QueryClientProvider > Redux Provider > ThemeProvider > BrowserRouter > Routes`.
+- **Provider shell** in `app/` mirrors your-product: `ErrorBoundary > QueryClientProvider > Redux Provider > ThemeProvider > BrowserRouter > Routes`.
 - **Base URL via config.** Introduce `VITE_QA_API` so the client can address the new App Service backend per environment (replaces the hardcoded relative `/api` + dev proxy; keep the Vite proxy for local dev only).
 
 ### Frontend phases
 - **F0** — add deps (`@reduxjs/toolkit`, `react-redux`, `@tanstack/react-query`), scaffold `app/`, `api/`, `config/`, `common/`, `routes/`; mount providers in `main.tsx`.
 - **F1** — centralized `axios-client` + `config`; migrate all inline `axios('/api/...')` calls into per-feature `api/*` modules (behavior-preserving).
 - **F2** — introduce React Query; replace polling hooks feature-by-feature (Author Tests first, then Find Bugs, Batches, Reports, KB, Settings); keep `useEventStream`.
-- **F3** — introduce Redux slices for cross-cutting UI state; move `ColorMode` into the store or keep as context (allowed by target-crm).
+- **F3** — introduce Redux slices for cross-cutting UI state; move `ColorMode` into the store or keep as context (allowed by your-product).
 - **F4** — relocate `pages/` + `session/` into `components/<feature>/` modules with barrels; central `routes/Routes.tsx`.
 - **F5** — point `config` at the new backend; verify against the .NET API.
 
@@ -188,7 +190,7 @@ src/
 
 Mirror the CRM's **no-container** approach (zip deploy + Bicep + Front Door; no Docker/K8s).
 
-**Backend (App Service)** — pipeline modeled on `TargetCrm.WebAPI/BuildPipelines/azure-pipelines-qa.yml`:
+**Backend (App Service)** — pipeline modeled on `YourProduct.WebAPI/BuildPipelines/azure-pipelines-qa.yml`:
 `UseDotNet@2 (8.x)` → `DotNetCoreCLI@2` restore/build/test → `publish --configuration Release --output ... -p:` → zip → deploy via **`AzureWebApp@1`/`AzureRmWebAppDeployment@4`** to an App Service (instead of `AzureFunctionApp@2`). One YAML per branch (`build-branch/develop/qa/main.yml`) with path-filtered triggers.
 
 **Frontend (Storage static website)** — modeled on `web-app/build/build-branch.yml`: `NodeTool@0 (18.x)` → `npm ci` → `vite build` (with `VITE_QA_API` per env) → `AzureCLI@2 az storage blob upload-batch --destination '$web'`. **[audit] Set the static-website 404 document to `index.html`** (SPA fallback) or every BrowserRouter deep link/refresh 404s.
@@ -209,7 +211,7 @@ The Python app is the authoritative contract. The .NET rewrite must reproduce **
 3. **Enum string spellings** (`SessionStatus`, `BugSessionStatus` incl. `AwaitingActual`/`Verifying`, `DraftStatus`, **`BugDraftStatus`** (distinct type), `BugSeverity`, `ReportStatus`/`Theme`, `LlmProvider` incl. `ClaudeCli`, `BatchModule`=`author-tests`/`find-bugs`, `BatchMode`=`auto`/`manual`). **[audit] Serialize via `JsonStringEnumConverter` as the exact NAME — NOT int and NOT camelCased; use `[JsonStringEnumMemberName]` for the kebab/lowercase values. Verdict statuses `pass|fail|inconclusive` are also frozen.**
 4. **Table/column names** (PascalCase EF defaults = original schema).
 5. **ADO REST JSON literals** — Steps XML (byte-identical), json-patch op bodies, testplan `workItem` wrapper, rel names (`Microsoft.VSTS.Common.TestedBy-Reverse`, `System.LinkTypes.Related`), severity map, standing bug fields, bug ReproSteps HTML (incl. `OBSERVATION` block), WIQL **date-only** on `[System.ChangedDate]`, `System.ClosedDate` **omitted** (TF51535).
-6. **Agent system prompts** — character-for-character (house style; mirrors the `targetcrm-bug-suite` gold reference).
+6. **Agent system prompts** — character-for-character (house style; mirrors the `yourproduct-bug-suite` gold reference).
 7. **`CurrentActivity` strings + SSE frame shape** (UI keys off them).
 8. Scheduler at **Thu 11:00 Asia/Karachi**; **UTC** datetime columns throughout; background tasks open their **own** DB scope; ports backend `5250` / client `5173`.
 

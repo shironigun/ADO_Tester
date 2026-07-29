@@ -34,7 +34,7 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
         "System.AssignedTo", "System.State", "Microsoft.VSTS.Common.AcceptanceCriteria",
     ];
 
-    // System.ClosedDate is omitted (TF51535 on Ideal Agile); the sort tolerates closedAt=null.
+    // System.ClosedDate is omitted (TF51535 on some ADO projects); the sort tolerates closedAt=null.
     private static readonly string[] ReportFields =
     [
         "System.Id", "System.Title", "System.WorkItemType", "System.AssignedTo",
@@ -332,8 +332,75 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
             $"{Opts.BaseUrl}/_apis/testplan/plans/{planId}/suites?api-version={Opts.ApiVersion}",
             $"Get suites for plan {planId}", ct);
         return Array(doc.RootElement, "value")
-            .Select(e => new AdoTestSuite(e.GetProperty("id").GetInt32(), GetStr(e, "name") ?? ""))
+            .Select(e => new AdoTestSuite(
+                e.GetProperty("id").GetInt32(),
+                GetStr(e, "name") ?? "",
+                e.TryGetProperty("parentSuite", out var ps) && ps.ValueKind == JsonValueKind.Object
+                    && ps.TryGetProperty("id", out var pid) && pid.TryGetInt32(out var p) ? p : null))
             .ToList();
+    }
+
+    /// <summary>List the Test Cases in a suite (optionally recursing into sub-suites), as parsed
+    /// <see cref="LinkedTestCase"/>s. Used to read the existing coverage of a module's plan.</summary>
+    public async Task<IReadOnlyList<LinkedTestCase>> GetSuiteTestCasesAsync(
+        int planId, int suiteId, bool recurse = true, CancellationToken ct = default)
+    {
+        // Resolve the set of suites to read: the chosen one, plus all descendants when recursing.
+        var suiteIds = new List<int> { suiteId };
+        if (recurse)
+        {
+            var all = await GetTestSuitesAsync(planId, ct);
+            var childrenByParent = all.Where(s => s.ParentId is not null)
+                .GroupBy(s => s.ParentId!.Value).ToDictionary(g => g.Key, g => g.Select(s => s.Id).ToList());
+            var queue = new Queue<int>(new[] { suiteId });
+            var seen = new HashSet<int> { suiteId };
+            while (queue.Count > 0)
+            {
+                var cur = queue.Dequeue();
+                if (!childrenByParent.TryGetValue(cur, out var kids)) continue;
+                foreach (var k in kids)
+                    if (seen.Add(k)) { suiteIds.Add(k); queue.Enqueue(k); }
+            }
+        }
+
+        // Collect distinct test-case work-item ids across those suites.
+        var caseIds = new List<int>();
+        var seenCase = new HashSet<int>();
+        foreach (var sid in suiteIds)
+        {
+            using var doc = await GetDocAsync(
+                $"{Opts.BaseUrl}/_apis/testplan/Plans/{planId}/Suites/{sid}/TestCase?api-version={Opts.ApiVersion}",
+                $"Get test cases for suite {sid}", ct);
+            foreach (var e in Array(doc.RootElement, "value"))
+            {
+                // testplan shape: { workItem: { id }, testCase: { id } } — accept either.
+                int? id = null;
+                if (e.TryGetProperty("workItem", out var wi) && wi.TryGetProperty("id", out var wid) && wid.TryGetInt32(out var w)) id = w;
+                else if (e.TryGetProperty("testCase", out var tc) && tc.TryGetProperty("id", out var tcid) && tcid.TryGetInt32(out var t)) id = t;
+                if (id is int cid && seenCase.Add(cid)) caseIds.Add(cid);
+            }
+        }
+        if (caseIds.Count == 0)
+            return [];
+
+        // Batch-fetch titles + steps.
+        var outList = new List<LinkedTestCase>();
+        const string fieldsCsv = "System.Title,System.WorkItemType,Microsoft.VSTS.TCM.Steps";
+        foreach (var chunk in Chunk(caseIds, 200))
+        {
+            var batchUrl = $"{Opts.BaseUrl}/_apis/wit/workitems?ids={string.Join(",", chunk)}&fields={fieldsCsv}&api-version={Opts.ApiVersion}";
+            using var br = await GetDocAsync(batchUrl, "Suite test case batch fetch", ct);
+            foreach (var e in Array(br.RootElement, "value"))
+            {
+                var f = e.GetProperty("fields");
+                outList.Add(new LinkedTestCase(
+                    e.GetProperty("id").GetInt32(),
+                    GetStr(f, "System.Title") ?? "",
+                    "",
+                    ParseStepsXml(GetStr(f, "Microsoft.VSTS.TCM.Steps") ?? "")));
+            }
+        }
+        return outList;
     }
 
     // ── Test Case create + suite add + Tested-By link ───────────────────────
@@ -368,6 +435,19 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
         using var _ = await SendDocAsync(HttpMethod.Post, url, body, "application/json", $"Add TC {testCaseId} to suite {suiteId}", ct);
     }
 
+    public async Task<int> CreateStaticTestSuiteAsync(int planId, int parentSuiteId, string name, CancellationToken ct = default)
+    {
+        var body = new JsonObject
+        {
+            ["suiteType"]   = "staticTestSuite",
+            ["name"]        = name,
+            ["parentSuite"] = new JsonObject { ["id"] = parentSuiteId },
+        };
+        var url = $"{Opts.BaseUrl}/_apis/testplan/Plans/{planId}/suites?api-version={Opts.ApiVersion}";
+        using var doc = await SendDocAsync(HttpMethod.Post, url, body, "application/json", $"Create suite '{name}' under {parentSuiteId}", ct);
+        return doc.RootElement.GetProperty("id").GetInt32();
+    }
+
     public async Task LinkTestedByAsync(int storyId, int testCaseId, CancellationToken ct = default)
     {
         var tcUrl = $"https://dev.azure.com/{Opts.Organization}/{Quote(Opts.Project)}/_apis/wit/workItems/{testCaseId}";
@@ -388,21 +468,32 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
 
     public async Task<int> CreateBugAsync(
         string title, string severity, string preconditions, IReadOnlyList<string> reproSteps,
-        string expected, string actual, string suggestedFix, CancellationToken ct = default)
+        string expected, string actual, string suggestedFix, string systemInfo = "", string reproHtml = "",
+        string foundWith = "Manual Test", CancellationToken ct = default)
     {
-        // Repro in the house anatomy: optional preconditions, env-first <ul> steps, bold OBSERVATION,
-        // then a screenshot placeholder (spec §5.5 — frozen order).
-        var repro = new StringBuilder();
-        if (!string.IsNullOrWhiteSpace(preconditions))
-            repro.Append($"<div><b>Preconditions:</b> {HtmlEscape(preconditions)}</div>");
-        repro.Append("<ul>");
-        foreach (var s in reproSteps)
-            repro.Append($"<li>{HtmlEscape(s)}</li>");
-        repro.Append("</ul>");
-        if (!string.IsNullOrWhiteSpace(actual))
-            repro.Append("<div><b>OBSERVATION:</b></div>")
-                 .Append($"<div><ul><li>{HtmlEscape(actual)}</li></ul></div>");
-        repro.Append("<div><i>[Attach screenshot/GIF here]</i></div>");
+        // Repro field: a caller-composed HTML override (auto-filed bugs — multi-bullet observations +
+        // inline attachments) wins; otherwise the frozen house anatomy: optional preconditions, env-first
+        // <ul> steps, bold OBSERVATION, then a screenshot placeholder (spec §5.5 — frozen order).
+        string reproField;
+        if (!string.IsNullOrWhiteSpace(reproHtml))
+        {
+            reproField = reproHtml;
+        }
+        else
+        {
+            var repro = new StringBuilder();
+            if (!string.IsNullOrWhiteSpace(preconditions))
+                repro.Append($"<div><b>Preconditions:</b> {HtmlEscape(preconditions)}</div>");
+            repro.Append("<ul>");
+            foreach (var s in reproSteps)
+                repro.Append($"<li>{HtmlEscape(s)}</li>");
+            repro.Append("</ul>");
+            if (!string.IsNullOrWhiteSpace(actual))
+                repro.Append("<div><b>OBSERVATION:</b></div>")
+                     .Append($"<div><ul><li>{HtmlEscape(actual)}</li></ul></div>");
+            repro.Append("<div><i>[Attach screenshot/GIF here]</i></div>");
+            reproField = repro.ToString();
+        }
 
         var acceptanceHtml = "";
         if (!string.IsNullOrWhiteSpace(expected))
@@ -412,6 +503,10 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
         var sysInfo = "";
         if (!string.IsNullOrWhiteSpace(suggestedFix))
             sysInfo = $"<div><b>Suggested fix:</b> {HtmlEscape(suggestedFix)}</div>";
+        // Optional pre-built HTML block (e.g. automation/triage traceability) — the caller escapes it.
+        // Empty for manual bugs, so their SystemInfo stays byte-identical (golden parity preserved).
+        if (!string.IsNullOrWhiteSpace(systemInfo))
+            sysInfo += systemInfo;
 
         var sevValue = severity switch
         {
@@ -426,13 +521,13 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
         var body = new JsonArray
         {
             PatchOp("add", "/fields/System.Title", title),
-            PatchOp("add", "/fields/Microsoft.VSTS.TCM.ReproSteps", repro.ToString()),
+            PatchOp("add", "/fields/Microsoft.VSTS.TCM.ReproSteps", reproField),
             PatchOp("add", "/fields/Microsoft.VSTS.Common.Severity", sevValue),
             PatchOp("add", "/fields/System.AreaPath", Opts.BugAreaPath),
             PatchOp("add", "/fields/Microsoft.VSTS.Common.Priority", 2),
             PatchOp("add", "/fields/Microsoft.VSTS.Common.ValueArea", "Business"),
             PatchOp("add", "/fields/Custom.QA", Opts.QaOwner),
-            PatchOp("add", "/fields/Custom.FoundWith", "Manual Test"),
+            PatchOp("add", "/fields/Custom.FoundWith", foundWith),
         };
         if (acceptanceHtml.Length > 0)
             body.Add(PatchOp("add", "/fields/Microsoft.VSTS.Common.AcceptanceCriteria", acceptanceHtml));
@@ -458,6 +553,48 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
         };
         var url = $"{Opts.BaseUrl}/_apis/wit/workitems/{fromId}?api-version={Opts.ApiVersion}";
         using var _ = await SendDocAsync(HttpMethod.Patch, url, body, "application/json-patch+json", $"Link {fromId} <-> {toId} as Related", ct);
+    }
+
+    public async Task LinkParentAsync(int childId, int parentId, CancellationToken ct = default)
+    {
+        var parentUrl = $"https://dev.azure.com/{Opts.Organization}/{Quote(Opts.Project)}/_apis/wit/workItems/{parentId}";
+        var body = new JsonArray
+        {
+            new JsonObject
+            {
+                ["op"] = "add",
+                ["path"] = "/relations/-",
+                ["value"] = new JsonObject { ["rel"] = "System.LinkTypes.Hierarchy-Reverse", ["url"] = parentUrl },
+            },
+        };
+        var url = $"{Opts.BaseUrl}/_apis/wit/workitems/{childId}?api-version={Opts.ApiVersion}";
+        using var _ = await SendDocAsync(HttpMethod.Patch, url, body, "application/json-patch+json", $"Link {childId} under parent {parentId}", ct);
+    }
+
+    public async Task<string> UploadAttachmentAsync(string fileName, byte[] content, CancellationToken ct = default)
+    {
+        var safeName = Uri.EscapeDataString(string.IsNullOrWhiteSpace(fileName) ? "attachment" : fileName);
+        var url = $"{Opts.BaseUrl}/_apis/wit/attachments?fileName={safeName}&api-version={Opts.ApiVersion}";
+        using var req = new HttpRequestMessage(HttpMethod.Post, url) { Content = new ByteArrayContent(content) };
+        req.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+        using var r = await _http.SendAsync(req, ct);
+        await EnsureOkAsync(r, $"Upload attachment {fileName}", ct);
+        using var doc = JsonDocument.Parse(await r.Content.ReadAsStringAsync(ct) is { Length: > 0 } s ? s : "{}");
+        return doc.RootElement.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
+    }
+
+    public async Task AddWorkItemAttachmentLinkAsync(
+        int workItemId, string attachmentUrl, string? comment = null, CancellationToken ct = default)
+    {
+        var rel = new JsonObject { ["rel"] = "AttachedFile", ["url"] = attachmentUrl };
+        if (!string.IsNullOrWhiteSpace(comment))
+            rel["attributes"] = new JsonObject { ["comment"] = comment };
+        var body = new JsonArray
+        {
+            new JsonObject { ["op"] = "add", ["path"] = "/relations/-", ["value"] = rel },
+        };
+        var url = $"{Opts.BaseUrl}/_apis/wit/workitems/{workItemId}?api-version={Opts.ApiVersion}";
+        using var _ = await SendDocAsync(HttpMethod.Patch, url, body, "application/json-patch+json", $"Attach file to WI {workItemId}", ct);
     }
 
     // ── Reports query + enrichment ──────────────────────────────────────────
@@ -679,6 +816,21 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
         return rid;
     }
 
+    public async Task<IReadOnlyList<string>> DiscoverBranchesAsync(string? repository = null, CancellationToken ct = default)
+    {
+        var rid = await ResolveRepositoryIdAsync(repository, ct);
+        using var doc = await GetDocAsync(
+            $"{Opts.BaseUrl}/_apis/git/repositories/{rid}/refs?filter=heads/&api-version={Opts.ApiVersion}",
+            "List branches", ct);
+        return Array(doc.RootElement, "value")
+            .Select(e => GetStr(e, "name") ?? "")               // "refs/heads/feature/x"
+            .Where(n => n.StartsWith("refs/heads/", StringComparison.Ordinal))
+            .Select(n => n["refs/heads/".Length..])
+            .Where(n => n.Length > 0)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     public async Task<GitRefs> GetWorkItemGitRefsAsync(int workItemId, CancellationToken ct = default)
     {
         var url = $"{Opts.BaseUrl}/_apis/wit/workitems/{workItemId}?$expand=relations&api-version={Opts.ApiVersion}";
@@ -849,6 +1001,29 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
         catch (JsonException) { return raw; }  // some responses return raw text
     }
 
+    public async Task<IReadOnlyList<string>> ListRepoFilePathsAsync(
+        string scopePath, string? branch = null, string? repoId = null, CancellationToken ct = default)
+    {
+        var rid = repoId ?? await ResolveRepositoryIdAsync(null, ct);
+        var version = string.IsNullOrWhiteSpace(branch) ? Opts.DefaultBranch : branch!;
+        var scope = string.IsNullOrWhiteSpace(scopePath) ? "/" : (scopePath.StartsWith('/') ? scopePath : "/" + scopePath);
+        var url = $"{Opts.BaseUrl}/_apis/git/repositories/{rid}/items" +
+                  $"?scopePath={Quote(scope)}&recursionLevel=Full" +
+                  $"&versionDescriptor.version={Quote(version)}&versionDescriptor.versionType=branch" +
+                  $"&api-version={Opts.ApiVersion}";
+        using var doc = await GetDocAsync(url, $"List items {scope}", ct);
+        var paths = new List<string>();
+        foreach (var item in Array(doc.RootElement, "value"))
+        {
+            if (item.TryGetProperty("isFolder", out var f) && f.ValueKind == JsonValueKind.True)
+                continue;
+            var p = GetStr(item, "path");
+            if (!string.IsNullOrEmpty(p))
+                paths.Add(p!.TrimStart('/'));
+        }
+        return paths;
+    }
+
     public async Task<IReadOnlyList<string>> SearchCodeAsync(string text, int top = 20, string? repoId = null, CancellationToken ct = default)
     {
         var org = Opts.Organization.Trim('/');
@@ -878,6 +1053,148 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
         using var r = await _http.GetAsync(url, ct);
         await EnsureOkAsync(r, op, ct);
         return JsonDocument.Parse(await r.Content.ReadAsStringAsync(ct) is { Length: > 0 } s ? s : "{}");
+    }
+
+    // ── ADO Test Run lifecycle (QAL-027) ─────────────────────────────────────
+
+    public async Task<int> CreateAdoTestRunAsync(int planId, int suiteId, string name,
+        IReadOnlyList<int> pointIds, CancellationToken ct = default)
+    {
+        // Include pointIds so ADO auto-creates one result per point (outcome unset). We then PATCH
+        // those results with final outcomes via UpdateAdoTestResultsAsync. (POSTing fresh results to
+        // a pointId-less run is rejected with 400 — the results must be created by ADO from points.)
+        var body = new JsonObject
+        {
+            ["name"]     = name,
+            ["plan"]     = new JsonObject { ["id"] = planId.ToString(CultureInfo.InvariantCulture) },
+            ["pointIds"] = new JsonArray(pointIds.Select(id => JsonValue.Create(id)).ToArray<JsonNode?>()),
+        };
+        var url = $"{Opts.BaseUrl}/_apis/test/runs?api-version=7.0";
+        using var doc = await PostDocAsync(url, body, "Create ADO Test Run", ct);
+        return doc.RootElement.GetProperty("id").GetInt32();
+    }
+
+    public async Task<IReadOnlyDictionary<int, int>> GetAdoTestResultIdsAsync(int adoTestRunId, CancellationToken ct = default)
+    {
+        var url = $"{Opts.BaseUrl}/_apis/test/Runs/{adoTestRunId}/results?api-version=7.0";
+        using var doc = await GetDocAsync(url, $"Get ADO test results (run {adoTestRunId})", ct);
+        var map = new Dictionary<int, int>();
+        if (doc.RootElement.TryGetProperty("value", out var arr))
+            foreach (var r in arr.EnumerateArray())
+            {
+                var resultId = r.TryGetProperty("id", out var idP) && idP.ValueKind == JsonValueKind.Number
+                    ? idP.GetInt32() : 0;
+                var ptId = 0;
+                if (r.TryGetProperty("testPoint", out var tp) && tp.TryGetProperty("id", out var tpId))
+                    ptId = tpId.ValueKind == JsonValueKind.Number ? tpId.GetInt32()
+                         : int.TryParse(tpId.GetString(), out var v) ? v : 0;
+                if (resultId > 0 && ptId > 0) map[ptId] = resultId;
+            }
+        return map;
+    }
+
+    public async Task UpdateAdoTestResultsAsync(int adoTestRunId, IReadOnlyList<AdoTestResultUpdate> updates,
+        CancellationToken ct = default)
+    {
+        if (updates.Count == 0) return;
+        var arr = new JsonArray();
+        foreach (var u in updates)
+        {
+            var o = new JsonObject
+            {
+                ["id"]           = u.ResultId,
+                ["outcome"]      = u.Outcome,
+                ["state"]        = "Completed",
+                ["durationInMs"] = u.DurationMs,
+            };
+            if (!string.IsNullOrEmpty(u.ErrorMessage))
+                o["errorMessage"] = u.ErrorMessage;
+            arr.Add(o);
+        }
+        var url = $"{Opts.BaseUrl}/_apis/test/Runs/{adoTestRunId}/results?api-version=7.0";
+        using var _ = await SendDocAsync(HttpMethod.Patch, url, arr, "application/json",
+            $"Update ADO test results (run {adoTestRunId})", ct);
+    }
+
+    public async Task CompleteAdoTestRunAsync(int adoTestRunId, CancellationToken ct = default)
+    {
+        var body = new JsonObject { ["state"] = "Completed" };
+        var url = $"{Opts.BaseUrl}/_apis/test/runs/{adoTestRunId}?api-version=7.0";
+        using var _ = await SendDocAsync(HttpMethod.Patch, url, body, "application/json",
+            $"Complete ADO test run {adoTestRunId}", ct);
+    }
+
+    public async Task<IReadOnlyDictionary<int, int>> GetTestPointsAsync(
+        int planId, int suiteId, IReadOnlyList<int> testCaseIds, CancellationToken ct = default)
+    {
+        // isRecursive=true makes ADO return test points from child suites too, which is needed
+        // when the session's TestSuiteId is a parent/folder suite (e.g. COWORK 173473) but the
+        // actual test cases live in level child-suites (175537 → 175538/539/540).
+        // We filter by testCaseIds in-memory rather than via a testCaseId= query param to avoid
+        // building a multi-KB URL (a large push can have hundreds of ids) that risks a 404/414.
+        var wanted = testCaseIds.ToHashSet();
+        var url = $"{Opts.BaseUrl}/_apis/testplan/Plans/{planId}/Suites/{suiteId}/TestPoint" +
+                  $"?isRecursive=true&api-version={Opts.ApiVersion}";
+        using var doc = await GetDocAsync(url, "Get test points", ct);
+        var map = new Dictionary<int, int>();
+        if (doc.RootElement.TryGetProperty("value", out var arr))
+            foreach (var pt in arr.EnumerateArray())
+            {
+                var tcId = pt.TryGetProperty("testCaseReference", out var tcr)
+                    ? (tcr.TryGetProperty("id", out var idProp) ? idProp.GetInt32() : 0)
+                    : 0;
+                var ptId = pt.TryGetProperty("id", out var ptProp) ? ptProp.GetInt32() : 0;
+                if (tcId > 0 && ptId > 0 && (wanted.Count == 0 || wanted.Contains(tcId)))
+                    map[tcId] = ptId;
+            }
+        return map;
+    }
+
+    // ── Build / pipeline reads (QAL-030) ────────────────────────────────────
+
+    public async Task<IReadOnlyList<AdoBuild>> GetPipelineBuildsAsync(
+        int pipelineId, int? minBuildId = null, CancellationToken ct = default)
+    {
+        // NOTE: /build/builds has NO minBuildId query parameter — ADO silently ignores unknown
+        // params, so the old "&minBuildId=N" filtered nothing and every poll returned the full
+        // history (the pipeline watcher then re-ran runs for long-past executions). Filter
+        // client-side instead; $top bounds the fetch to the recent window.
+        var url = $"{Opts.BaseUrl}/_apis/build/builds?definitions={pipelineId}" +
+                  "&statusFilter=completed&resultFilter=succeeded&queryOrder=finishTimeDescending" +
+                  $"&$top=50&api-version={Opts.ApiVersion}";
+
+        using var doc = await GetDocAsync(url, $"Get pipeline builds {pipelineId}", ct);
+        var builds = new List<AdoBuild>();
+        if (doc.RootElement.TryGetProperty("value", out var arr))
+            foreach (var b in arr.EnumerateArray())
+            {
+                var id  = b.TryGetProperty("id", out var idP) ? idP.GetInt32() : 0;
+                var sha = b.TryGetProperty("sourceVersion", out var svP) ? svP.GetString() ?? "" : "";
+                var repoId = b.TryGetProperty("repository", out var rp)
+                    ? (rp.TryGetProperty("id", out var rIdP) ? rIdP.GetString() ?? "" : "") : "";
+                var finished = b.TryGetProperty("finishTime", out var ftP)
+                    ? DateTime.Parse(ftP.GetString() ?? "", CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)
+                    : DateTime.UtcNow;
+                if (id > 0 && (minBuildId is null || id > minBuildId.Value))
+                    builds.Add(new AdoBuild(id, sha, repoId, finished));
+            }
+        return builds;
+    }
+
+    public async Task<IReadOnlyList<AdoBuildChange>> GetBuildChangesAsync(
+        int buildId, CancellationToken ct = default)
+    {
+        var url = $"{Opts.BaseUrl}/_apis/build/builds/{buildId}/changes?api-version={Opts.ApiVersion}";
+        using var doc = await GetDocAsync(url, $"Get build changes {buildId}", ct);
+        var changes = new List<AdoBuildChange>();
+        if (doc.RootElement.TryGetProperty("value", out var arr))
+            foreach (var c in arr.EnumerateArray())
+            {
+                var sha = c.TryGetProperty("id", out var idP) ? idP.GetString() ?? "" : "";
+                var msg = c.TryGetProperty("message", out var mP) ? mP.GetString() ?? "" : "";
+                if (!string.IsNullOrEmpty(sha)) changes.Add(new AdoBuildChange(sha, msg));
+            }
+        return changes;
     }
 
     private Task<JsonDocument> PostDocAsync(string url, JsonNode body, string op, CancellationToken ct) =>

@@ -5,7 +5,7 @@ namespace QaAutomation.Api.Configurations;
 
 /// <summary>
 /// House-style configuration extensions. <c>Program.cs</c> reads as a list of
-/// <c>AddCustom*</c>/<c>Configure*</c> one-liners (mirrors <c>TargetCrm.WebAPI</c>). New
+/// <c>AddCustom*</c>/<c>Configure*</c> one-liners (mirrors a typical ASP.NET Core Web API host). New
 /// cross-cutting wiring is added here as later phases land (B9 introduces strongly-typed
 /// options with <c>[Required]</c> + <c>ValidateDataAnnotations()</c>).
 /// </summary>

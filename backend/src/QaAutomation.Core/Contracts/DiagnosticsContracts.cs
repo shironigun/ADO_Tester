@@ -10,6 +10,8 @@ public sealed class DiagnosticsStatus
     public bool AzureOpenAiConfigured { get; init; }
     public bool ClaudeCliAvailable { get; init; }
     public string? ClaudeCliVersion { get; init; }
+    public bool CopilotCliAvailable { get; init; }
+    public string? CopilotCliVersion { get; init; }
 }
 
 /// <summary>Response for <c>GET /api/diagnostics/llm</c> — the active provider name + its ping reply.</summary>

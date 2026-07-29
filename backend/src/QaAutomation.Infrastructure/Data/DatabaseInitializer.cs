@@ -2,6 +2,7 @@ using System.Reflection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using QaAutomation.Core.Models;
+using QaAutomation.Infrastructure.TextSearch;
 
 namespace QaAutomation.Infrastructure.Data;
 
@@ -19,30 +20,53 @@ namespace QaAutomation.Infrastructure.Data;
 /// </summary>
 public sealed class DatabaseInitializer
 {
-    private const string FtsBootstrapSql =
-        "CREATE VIRTUAL TABLE IF NOT EXISTS doc_chunks USING fts5(content, project_id UNINDEXED, doc_id UNINDEXED)";
-
     private static readonly string EfProductVersion =
         (typeof(DbContext).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
             ?.InformationalVersion ?? "8.0.11").Split('+')[0];
 
     private readonly QaDbContext _db;
+    private readonly ITextSearchProvider _textSearch;
     private readonly ILogger<DatabaseInitializer> _log;
 
-    public DatabaseInitializer(QaDbContext db, ILogger<DatabaseInitializer> log)
+    public DatabaseInitializer(QaDbContext db, ITextSearchProvider textSearch, ILogger<DatabaseInitializer> log)
     {
         _db = db;
+        _textSearch = textSearch;
         _log = log;
     }
 
     public void Initialize()
     {
-        if (ExistingSchemaNeedsAdoption())
+        // The adopt-existing-qa.db path is SQLite-only (an Alembic-era file DB). On PostgreSQL there is
+        // never a pre-existing non-EF schema, so Migrate() just builds it fresh.
+        if (_db.Database.IsSqlite() && ExistingSchemaNeedsAdoption())
             StampBaselineAsApplied();
 
         _db.Database.Migrate();   // fresh → create schema + history; adopted / up-to-date → no-op
-        EnsureFtsTable();
+        _textSearch.EnsureSchema(_db);   // FTS stores (SQLite fts5 virtual tables / Postgres tsvector tables)
         SeedProject();
+        ReconcileOrphanedRuns();
+    }
+
+    /// <summary>
+    /// A TestRun executes on an in-memory background task, so a backend restart orphans any run left
+    /// in Queued/Running — it would otherwise display as "stuck" forever. Mark those Failed on boot.
+    /// </summary>
+    private void ReconcileOrphanedRuns()
+    {
+        var stuck = _db.TestRuns
+            .Where(r => r.Status == TestRunStatus.Queued || r.Status == TestRunStatus.Running)
+            .ToList();
+        if (stuck.Count == 0)
+            return;
+        foreach (var r in stuck)
+        {
+            r.Status = TestRunStatus.Failed;
+            r.ErrorMessage = "Orphaned by a backend restart while running.";
+            r.FinishedAt = DateTime.UtcNow;
+        }
+        _db.SaveChanges();
+        _log.LogInformation("Reconciled {Count} orphaned TestRun(s) as Failed after restart.", stuck.Count);
     }
 
     /// <summary>True when the app schema already exists (Alembic-built) but EF has not recorded its baseline.</summary>
@@ -69,20 +93,18 @@ public sealed class DatabaseInitializer
             "Adopted existing Alembic database: recorded baseline {Baseline} as applied (no DDL ran).", baseline);
     }
 
-    private void EnsureFtsTable() => _db.Database.ExecuteSqlRaw(FtsBootstrapSql);
-
     private void SeedProject()
     {
         if (_db.Projects.Any())
             return;   // fresh seed only — never overwrite an adopted project row
         _db.Projects.Add(new Project
         {
-            Name = "Ideal Agile",
-            AdoOrganization = "ConstellationDealer",
-            AdoProject = "Ideal Agile",
+            Name = "Default Project",
+            AdoOrganization = "",
+            AdoProject = "",
         });
         _db.SaveChanges();
-        _log.LogInformation("Seeded default Project id=1 'Ideal Agile'.");
+        _log.LogInformation("Seeded default Project id=1.");
     }
 
     private bool TableExists(string name) => Count(

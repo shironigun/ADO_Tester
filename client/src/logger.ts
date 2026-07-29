@@ -1,12 +1,13 @@
-import axios from 'axios'
+import { apiUrl } from './config/env'
 
 // Free, DB-only frontend error/warning logger. Captures uncaught errors, unhandled promise
 // rejections, React render errors (via ErrorBoundary), explicit logger.warn/error calls, and failed
 // API requests, then batches them to the backend (POST /api/logs → ErrorLogs table). There is no
 // viewer — debug by querying the SQLite ErrorLogs table directly.
 //
-// Sending uses fetch (NOT axios) on purpose, so the axios response interceptor installed below cannot
-// recurse into logging when the /api/logs request itself fails.
+// Failed API requests are logged by the response interceptor on the shared axios instance in
+// api/client.ts (every feature calls through it). Sending uses fetch (NOT axios) on purpose, so that
+// interceptor cannot recurse into logging when the /api/logs request itself fails.
 
 type Level = 'warn' | 'error'
 
@@ -59,7 +60,7 @@ function flush(): void {
   if (queue.length === 0) return
   const batch = queue.splice(0, queue.length)
   try {
-    void fetch('/api/logs', {
+    void fetch(apiUrl('/api/logs'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(batch),
@@ -102,22 +103,5 @@ export function installGlobalErrorLogging(): void {
 
   window.addEventListener('beforeunload', () => flush())
 
-  // Failed API calls: 4xx → warning, 5xx / network → error.
-  axios.interceptors.response.use(
-    (r) => r,
-    (error) => {
-      const cfg = error?.config ?? {}
-      const status: number | undefined = error?.response?.status
-      const url = `${cfg.baseURL ?? ''}${cfg.url ?? ''}`
-      const method = (cfg.method ?? '').toUpperCase()
-      const msg = `API ${method} ${url} failed${status ? ` (${status})` : ''}: ${error?.message ?? ''}`
-      const context = { status, data: error?.response?.data }
-      if (status != null && status >= 400 && status < 500) {
-        logger.warn(msg, { source: 'axios', context })
-      } else {
-        logger.error(msg, { source: 'axios', context, stack: error?.stack })
-      }
-      return Promise.reject(error)
-    },
-  )
+  // Failed API calls are logged by the interceptor on the shared axios instance (api/client.ts).
 }

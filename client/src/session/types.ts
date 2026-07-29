@@ -4,8 +4,8 @@ import type { PipelineStep } from '../components/AgentPipeline'
 // Shared session shapes — a superset that tolerates the few bug-only fields as optional.
 export interface SessionSummary {
   id: number
-  workItemId: number
-  workItemTitle: string
+  workItemId: number | null
+  workItemTitle: string | null
   status: string
   createdAt: string
   errorMessage: string | null
@@ -14,8 +14,8 @@ export interface SessionSummary {
 export interface SessionDetail {
   id: number
   projectId?: number
-  workItemId: number
-  workItemTitle: string
+  workItemId: number | null
+  workItemTitle: string | null
   status: string
   currentActivity: string | null
   analysisJson: string | null
@@ -24,10 +24,19 @@ export interface SessionDetail {
   createdAt?: string
   updatedAt?: string
   drafts: AnyDraft[]
+  // author-tests context/refine (optional, tolerated)
+  additionalContext?: string | null
+  testerContext?: string | null
+  referenceTestPlanId?: number | null
+  referenceTestSuiteId?: number | null
+  planNavigationHint?: string | null
   // bug-only (optional, tolerated)
   actualBehavior?: string | null
   codeContext?: string | null
   codeVerificationJson?: string | null
+  // qa-loop only (optional, tolerated)
+  module?: string | null
+  inventoryJson?: string | null
 }
 
 export interface AnyDraft {
@@ -70,7 +79,7 @@ export interface StartFormProps {
 }
 
 export interface SessionModuleConfig {
-  key: 'author-tests' | 'find-bugs'
+  key: 'author-tests' | 'find-bugs' | 'qa-loop'
   apiBase: string
   route: string
   labels: { title: string; subtitle: string; newCta: string }
@@ -80,11 +89,15 @@ export interface SessionModuleConfig {
   pipelineSteps: PipelineStep[]
   activeStepIndex: (status: string, activity: string | null) => number
   analyticsColumns: AnalyticsColumn[]
+  /** Optional custom identity renderer; when absent, sessionIdentity falls back to "#id — title". */
+  renderIdentity?: (s: SessionSummary | SessionDetail) => string
 
   // data access
   listSessions: (take: number, skip: number) => Promise<{ total: number; items: SessionSummary[] }>
   getDetail: (id: number) => Promise<SessionDetail>
   streamUrl: (id: number) => string
+  /** Optional: permanently delete a session and all its drafts. */
+  deleteSession?: (id: number) => Promise<void>
 
   // module-specific UI
   StartForm: ComponentType<StartFormProps>

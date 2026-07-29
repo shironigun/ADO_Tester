@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
   Alert, Autocomplete, Box, Button, Card, CardContent, Chip, CircularProgress, Dialog,
   DialogContent, DialogTitle, FormControl, IconButton, InputLabel, MenuItem,
@@ -9,7 +10,6 @@ import OpenInFullIcon from '@mui/icons-material/OpenInFull'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import CloseIcon from '@mui/icons-material/Close'
 import AssessmentIcon from '@mui/icons-material/AssessmentOutlined'
-import axios from 'axios'
 import PageHeader from '../components/PageHeader'
 import Section from '../components/Section'
 import StatusChip from '../components/StatusChip'
@@ -18,42 +18,28 @@ import { alpha } from '@mui/material/styles'
 import { Stagger, StaggerItem, PulsingAgentBadge } from '../motion/primitives'
 import AgentConsole from '../components/AgentConsole'
 import { type ConsoleEvent } from '../hooks/useEventStream'
+import { PROJECT_ID } from '../config/env'
+import { axiosMessage } from '../common/errors'
+import { getConfig, getAdoAreaPaths } from '../api/settings'
+import {
+  listReports, generateReport, reportHtmlUrl, reportDownloadUrl, reportStreamUrl,
+  type Report, type Theme,
+} from '../api/reports'
 
 function parseEventLog(json: string | null | undefined): ConsoleEvent[] {
   if (!json) return []
   try { const v = JSON.parse(json); return Array.isArray(v) ? v : [] } catch { return [] }
 }
 
-// Theme → accent palette key for the report card stripe.
+// Theme → accent palette key for the report card stripe. (Theme + Report are imported from api/reports.)
 const THEME_ACCENT: Record<Theme, 'info' | 'secondary' | 'primary'> = {
   Executive: 'info', Standup: 'secondary', Branded: 'primary',
 }
 
-const PROJECT_ID = 1
-
-type Theme = 'Executive' | 'Standup' | 'Branded'
-
 const THEME_BLURB: Record<Theme, string> = {
   Executive: 'Light, minimal, serif headlines. Stakeholder reviews.',
   Standup:   'Dark slate, neon accents, dense. Team meetings + projectors.',
-  Branded:   'ConstellationDealer corporate palette + logo lockup.',
-}
-
-interface Report {
-  id: number
-  projectId: number
-  fromUtc: string
-  toUtc: string
-  boards: string
-  ticketCount: number
-  status: 'Generating' | 'Done' | 'Failed'
-  htmlPath: string | null
-  errorMessage: string | null
-  createdAt: string
-  title: string
-  trigger: string
-  theme: Theme
-  eventLogJson?: string | null
+  Branded:   'Corporate palette + logo lockup.',
 }
 
 function isoLocalDate(d: Date): string {
@@ -75,22 +61,24 @@ export default function ReportsPage() {
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState('')
 
-  const [reports, setReports] = useState<Report[]>([])
   const [viewing, setViewing] = useState<Report | null>(null)
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Reports list, kept live via React Query (F2). Polls every 2.5s only while a report is still
+  // generating, with a 25-min cap (600 polls) so a stuck "Generating" can't poll forever.
   const pollCountRef = useRef(0)
-  const MAX_POLLS = 600 // 2.5s * 600 = 25 min cap
-
-  const loadReports = useCallback(async () => {
-    const { data } = await axios.get<Report[]>(`/api/reports/${PROJECT_ID}`)
-    setReports(data)
-    return data
-  }, [])
-
-  useEffect(() => {
-    loadReports().catch(() => {})
-    return () => { if (pollRef.current) clearInterval(pollRef.current) }
-  }, [loadReports])
+  const MAX_POLLS = 600
+  const reportsQuery = useQuery({
+    queryKey: ['reports', PROJECT_ID],
+    queryFn: () => listReports(PROJECT_ID),
+    refetchInterval: (q) => {
+      const generating = (q.state.data ?? []).some(r => r.status === 'Generating')
+      if (!generating) { pollCountRef.current = 0; return false }
+      pollCountRef.current += 1
+      return pollCountRef.current > MAX_POLLS ? false : 2500
+    },
+  })
+  const reports = reportsQuery.data ?? []
+  const loadReports = () => { void reportsQuery.refetch() }
 
   // Pull the saved default boards (from Settings) + the discoverable area paths.
   useEffect(() => {
@@ -99,14 +87,14 @@ export default function ReportsPage() {
       setBoardsLoading(true)
       try {
         // Saved defaults first — semicolon/comma separated.
-        const cfg = await axios.get<Record<string, string | boolean>>('/api/settings/config')
+        const cfg = await getConfig()
         if (!cancelled) {
-          const saved = String(cfg.data['reports.default_boards'] ?? '')
+          const saved = String(cfg['reports.default_boards'] ?? '')
           setBoards(saved.split(/[;,]/).map(s => s.trim()).filter(Boolean))
         }
         // Then discoverable area paths (drives the dropdown options).
-        const r = await axios.get<{ areaPaths: string[] }>('/api/settings/ado/area-paths')
-        if (!cancelled) setBoardOptions(r.data.areaPaths ?? [])
+        const areaPaths = await getAdoAreaPaths()
+        if (!cancelled) setBoardOptions(areaPaths)
       } catch { /* silent — page still works with free-text fallback */ }
       finally { if (!cancelled) setBoardsLoading(false) }
     }
@@ -114,51 +102,22 @@ export default function ReportsPage() {
     return () => { cancelled = true }
   }, [])
 
-  // Poll while any report is generating
-  useEffect(() => {
-    const hasGenerating = reports.some(r => r.status === 'Generating')
-    if (hasGenerating && !pollRef.current) {
-      pollCountRef.current = 0
-      pollRef.current = setInterval(() => {
-        pollCountRef.current += 1
-        if (pollCountRef.current > MAX_POLLS) {
-          if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
-          return
-        }
-        loadReports().catch(() => {})
-      }, 2500)
-    } else if (!hasGenerating && pollRef.current) {
-      clearInterval(pollRef.current); pollRef.current = null
-    }
-  }, [reports, loadReports])
-
   async function generate() {
     setError(''); setGenerating(true)
     try {
       const from = new Date(fromDate + 'T00:00:00').toISOString()
       const to = new Date(toDate + 'T23:59:59').toISOString()
-      await axios.post(`/api/reports/${PROJECT_ID}/generate`,
-        { fromUtc: from, toUtc: to, boards, theme })
-      await loadReports()
+      await generateReport(PROJECT_ID, { fromUtc: from, toUtc: to, boards, theme })
+      await reportsQuery.refetch()
     } catch (e: unknown) {
-      // Safely extract error message — server may return ProblemDetails JSON or HTML.
-      let msg: string
-      if (axios.isAxiosError(e)) {
-        const d = e.response?.data as unknown
-        if (typeof d === 'string') msg = d.length > 500 ? `Request failed (${e.response?.status})` : d
-        else if (d && typeof d === 'object' && 'title' in d) msg = String((d as { title: string }).title)
-        else msg = e.message
-      } else msg = String(e)
-      setError(msg)
+      // Server may return ProblemDetails JSON or a long HTML error page — guard the body length.
+      setError(axiosMessage(e, { maxLen: 500 }))
     } finally { setGenerating(false) }
   }
 
   return (
     <Box>
-      <PageHeader
-        title="Reports"
-        subtitle="Generate a self-contained HTML report for a date range and boards — view full-screen or download."
-      />
+      <PageHeader title="Reports" />
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={3} sx={{ alignItems: 'flex-start' }}>
 
         {/* Generate panel */}
@@ -267,7 +226,7 @@ export default function ReportsPage() {
                                 </Tooltip>
                                 <Tooltip title="Download .html">
                                   <IconButton size="small" component="a"
-                                    href={`/api/reports/download/${r.id}`}
+                                    href={reportDownloadUrl(r.id)}
                                     download>
                                     <DownloadIcon fontSize="small" />
                                   </IconButton>
@@ -281,7 +240,7 @@ export default function ReportsPage() {
                           {r.status === 'Generating' && (
                             <AgentConsole
                               title="Generation console"
-                              streamUrl={`/api/reports/${r.id}/stream`}
+                              streamUrl={reportStreamUrl(r.id)}
                               seedEvents={parseEventLog(r.eventLogJson)}
                             />
                           )}
@@ -299,18 +258,18 @@ export default function ReportsPage() {
       {/* Full-screen viewer — kept OUTSIDE any motion/AnimatePresence so the iframe
           never remounts (which would reload the report). */}
       <Dialog open={!!viewing} onClose={() => setViewing(null)} fullScreen>
-        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1 }}>
+        <DialogTitle component="div" sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1 }}>
           <Typography variant="subtitle1" sx={{ flex: 1 }}>{viewing?.title}</Typography>
           {viewing && (
             <Button variant="outlined" size="small" startIcon={<DownloadIcon />}
-              href={`/api/reports/download/${viewing.id}`} download>Download</Button>
+              href={reportDownloadUrl(viewing.id)} download>Download</Button>
           )}
           <IconButton onClick={() => setViewing(null)}><CloseIcon /></IconButton>
         </DialogTitle>
         <DialogContent sx={{ p: 0 }}>
           {viewing && (
             <iframe
-              src={`/api/reports/html/${viewing.id}`}
+              src={reportHtmlUrl(viewing.id)}
               title="report"
               style={{ width: '100%', height: 'calc(100vh - 64px)', border: 0 }}
             />

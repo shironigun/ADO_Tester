@@ -20,7 +20,7 @@ public sealed class AdoHelperTests
         var steps = new List<TestCaseStep>
         {
             new() { Action = "Click \"SAVE\" & go", Expected = "Record's saved — done" },
-            new() { Action = "Login to TargetCRM", Expected = "Dashboard loads" },
+            new() { Action = "Login to TestApp", Expected = "Dashboard loads" },
         };
         var parsed = AzureDevOpsClient.ParseStepsXml(AzureDevOpsClient.BuildStepsXml(steps));
         Assert.Equal(steps.Count, parsed.Count);

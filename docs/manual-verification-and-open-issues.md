@@ -1,6 +1,6 @@
 # Manual Verification & Open Issues
 
-Living doc for the .NET backend (`dotnet/`) migration. Tracks what has been verified working,
+Living doc for the .NET backend (`backend/`, formerly `dotnet/`). Tracks what has been verified working,
 what still needs **manual** verification, and known issues to work on. Update as items are
 confirmed or fixed.
 
@@ -47,10 +47,54 @@ Errors + warnings from both ends are persisted to the **`ErrorLogs`** table in `
 | Backend API | Up on http://localhost:5250 ; Swagger 200 |
 | Frontend (Vite) | Up on http://localhost:5173 ; 200 |
 | Database | SQLite `backend/data/qa.db` adopted (Alembic baseline), FTS5 `doc_chunks` created, scheduler started |
-| ADO read | `GET /api/diagnostics/workitem/171740` → 200 (live `dev.azure.com/ConstellationDealer`) |
+| ADO read | `GET /api/diagnostics/workitem/171740` → 200 (live `dev.azure.com/your-org`) |
 | LLM ping | `GET /api/diagnostics/llm` → 200, provider `ClaudeCli` replied `OK` |
 | Diagnostics status | ADO PAT ✔, Anthropic key ✔, Azure OpenAI ✔, Claude CLI ✔ (v2.1.104) |
 | Author-Tests **Analyst** phase | ✅ produced full analysis on 171740 (44 ACs normalized, business rules, edge/negative cases, permissions, cross-flow, open questions) |
+
+---
+
+## Frontend re-architecture F0–F5 (DONE, `dev` branch)
+
+Re-architected `client/` onto a centralized API + state layer. All steps are behaviour-preserving,
+each its own commit, `tsc + vite build` clean, and the whole stack was smoke-tested live against the
+.NET backend (see "Runtime verification" below).
+
+- **F0** — Redux Toolkit + React Query providers mounted; `config/env.ts` (`apiUrl`, central `PROJECT_ID`).
+- **F1** — every feature calls through one axios instance (`api/client.ts`) via per-feature modules
+  (`api/{knowledgebase,settings,diagnostics,reports,authorTests,findBugs,batches}.ts`); shared
+  `common/errors.ts`. All transports (axios, SSE `EventSource`, report iframe/download, Settings
+  preview, error-logger `fetch`) build URLs from `config/env` → honour `VITE_QA_API`. Legacy
+  global-axios interceptor removed. Only `client.ts`/`common/errors.ts` still import `axios`.
+- **F2** — polling moved to React Query: `useSessionDetail`/`useSessionsLive`, the Reports list, and
+  the Epic-runs list/detail now use `useQuery` + status-gated `refetchInterval` (off when terminal).
+  SSE keeps using `useEventStream`.
+- **F3** — colour mode is a Redux slice (`app/colorModeSlice`); active LLM provider is React Query
+  (server state). Redux = client UI state only; server state stays in React Query.
+- **F4** — central route table `routes/AppRoutes.tsx` + `routes/paths.ts` (path builders); nav, page
+  routes, and all `navigate()` deep-links source paths from there. (Optional page→`components/<feature>/`
+  folder reshuffle was intentionally skipped — cosmetic, high-churn.)
+- **F5** — `VITE_QA_API` mechanism documented in `client/.env.example`; empty in dev (Vite proxy),
+  set to an absolute origin to point a build at a remote backend.
+
+### Runtime verification (2026-06-21, this session, live browser smoke test)
+
+Backend healthy on :5250 (`ClaudeCli`, PAT ✔). API contracts confirmed to match the `api/*` modules
+(author-tests/find-bugs sessions, reports, knowledgebase, batches, settings/provider all 200 with the
+expected shapes). Every page rendered with live data and **zero console errors / zero failed
+requests**: Settings, Author Tests (list + detail drawer = React Query hooks), Find Bugs, Reports
+(87 area paths discovered), Dashboard (aggregates), Knowledgebase. Colour-mode toggle flips palette +
+persists to `localStorage`; full-screen session route renders outside the shell.
+
+### Full re-verification pass (2026-06-21) — findings + fixes
+
+Swept every page (Dashboard, Knowledgebase, Author Tests incl. detail drawer, Find Bugs incl. detail + 256-case test-execution report, Reports, Settings all 7 tabs incl. live LLM ping + ADO read), all 3 report themes (Executive/Standup/Branded) in Explore + Present + modal, and a console/network sweep. Three items found:
+
+1. **KB search returned nothing (real bug, FIXED).** The seeded `domain-base.md` was an orphan from the adopted Alembic DB — a `Documents` row claiming 3 chunks but with NO file on disk and **0 rows in the `doc_chunks` FTS5 index**, so every BM25 query returned `[]` (and the Author-Tests Retrieve-KB phase got nothing). DB adoption brings the Documents metadata but not the .NET FTS content. Fixed by deleting the orphan; the real `yourproduct-knowledge-base.md` (156 chunks) indexes + searches correctly ("serial number on hand" → 8 hits w/ bm25 scores). Anyone re-adopting a fresh Python qa.db must re-upload KB docs so the .NET FTS index is populated.
+2. **Report viewer DialogTitle invalid nesting (FIXED, commit on dev).** The full-screen report viewer's `DialogTitle` defaulted to `<h2>` wrapping a `subtitle1` Typography (`<h6>`) → an `<h6>`-in-`<h2>` React DOM-nesting error on every open. Added `component="div"` (every other DialogTitle already had it); zero console errors after.
+3. **Stale pre-fix reports (noted, not a bug).** Report HTML is persisted at generation time, so reports generated before the builder port (e.g. the "Done" 181-ticket report id=3) still render the OLD simplified format in the viewer. Regenerate to get the new deck; new generations + the live preview use the new builder.
+
+Otherwise clean: zero failed network requests, zero console errors across the app.
 
 ---
 
@@ -76,9 +120,11 @@ Errors + warnings from both ends are persisted to the **`ErrorLogs`** table in `
 - **Candidate fixes (if reproducible everywhere):** chunk the Tester generation (fewer test cases per
   CLI call / batch the 44 ACs) so no single generation is huge; or switch this agent to the Anthropic
   API with a raised `max_tokens`.
-- **Diagnostic note:** the app discards the CLI's stream-json `result` event's `subtype`/`is_error`,
-  so "exited 1: (no stderr)" hides *why* the CLI ended. Surfacing the result `subtype` would make this
-  class of failure self-explaining — consider as a follow-up improvement.
+- **Diagnostic note (FIXED 2026-06-22):** previously the app discarded the CLI's stream-json `result`
+  event's `subtype`/`is_error`, so "exited 1: (no stderr)" hid *why* the CLI ended. `ClaudeCliLlmClient`
+  now captures `is_error`/`subtype` and, on a non-zero exit (or `is_error`), surfaces the result-event
+  error text + `[subtype]` in the `LlmException` (stderr still wins when present). A failing LLM ping /
+  agent run will now report the real reason (e.g. usage-limit / auth / model error) instead of "(no stderr)".
 
 ### 2. Flows — partially verified (2026-06-21)
 Verified this session (read/wiring surfaces, no large LLM generation):
@@ -88,9 +134,9 @@ Verified this session (read/wiring surfaces, no large LLM generation):
 - ✅ **Find-Bugs start → cancel** on 171740 — `{sessionId}` then `{cancelled:true}` (start validates the
   work item, creates the session, kicks off the analyst; cancel works).
 - ✅ **Reports full `generate`** — generated a real report end-to-end: **181 tickets** queried from ADO
-  (board `Ideal Agile\CRM Team`), summarizer + HTML builder produced a **1.17 MB** report, persisted to
+  (board `Your Project\Your Team`), summarizer + HTML builder produced a **1.17 MB** report, persisted to
   `backend/data/reports/` and served via `GET /api/reports/html/{id}` (200). **B7 verified end-to-end.**
-  (Note: pass the *full* area path as the board, e.g. `Ideal Agile\CRM Team`, not the bare `CRM Team`.)
+  (Note: pass the *full* area path as the board, e.g. `Your Project\Your Team`, not the bare `Your Team`.)
 - ✅ **Error logger proven on real backend errors** — the failed first generate surfaced automatically as a
   `backend/Error` (`ReportService :: Report 2 generation failed`) plus an operational `backend/Warning`
   (`AzureDevOpsClient :: Report enrichment capped at 150 of 181`) in the `ErrorLogs` table.
@@ -141,7 +187,7 @@ ever reaches the bug-writer LLM. Two are fixed; one remains:
 - **Default test ticket: 171740** (User Story, "Customer Import via CSV / Excel File…").
 - **Local project id in the UI/API is `1`** (frontend `PROJECT_ID = 1`).
 - **Configured LLM:** provider `ClaudeCli`, model `claude-sonnet-4-6`, idle timeout 180s, absolute cap
-  1800s. CLI at `C:\Users\temp\.local\bin\claude.exe`.
+  1800s. CLI at `%USERPROFILE%\.local\bin\claude.exe`.
 
 ---
 

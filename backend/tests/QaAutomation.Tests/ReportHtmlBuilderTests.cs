@@ -8,10 +8,10 @@ namespace QaAutomation.Tests;
 public sealed class ReportHtmlBuilderTests
 {
     [Theory]
-    [InlineData("Ideal Agile\\CRM Team", "CRM Team")]   // 2nd segment
-    [InlineData("Ideal Agile/CRM Team", "CRM Team")]    // forward slash normalized to backslash
-    [InlineData("Ideal Agile\\CRM Team\\Sub", "CRM Team")] // still the 2nd segment
-    [InlineData("Ideal Agile", "Ideal Agile")]          // single segment → fallback to first
+    [InlineData("Area One\\Board Two", "Board Two")]   // 2nd segment
+    [InlineData("Area One/Board Two", "Board Two")]    // forward slash normalized to backslash
+    [InlineData("Area One\\Board Two\\Sub", "Board Two")] // still the 2nd segment
+    [InlineData("Area One", "Area One")]          // single segment → fallback to first
     [InlineData("", "Other")]                            // empty → Other
     [InlineData(null, "Other")]                          // null → Other
     public void BoardLabel_uses_second_area_path_segment(string? areaPath, string expected)
@@ -31,7 +31,7 @@ public sealed class ReportHtmlBuilderTests
             WorkItemType = "Bug",
             State = "Active",
             AssignedTo = "QA",
-            AreaPath = "Ideal Agile\\CRM Team",
+            AreaPath = "Area One\\Board Two",
         };
 
         var html = new ReportHtmlBuilder().Build(
@@ -45,9 +45,12 @@ public sealed class ReportHtmlBuilderTests
             teamName: "QA Team",
             boards: []);
 
-        // System.Text.Json escapes '<' to < by default, so the title's "</script>" can't break
-        // out of the <script> element — it appears as </script in the window.__REPORT__ data.
-        Assert.Contains("\\u003C/script", html);
+        // The payload is serialized with UnsafeRelaxedJsonEscaping (to match Python's
+        // json.dumps(ensure_ascii=False) — '<' stays literal), then the security-critical
+        // payload.Replace("</", "<\\/") turns every "</" into "<\/". So the title's "</script>"
+        // appears escaped as "<\/script>" in window.__REPORT__ and can't break out of the
+        // <script> element. (Python emits the same "<\/script>" form.)
+        Assert.Contains("Import bug <\\/script> x", html);     // </ escaped to <\/
         Assert.DoesNotContain("Import bug </script>", html);   // never emitted raw
     }
 }

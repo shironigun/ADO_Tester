@@ -7,7 +7,7 @@ import {
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import StatusChip from '../components/StatusChip'
 import { ThinkingShimmer } from '../components/LoadingSkeleton'
-import { axiosMessage, SessionTimeline, useSessionDetail } from './shared'
+import { axiosMessage, sessionIdentity, SessionTimeline, useSessionDetail } from './shared'
 import type { SessionModuleConfig } from './types'
 
 export default function SessionDetailFullScreen({ config }: { config: SessionModuleConfig }) {
@@ -36,7 +36,7 @@ export default function SessionDetailFullScreen({ config }: { config: SessionMod
           {session && (
             <>
               <Typography variant="subtitle1" sx={{ fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                #{session.workItemId} — {session.workItemTitle}
+                {sessionIdentity(config, session)}
               </Typography>
               <StatusChip value={session.status} />
             </>

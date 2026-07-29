@@ -15,6 +15,11 @@ namespace QaAutomation.Infrastructure.Llm;
 /// ~32KB argv limit). Token/thinking deltas are coalesced before emit (channel switch / ≥256 chars /
 /// ≥80ms). Faithful to the Python ClaudeCliLlmClient — .NET async process I/O replaces the Python
 /// thread+queue workaround.
+///
+/// The child process's WorkingDirectory is pinned to a neutral scratch folder (never the app's own
+/// repo checkout), because the CLI auto-discovers `.claude/`, `CLAUDE.md`, and project memory from its
+/// cwd — inherited cwd would otherwise leak THIS repo's own dev config/memory into every agent prompt
+/// (QAL-069). `--setting-sources ""` does NOT suppress this (verified empirically); only cwd redirect does.
 /// </summary>
 public sealed class ClaudeCliLlmClient : ILlmClient
 {
@@ -24,11 +29,14 @@ public sealed class ClaudeCliLlmClient : ILlmClient
 
     private readonly ClaudeCliOptions _options;
     private readonly ILogger<ClaudeCliLlmClient> _log;
+    private readonly string _scratchDir;
 
-    public ClaudeCliLlmClient(ClaudeCliOptions options, ILogger<ClaudeCliLlmClient> log)
+    public ClaudeCliLlmClient(ClaudeCliOptions options, StorageOptions storage, ILogger<ClaudeCliLlmClient> log)
     {
         _options = options;
         _log = log;
+        _scratchDir = Path.GetFullPath(Path.Combine(storage.DataDirectory, "llm-scratch"));
+        Directory.CreateDirectory(_scratchDir);
     }
 
     public async Task<string> CompleteAsync(
@@ -71,9 +79,20 @@ public sealed class ClaudeCliLlmClient : ILlmClient
             UseShellExecute = false,
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8,
+            // Neutral cwd so the CLI can't auto-discover this app's OWN .claude/CLAUDE.md/memory (QAL-069).
+            WorkingDirectory = _scratchDir,
         };
         foreach (var a in args)
             psi.ArgumentList.Add(a);
+
+        // The ClaudeCli provider authenticates via the local subscription login (Pro/Max), NEVER an API
+        // key. Any ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN in the environment — e.g. set in .env for the
+        // Anthropic provider, even the unfilled "your-anthropic-key-here" placeholder — would push the CLI
+        // into external-API-key mode and fail with "Invalid API key". Strip them from the child so it
+        // always uses the subscription login. (A top-level CLI honors the key; only a nested Claude Code
+        // child session ignores it, which is why this never reproduces from inside Claude Code.)
+        psi.Environment.Remove("ANTHROPIC_API_KEY");
+        psi.Environment.Remove("ANTHROPIC_AUTH_TOKEN");
 
         using var proc = new Process { StartInfo = psi };
         try
@@ -99,6 +118,8 @@ public sealed class ClaudeCliLlmClient : ILlmClient
         }, CancellationToken.None);
 
         string? finalText = null;
+        string? resultSubtype = null;
+        bool resultIsError = false;
         long chars = 0;
         var overall = Stopwatch.StartNew();
 
@@ -155,6 +176,10 @@ public sealed class ClaudeCliLlmClient : ILlmClient
                 {
                     if (root.TryGetProperty("result", out var r) && r.ValueKind == JsonValueKind.String)
                         finalText = r.GetString();
+                    // `claude -p` reports failures (usage limits, auth, model errors) in the result event
+                    // itself — capture is_error/subtype so a non-zero exit isn't an opaque "(no stderr)".
+                    resultSubtype = StrOf(root, "subtype");
+                    resultIsError = root.TryGetProperty("is_error", out var ie) && ie.ValueKind == JsonValueKind.True;
                     continue;
                 }
 
@@ -196,8 +221,18 @@ public sealed class ClaudeCliLlmClient : ILlmClient
         var stderr = (await proc.StandardError.ReadToEndAsync(ct)).Trim();
         var rc = proc.ExitCode;
 
-        if (rc != 0)
-            throw new LlmException($"Claude CLI exited {rc}: {(stderr.Length > 0 ? Truncate(stderr, 500) : "(no stderr)")}");
+        if (rc != 0 || resultIsError)
+        {
+            // Prefer stderr; otherwise surface the CLI's own result-event error text/subtype (where
+            // `claude -p` actually puts usage-limit / auth / model failures); only then fall back to "(no stderr)".
+            var subtypeTag = resultSubtype is { Length: > 0 } ? $"[{resultSubtype}] " : "";
+            var reason =
+                stderr.Length > 0 ? Truncate(stderr, 500)
+                : !string.IsNullOrEmpty(finalText) ? $"{subtypeTag}{Truncate(finalText!, 500)}"
+                : subtypeTag.Length > 0 ? subtypeTag.TrimEnd()
+                : "(no stderr)";
+            throw new LlmException($"Claude CLI exited {rc}: {reason}");
+        }
         if (string.IsNullOrEmpty(finalText))
             throw new LlmException("Claude CLI stream ended without a result." + (stderr.Length > 0 ? $" stderr: {Truncate(stderr, 300)}" : ""));
         return finalText;

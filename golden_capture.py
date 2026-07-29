@@ -34,7 +34,7 @@ class _FakeHttp:
 # Inputs deliberately exercise ' " & < > and a non-ASCII em-dash (U+2014).
 STEPS = [
     {"action": 'Click "SAVE" & confirm', "expected": "Record's saved <ok> — done"},
-    {"action": "Login to TargetCRM", "expected": "Dashboard loads"},
+    {"action": "Login to TestApp", "expected": "Dashboard loads"},
 ]
 TC = {"title": "Verify that user's data — saved & <validated>", "preconditions": "Logged in & 'ready' <prod>"}
 BUG = {

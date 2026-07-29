@@ -23,16 +23,18 @@ public sealed class AuthorTestsController : ControllerBase
     private readonly IAzureDevOpsClient _ado;
     private readonly IEventBus _bus;
     private readonly QaDbContext _db;
+    private readonly IExistingTestsIndexService _dedupIndex;
     private readonly ILogger<AuthorTestsController> _log;
 
     public AuthorTestsController(
         IAgentOrchestrator orchestrator, IAzureDevOpsClient ado, IEventBus bus, QaDbContext db,
-        ILogger<AuthorTestsController> log)
+        IExistingTestsIndexService dedupIndex, ILogger<AuthorTestsController> log)
     {
         _orchestrator = orchestrator;
         _ado = ado;
         _bus = bus;
         _db = db;
+        _dedupIndex = dedupIndex;
         _log = log;
     }
 
@@ -72,6 +74,42 @@ public sealed class AuthorTestsController : ControllerBase
         catch (Exception e) { return StatusCode(502, new { detail = e.Message }); }
     }
 
+    /// <summary>Force-rescan a reference test plan (+ optional suite scope) and rebuild the dedup index.</summary>
+    [HttpPost("plans/{planId:int}/rescan")]
+    public async Task<IActionResult> RescanPlan(int planId, [FromQuery] int? suiteId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var scan = await _dedupIndex.EnsureIndexAsync(planId, suiteId, forceRescan: true, cancellationToken);
+            return Ok(new RescanPlanResponse { ScanId = scan.Id, CaseCount = scan.CaseCount, ScannedAt = scan.ScannedAt });
+        }
+        catch (Exception e)
+        {
+            _log.LogError(e, "Rescan failed for plan {PlanId}", planId);
+            return StatusCode(500, new { detail = e.Message });
+        }
+    }
+
+    /// <summary>Return the current scan status for a reference plan (null fields = never scanned).</summary>
+    [HttpGet("plans/{planId:int}/scan-status")]
+    public async Task<IActionResult> ScanStatus(int planId, [FromQuery] int? suiteId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var scan = await _dedupIndex.GetScanStatusAsync(planId, suiteId, cancellationToken);
+            return Ok(new ScanStatusResponse
+            {
+                ScanId = scan?.Id,
+                CaseCount = scan?.CaseCount,
+                ScannedAt = scan?.ScannedAt,
+            });
+        }
+        catch (Exception e)
+        {
+            return StatusCode(500, new { detail = e.Message });
+        }
+    }
+
     [HttpPost("{projectId:int}/start")]
     public async Task<IActionResult> Start(int projectId, [FromBody] StartRequest request, CancellationToken cancellationToken)
     {
@@ -89,7 +127,10 @@ public sealed class AuthorTestsController : ControllerBase
         }
         try
         {
-            var sessionId = await _orchestrator.StartAsync(projectId, request.WorkItemId, request.AutoHandoff, cancellationToken: cancellationToken);
+            var context = new AuthorRunContext(
+                request.AdditionalContext, request.ReferenceTestPlanId, request.ReferenceTestSuiteId, request.PlanNavigationHint);
+            var sessionId = await _orchestrator.StartAsync(
+                projectId, request.WorkItemId, request.AutoHandoff, context, cancellationToken: cancellationToken);
             return Ok(new StartResponse { SessionId = sessionId });
         }
         catch (Exception e)
@@ -100,9 +141,26 @@ public sealed class AuthorTestsController : ControllerBase
     }
 
     [HttpPost("sessions/{sessionId:int}/run-tester")]
-    public async Task<IActionResult> RunTester(int sessionId, CancellationToken cancellationToken)
+    public async Task<IActionResult> RunTester(int sessionId, [FromBody] RunTesterRequest? request, CancellationToken cancellationToken)
     {
-        await _orchestrator.RunTesterAsync(sessionId, cancellationToken);
+        // Empty body → null request → pre-enhancement behavior (no extra context/reference plan).
+        var context = request is null ? null : new AuthorRunContext(
+            request.AdditionalContext, request.ReferenceTestPlanId, request.ReferenceTestSuiteId, request.PlanNavigationHint);
+        await _orchestrator.RunTesterAsync(sessionId, context, cancellationToken);
+        return StatusCode(202, new AcceptedResponse { Started = true });
+    }
+
+    [HttpPost("sessions/{sessionId:int}/rerun-analyst")]
+    public async Task<IActionResult> RerunAnalyst(int sessionId, [FromBody] RerunAnalystRequest request, CancellationToken cancellationToken)
+    {
+        await _orchestrator.RerunAnalystAsync(sessionId, request?.Feedback ?? "", cancellationToken);
+        return StatusCode(202, new AcceptedResponse { Started = true });
+    }
+
+    [HttpPost("sessions/{sessionId:int}/refine-tester")]
+    public async Task<IActionResult> RefineTester(int sessionId, [FromBody] RefineTesterRequest request, CancellationToken cancellationToken)
+    {
+        await _orchestrator.RefineTesterAsync(sessionId, request?.OverallFeedback, request?.PerTest ?? [], cancellationToken);
         return StatusCode(202, new AcceptedResponse { Started = true });
     }
 
@@ -117,9 +175,10 @@ public sealed class AuthorTestsController : ControllerBase
         skip = Math.Max(0, skip);
         try
         {
-            var total = await _db.TestSessions.CountAsync(s => s.ProjectId == projectId, cancellationToken);
+            // Standalone sessions only — epic-run children (BatchId set) live under the Epic runs tab.
+            var total = await _db.TestSessions.CountAsync(s => s.ProjectId == projectId && s.BatchId == null, cancellationToken);
             var items = await _db.TestSessions
-                .Where(s => s.ProjectId == projectId)
+                .Where(s => s.ProjectId == projectId && s.BatchId == null)
                 .OrderByDescending(s => s.CreatedAt)
                 .Skip(skip).Take(take)
                 .ToListAsync(cancellationToken);
@@ -212,5 +271,27 @@ public sealed class AuthorTestsController : ControllerBase
     {
         await _orchestrator.PushToAdoAsync(sessionId, request.TestPlanId, request.TestSuiteId, cancellationToken);
         return StatusCode(202, new AcceptedResponse { Started = true });
+    }
+
+    [HttpPost("drafts/{draftId:int}/push")]
+    public async Task<IActionResult> PushDraft(int draftId, [FromBody] PushRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var draft = await _orchestrator.PushDraftAsync(draftId, request.TestPlanId, request.TestSuiteId, cancellationToken);
+            return Ok(TestCaseDraftDto.From(draft));
+        }
+        catch (AdoApiError e)
+        {
+            return StatusCode(502, new { detail = e.Message });
+        }
+        catch (InvalidOperationException e)
+        {
+            return StatusCode(404, new { detail = e.Message });
+        }
+        catch (Exception e)
+        {
+            return StatusCode(500, new { detail = e.Message });
+        }
     }
 }

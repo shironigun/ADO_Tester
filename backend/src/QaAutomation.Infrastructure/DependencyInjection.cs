@@ -10,12 +10,21 @@ using QaAutomation.Infrastructure.AzureDevOps;
 using QaAutomation.Infrastructure.Batches;
 using QaAutomation.Infrastructure.Data;
 using QaAutomation.Infrastructure.Events;
+using QaAutomation.Infrastructure.Generation;
 using QaAutomation.Infrastructure.Knowledgebase;
+using QaAutomation.Infrastructure.Modules;
+using QaAutomation.Infrastructure.Results;
 using QaAutomation.Infrastructure.Llm;
 using QaAutomation.Infrastructure.Logging;
+using QaAutomation.Infrastructure.Notifications;
+using QaAutomation.Infrastructure.CodeContext;
+using QaAutomation.Infrastructure.ExistingTests;
 using QaAutomation.Infrastructure.Orchestrators;
+using QaAutomation.Infrastructure.QaPipelines;
+using QaAutomation.Infrastructure.QaRuns;
 using QaAutomation.Infrastructure.Reports;
 using QaAutomation.Infrastructure.Settings;
+using QaAutomation.Infrastructure.TextSearch;
 
 namespace QaAutomation.Infrastructure;
 
@@ -25,13 +34,36 @@ namespace QaAutomation.Infrastructure;
 /// </summary>
 public static class DependencyInjection
 {
+    // Backward-compatible SQLite overload (tests + any legacy caller). Defaults the provider to SQLite.
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services, IConfiguration config, string sqliteConnectionString)
+        => services.AddInfrastructure(config, DatabaseProvider.Sqlite, sqliteConnectionString);
+
+    public static IServiceCollection AddInfrastructure(
+        this IServiceCollection services, IConfiguration config,
+        DatabaseProvider provider, string connectionString)
     {
-        services.AddDbContext<QaDbContext>(o => o
-            .UseSqlite(sqliteConnectionString)
-            .AddInterceptors(SqliteBusyTimeoutInterceptor.Instance));
+        services.AddDbContext<QaDbContext>(o =>
+        {
+            if (provider == DatabaseProvider.Postgres)
+                // Npgsql migrations live in their own assembly (they cannot share the SQLite model
+                // snapshot). Generate them locally (PGM-006); SQLite keeps the default assembly.
+                o.UseNpgsql(connectionString, npgsql => npgsql
+                    .EnableRetryOnFailure()
+                    .MigrationsAssembly("QaAutomation.Migrations.Npgsql"));
+            else
+                o.UseSqlite(connectionString).AddInterceptors(SqliteBusyTimeoutInterceptor.Instance);
+        });
+
+        // Full-text search provider — MUST match the DB provider (SQLite fts5/bm25 vs Postgres tsvector/ts_rank).
+        // Stateless singletons; they operate on whichever QaDbContext the caller passes.
+        services.AddSingleton<ITextSearchProvider>(
+            provider == DatabaseProvider.Postgres ? new PostgresFtsSearch() : new SqliteFts5Search());
+
         services.AddScoped<DatabaseInitializer>();
+        services.AddScoped<LeadsScanSeeder>();
+        services.AddScoped<SchemaExplorer.SchemaScanService>();   // DB Schema Explorer repo scanner (read-only)
+        services.AddScoped<SchemaExplorer.SchemaTraceService>();  // DB Schema Explorer live entity trace (SELECT-only)
         services.AddDbLogging();
         services.AddAzureDevOps(config);
         services.AddLlm(config);
@@ -39,6 +71,7 @@ public static class DependencyInjection
         services.AddPipelineInfrastructure();
         services.AddSettingsLayer();
         services.AddReports();
+        services.AddQaLoop(config);
         return services;
     }
 
@@ -65,6 +98,7 @@ public static class DependencyInjection
             o.PersonalAccessToken = rt.Get("ado.pat") ?? o.PersonalAccessToken;
             o.Repository = rt.Get("ado.repository") ?? o.Repository;
             o.DefaultBranch = rt.Get("ado.default_branch") ?? o.DefaultBranch;
+            o.BugAreaPath = rt.Get("ado.bug_area_path") ?? o.BugAreaPath;
         });
         services.AddOptions<AnthropicOptions>().PostConfigure<RuntimeSettings>((o, rt) =>
         {
@@ -90,6 +124,14 @@ public static class DependencyInjection
             if (rt.Get("claude_cli.timeout_seconds") is { } ts && int.TryParse(ts, out var t))
                 o.TimeoutSeconds = Math.Max(10, t);
         });
+        services.AddOptions<CopilotCliOptions>().PostConfigure<RuntimeSettings>((o, rt) =>
+        {
+            o.Path = rt.Get("copilot_cli.path") ?? o.Path;
+            o.Model = rt.Get("copilot_cli.model") ?? o.Model;
+            o.Context = rt.Get("copilot_cli.context") ?? o.Context;
+            if (rt.Get("copilot_cli.timeout_seconds") is { } ts && int.TryParse(ts, out var t))
+                o.TimeoutSeconds = Math.Max(10, t);
+        });
 
         services.AddSingleton<IAppSettingsService, AppSettingsService>();
         return services;
@@ -102,6 +144,8 @@ public static class DependencyInjection
         services.AddSingleton<IEventBus, EventBus>();
         services.AddSingleton<PipelineConcurrency>();
         services.AddSingleton<CancellationRegistry>();
+        services.AddSingleton<ICodeContextService, CodeContextService>();
+        services.AddSingleton<IExistingTestsIndexService, ExistingTestsIndexService>();
         services.AddSingleton<IAgentOrchestrator, AgentOrchestrator>();
         services.AddSingleton<IBugOrchestrator, BugOrchestrator>();
         services.AddScoped<IBatchService, BatchService>();   // scoped: uses the request/background DbContext
@@ -113,6 +157,15 @@ public static class DependencyInjection
         services.AddOptions<StorageOptions>().Bind(config.GetSection(StorageOptions.SectionName));
         // Scoped: shares the request/background DbContext scope (FTS writes + BM25 reads go through it).
         services.AddScoped<IKnowledgebaseService, KnowledgebaseService>();
+        // Track A KB foundation: reads module source → LLM → per-flow KB docs + rules.md, stored+indexed
+        // through the KnowledgebaseService above (so scoped to match it).
+        services.AddScoped<IKbExtractionService, KbExtractionService>();
+        // Track A Generator: KB flow → LLM → Playwright spec, written into /automation. Scoped (reads KB).
+        services.AddScoped<IGenerationService, GenerationService>();
+        // Track A triage loop: JUnit run → triage failures → file house-style Bug on real bugs. Scoped.
+        services.AddScoped<IResultsIngestService, ResultsIngestService>();
+        // Track A module run: source + existing cases → discover flows + coverage map. Scoped (reads KB).
+        services.AddScoped<IModuleAnalysisService, ModuleAnalysisService>();
         return services;
     }
 
@@ -159,6 +212,16 @@ public static class DependencyInjection
                 if (int.TryParse(Env("CLAUDE_CLI_TIMEOUT_SECONDS"), out var t)) o.TimeoutSeconds = t;
             });
 
+        services.AddOptions<CopilotCliOptions>()
+            .Bind(config.GetSection(CopilotCliOptions.SectionName))
+            .PostConfigure(o =>
+            {
+                o.Path = Env("COPILOT_CLI_PATH") ?? o.Path;
+                o.Model = Env("COPILOT_CLI_MODEL") ?? o.Model;
+                o.Context = Env("COPILOT_CLI_CONTEXT") ?? o.Context;
+                if (int.TryParse(Env("COPILOT_CLI_TIMEOUT_SECONDS"), out var t)) o.TimeoutSeconds = t;
+            });
+
         // Anthropic provider is built per-call on a pooled HttpClient. 10-min timeout matches the SDK default.
         services.AddHttpClient(LlmClientFactory.AnthropicHttpClientName, c => c.Timeout = TimeSpan.FromMinutes(10));
 
@@ -183,6 +246,7 @@ public static class DependencyInjection
                 o.ApiVersion = Env("ADO_API_VERSION") ?? o.ApiVersion;
                 o.Repository = Env("ADO_REPOSITORY") ?? o.Repository;
                 o.DefaultBranch = Env("ADO_DEFAULT_BRANCH") ?? o.DefaultBranch;
+                o.BugAreaPath = Env("ADO_BUG_AREA_PATH") ?? o.BugAreaPath;
             });
 
         services.AddTransient<AdoAuthHandler>();
@@ -203,10 +267,75 @@ public static class DependencyInjection
         return services;
     }
 
+    /// <summary>QA Loop Track B: orchestrator, runner, run-execution, watcher, notifier, agents, options.</summary>
+    private static IServiceCollection AddQaLoop(this IServiceCollection services, IConfiguration config)
+    {
+        static string? Env(string key) => Environment.GetEnvironmentVariable(key);
+
+        // .env bridge → QaLoopOptions, then RuntimeSettings overlay (DB-over-env).
+        services.AddOptions<QaLoopOptions>()
+            .Bind(config.GetSection(QaLoopOptions.SectionName))
+            .PostConfigure(o =>
+            {
+                o.TeamsWebhookUrl = Env("TEAMS_WEBHOOK_URL") ?? o.TeamsWebhookUrl;
+                o.TeamsTemplate = Env("TEAMS_TEMPLATE") ?? o.TeamsTemplate;
+                if (Env("QALOOP_POLL_INTERVAL_MINUTES") is { } pi && int.TryParse(pi, out var piv))
+                    o.PollIntervalMinutes = Math.Max(1, piv);
+                o.ReportProvider = Env("QALOOP_REPORT_PROVIDER") ?? o.ReportProvider;
+                if (Env("QALOOP_ACTIVITY_ENABLED") is { } ae && bool.TryParse(ae, out var aev))
+                    o.ActivityEnabled = aev;
+                o.FrontendRepo = Env("QALOOP_FRONTEND_REPO") ?? o.FrontendRepo;
+                o.FrontendRoot = Env("QALOOP_FRONTEND_ROOT") ?? o.FrontendRoot;
+                o.FrontendBaseUrl = Env("QALOOP_FRONTEND_BASE_URL") ?? o.FrontendBaseUrl;
+            })
+            .PostConfigure<RuntimeSettings>((o, rt) =>
+            {
+                o.TeamsWebhookUrl = rt.Get("teams.webhook_url") ?? o.TeamsWebhookUrl;
+                o.TeamsTemplate = rt.Get("teams.template") ?? o.TeamsTemplate;
+                if (rt.Get("qaloop.poll_interval_minutes") is { } pi && int.TryParse(pi, out var piv))
+                    o.PollIntervalMinutes = Math.Max(1, piv);
+                o.ReportProvider = rt.Get("qaloop.report_provider") ?? o.ReportProvider;
+                if (rt.Get("qaloop.activity_enabled") is { } ae && bool.TryParse(ae, out var aev))
+                    o.ActivityEnabled = aev;
+                o.FrontendRepo = rt.Get("qaloop.frontend_repo") ?? o.FrontendRepo;
+                o.FrontendRoot = rt.Get("qaloop.frontend_root") ?? o.FrontendRoot;
+                o.FrontendBaseUrl = rt.Get("qaloop.frontend_base_url") ?? o.FrontendBaseUrl;
+            });
+
+        // Automation target + pre-run auth (single base URL for all DMS; bearer minted per run).
+        services.AddOptions<AutomationAuthOptions>()
+            .Bind(config.GetSection(AutomationAuthOptions.SectionName))
+            .PostConfigure(o =>
+            {
+                o.LeadApiBaseUrl = Env("LEAD_API_BASE_URL") ?? o.LeadApiBaseUrl;
+                o.WebApiBaseUrl  = Env("WEB_API_BASE_URL") ?? o.WebApiBaseUrl;
+                o.AuthDealerId   = Env("AUTH_DEALER_ID") ?? o.AuthDealerId;
+                o.AuthUsername   = Env("AUTH_USERNAME") ?? o.AuthUsername;
+                o.AuthPassword   = Env("AUTH_PASSWORD") ?? o.AuthPassword;
+            });
+        services.AddSingleton<IAutomationAuthenticator, AutomationAuthenticator>();
+
+        services.AddSingleton<IQaLoopOrchestrator, QaLoopOrchestrator>();
+        services.AddSingleton<AllureEnricher>();
+        services.AddSingleton<IPlaywrightRunner, PlaywrightRunner>();
+        services.AddScoped<RunExecutionService>();
+        services.AddSingleton<ITeamsNotifier, TeamsNotifier>();
+        // Registered as its own concrete type (not just AddHostedService<T>, which only exposes T as
+        // IHostedService) so QaPipelinesController can inject the SAME singleton instance directly —
+        // AddHostedService<T> alone leaves T unresolvable by its own type and crashes every controller action.
+        services.AddSingleton<PipelineWatcherHostedService>();
+        services.AddHostedService(sp => sp.GetRequiredService<PipelineWatcherHostedService>());
+
+        services.AddHttpClient();   // IHttpClientFactory for TeamsNotifier (idempotent if already added)
+
+        return services;
+    }
+
     /// <summary>Runs migrate/adopt → FTS bootstrap → seed. Call once at startup before <c>app.Run()</c>.</summary>
     public static void InitializeDatabase(this IServiceProvider services)
     {
         using var scope = services.CreateScope();
         scope.ServiceProvider.GetRequiredService<DatabaseInitializer>().Initialize();
+        scope.ServiceProvider.GetRequiredService<LeadsScanSeeder>().Seed();
     }
 }

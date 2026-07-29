@@ -4,42 +4,37 @@
  * roll-up. Reuses the per-story session pipeline + detail unchanged — this is just the grouping UI.
  * Config-driven, so Author Tests and Find Bugs share it.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
+  Accordion, AccordionDetails, AccordionSummary,
   Alert, AppBar, Autocomplete, Box, Button, Card, CardContent, Checkbox, Chip, CircularProgress,
-  Container, IconButton, Snackbar, Stack, TextField, ToggleButton, ToggleButtonGroup, Toolbar,
-  Tooltip, Typography,
+  Collapse, Container, IconButton, Link, Snackbar, Stack, TextField, ToggleButton, ToggleButtonGroup,
+  Toolbar, Tooltip, Typography,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import CloseIcon from '@mui/icons-material/Close'
 import StopIcon from '@mui/icons-material/Stop'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
-import axios from 'axios'
 import StatTile from '../components/StatTile'
 import StatusChip from '../components/StatusChip'
 import EmptyState from '../components/EmptyState'
+import AgentPipeline from '../components/AgentPipeline'
+import LiveActivityIndicator from '../components/LiveActivityIndicator'
 import { ThinkingShimmer } from '../components/LoadingSkeleton'
-import { axiosMessage } from './shared'
+import { axiosMessage } from '../common/errors'
+import { PROJECT_ID } from '../config/env'
+import { searchWorkItems } from '../api/authorTests'
+import {
+  expandChildren, startBatch, listBatches, getBatchDetail, cancelBatch,
+  type BatchChild, type BatchChildSummary,
+} from '../api/batches'
+import { useAdoWorkItemUrl } from '../common/adoLinks'
+import { paths } from '../routes/paths'
 import type { SessionModuleConfig, WorkItemOption } from './types'
-
-const PROJECT_ID = 1
-
-export interface BatchChild { id: number; title: string; workItemType: string; state?: string | null }
-interface ChildrenExpand { parentWorkItemId: number; parentTitle: string; children: BatchChild[]; truncated: boolean }
-export interface BatchChildSummary {
-  sessionId: number; workItemId: number; workItemTitle: string; status: string
-  currentActivity?: string | null; errorMessage?: string | null; count: number
-}
-export interface BatchSummary {
-  id: number; module: string; parentWorkItemId?: number | null; title: string; mode?: string | null
-  createdAt: string; childCount: number; doneCount: number; failedCount: number; runningCount: number; derivedStatus: string
-}
-export interface BatchDetail {
-  id: number; module: string; parentWorkItemId?: number | null; title: string; mode?: string | null
-  createdAt: string; updatedAt: string; derivedStatus: string; children: BatchChildSummary[]
-}
 
 const unitOf = (config: SessionModuleConfig) => (config.key === 'find-bugs' ? 'bug' : 'test')
 
@@ -63,8 +58,7 @@ export function EpicRunDialog({ config, onClose, onStarted, onError }: {
   useEffect(() => {
     if (wiQuery.length < 2) { setWiOptions([]); return }
     const t = setTimeout(() => {
-      axios.get<WorkItemOption[]>('/api/author-tests/search', { params: { q: wiQuery } })
-        .then(r => setWiOptions(r.data)).catch(() => setWiOptions([]))
+      searchWorkItems(wiQuery).then(setWiOptions).catch(() => setWiOptions([]))
     }, 400)
     return () => clearTimeout(t)
   }, [wiQuery])
@@ -86,8 +80,7 @@ export function EpicRunDialog({ config, onClose, onStarted, onError }: {
     // "epics" are typed User Story — so we don't gate on the work-item type.)
     setExpanding(true)
     try {
-      const { data } = await axios.get<ChildrenExpand>('/api/batches/children-expand',
-        { params: { parentWorkItemId: o.id, recursive: true } })
+      const data = await expandChildren(o.id, true)
       if (data.children.length > 0) {
         if (parentId == null) setParentId(o.id)
         addItems(data.children)
@@ -111,10 +104,10 @@ export function EpicRunDialog({ config, onClose, onStarted, onError }: {
     if (selectedIds.length === 0) return
     setStarting(true)
     try {
-      const body: Record<string, unknown> = { parentWorkItemId: parentId, workItemIds: selectedIds }
-      if (config.key === 'find-bugs') body.mode = mode
-      const { data } = await axios.post<{ batchId: number; sessionIds?: number[]; skipped?: number[] }>(
-        `/api/batches/${config.key}/${PROJECT_ID}/start`, body)
+      const data = await startBatch(config.key, PROJECT_ID, {
+        parentWorkItemId: parentId, workItemIds: selectedIds,
+        ...(config.key === 'find-bugs' ? { mode } : {}),
+      })
       if (!data.sessionIds || data.sessionIds.length === 0) {
         // Every child failed to start (e.g. ADO unreachable) — don't navigate to an empty roll-up.
         onError(new Error('No stories could be started — Azure DevOps may be unreachable. Nothing was queued.'),
@@ -204,23 +197,18 @@ const borderColor = (s: string): string =>
 
 export function EpicRunsTab({ config }: { config: SessionModuleConfig }) {
   const navigate = useNavigate()
-  const [batches, setBatches] = useState<BatchSummary[]>([])
-  const [loaded, setLoaded] = useState(false)
 
-  const load = useCallback(async () => {
-    try {
-      const { data } = await axios.get<{ total: number; items: BatchSummary[] }>(`/api/batches/${PROJECT_ID}`, { params: { take: 100 } })
-      setBatches((data.items ?? []).filter(b => b.module === config.key))
-    } catch { /* ignore */ } finally { setLoaded(true) }
-  }, [config.key])
-
-  useEffect(() => { load() }, [load])
-  const anyRunning = batches.some(b => RUNNING(b.derivedStatus))
-  useEffect(() => {
-    if (!anyRunning) return
-    const t = setInterval(load, 3000)
-    return () => clearInterval(t)
-  }, [anyRunning, load])
+  // Batches for this module, kept live via React Query (F2). Polls every 3s only while one is
+  // Running. The endpoint returns all modules' batches; we filter to this module client-side.
+  const batchesQuery = useQuery({
+    queryKey: ['batches', config.key],
+    queryFn: () => listBatches(PROJECT_ID, 100),
+    refetchInterval: (q) =>
+      (q.state.data?.items ?? []).some(b => b.module === config.key && RUNNING(b.derivedStatus))
+        ? 3000 : false,
+  })
+  const batches = (batchesQuery.data?.items ?? []).filter(b => b.module === config.key)
+  const loaded = !batchesQuery.isLoading
 
   if (loaded && batches.length === 0) {
     return <EmptyState icon={<AccountTreeIcon />} title="No epic runs yet"
@@ -229,7 +217,7 @@ export function EpicRunsTab({ config }: { config: SessionModuleConfig }) {
   return (
     <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(3, 1fr)' } }}>
       {batches.map(b => (
-        <Card key={b.id} variant="outlined" onClick={() => navigate(`${config.route}/epic/${b.id}`)}
+        <Card key={b.id} variant="outlined" onClick={() => navigate(paths.epic(config.route, b.id))}
           sx={{ cursor: 'pointer', borderLeft: '4px solid', borderLeftColor: borderColor(b.derivedStatus),
                 transition: 'transform .15s, box-shadow .15s', '&:hover': { transform: 'translateY(-2px)', boxShadow: 3 } }}>
           <CardContent sx={{ p: 1.75, '&:last-child': { pb: 1.75 } }}>
@@ -248,30 +236,92 @@ export function EpicRunsTab({ config }: { config: SessionModuleConfig }) {
   )
 }
 
+// ── One story row, expandable to its child tasks (lazy-loaded from ADO) ───────
+function StoryAccordion({ child, config, unit, highlight }: {
+  child: BatchChildSummary; config: SessionModuleConfig; unit: string; highlight?: boolean
+}) {
+  const navigate = useNavigate()
+  const wiUrl = useAdoWorkItemUrl()
+  const [expanded, setExpanded] = useState(false)
+  const [tasks, setTasks] = useState<BatchChild[] | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState('')
+
+  const onToggle = async (_: unknown, isExpanded: boolean) => {
+    setExpanded(isExpanded)
+    if (isExpanded && tasks === null && !loading) {
+      setLoading(true); setErr('')
+      try { const d = await expandChildren(child.workItemId, false); setTasks(d.children) }
+      catch (e) { setErr(axiosMessage(e)); setTasks([]) }
+      finally { setLoading(false) }
+    }
+  }
+
+  return (
+    <Accordion expanded={expanded} onChange={onToggle} disableGutters elevation={0}
+      sx={{ border: 1, borderColor: highlight ? 'warning.main' : 'divider', borderLeftWidth: highlight ? 4 : 1,
+            borderRadius: 1, '&:before': { display: 'none' } }}>
+      <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ '& .MuiAccordionSummary-content': { my: 1, minWidth: 0 } }}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 0.5, flex: 1, minWidth: 0, pr: 1 }}>
+          <StatusChip value={child.status} />
+          {highlight && <Chip size="small" color="warning" variant="outlined" label="Processing" sx={{ height: 18, flexShrink: 0 }} />}
+          <Typography variant="body2" sx={{ fontWeight: 500, flex: 1, minWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            title={child.workItemTitle}>#{child.workItemId} — {child.workItemTitle}</Typography>
+          {child.count > 0 && <Chip size="small" variant="outlined" label={`${child.count} ${unit}${child.count === 1 ? '' : 's'}`} />}
+          <Tooltip title="Open this story">
+            <Button size="small" variant="outlined" endIcon={<OpenInNewIcon />} component="div" role="button"
+              onClick={e => { e.stopPropagation(); navigate(paths.session(config.route, child.sessionId)) }}>Open</Button>
+          </Tooltip>
+        </Stack>
+      </AccordionSummary>
+      <AccordionDetails sx={{ pt: 0 }}>
+        {child.errorMessage && <Typography variant="caption" color="error.main" sx={{ display: 'block', mb: 1 }}>{child.errorMessage}</Typography>}
+        {loading && <Stack direction="row" spacing={1} sx={{ alignItems: 'center', py: 1 }}><CircularProgress size={16} /><Typography variant="caption" color="text.secondary">Loading child tasks…</Typography></Stack>}
+        {err && <Typography variant="caption" color="error.main">{err}</Typography>}
+        {tasks !== null && !loading && (
+          tasks.length === 0
+            ? <Typography variant="caption" color="text.secondary">No child tasks under this story.</Typography>
+            : (
+              <Stack spacing={0.5}>
+                <Typography variant="overline" color="text.secondary">Child tasks ({tasks.length})</Typography>
+                {tasks.map(t => (
+                  <Stack key={t.id} direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                    <Chip size="small" variant="outlined" label={t.workItemType || '?'} sx={{ height: 18, flexShrink: 0 }} />
+                    <Link href={wiUrl(t.id)} target="_blank" rel="noreferrer" variant="body2"
+                      sx={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      title={t.title}>#{t.id} — {t.title}</Link>
+                    {t.state && <Chip size="small" label={t.state} sx={{ height: 18, flexShrink: 0 }} />}
+                  </Stack>
+                ))}
+              </Stack>
+            )
+        )}
+      </AccordionDetails>
+    </Accordion>
+  )
+}
+
 // ── Roll-up full-screen view ─────────────────────────────────────────────────
 export default function EpicRunDetailFullScreen({ config }: { config: SessionModuleConfig }) {
   const { batchId } = useParams()
   const navigate = useNavigate()
   const bid = batchId ? Number(batchId) : null
-  const [detail, setDetail] = useState<BatchDetail | null>(null)
   const [actionError, setActionError] = useState('')
+  const [listOpen, setListOpen] = useState(false)
   const unit = unitOf(config)
 
-  const load = useCallback(async () => {
-    if (bid == null) return
-    try { const { data } = await axios.get<BatchDetail>(`/api/batches/detail/${bid}`); setDetail(data) } catch { /* ignore */ }
-  }, [bid])
-
-  useEffect(() => { load() }, [load])
-  const running = detail?.derivedStatus === 'Running'
-  useEffect(() => {
-    if (!running) return
-    const t = setInterval(load, 2500)
-    return () => clearInterval(t)
-  }, [running, load])
+  // Roll-up detail, kept live via React Query (F2). Polls every 2.5s only while Running.
+  const detailQuery = useQuery({
+    queryKey: ['batch-detail', bid],
+    queryFn: () => getBatchDetail(bid as number),
+    enabled: bid != null,
+    refetchInterval: (q) => (q.state.data?.derivedStatus === 'Running' ? 2500 : false),
+  })
+  const detail = detailQuery.data ?? null
 
   const cancel = async () => {
-    try { await axios.post(`/api/batches/${bid}/cancel`); load() }
+    if (bid == null) return
+    try { await cancelBatch(bid); void detailQuery.refetch() }
     catch (e) { setActionError(`Cancel failed: ${axiosMessage(e)}`) }
   }
 
@@ -286,6 +336,15 @@ export default function EpicRunDetailFullScreen({ config }: { config: SessionMod
   const awaiting = children.filter(c => c.status === 'AwaitingActual' || c.status === 'AwaitingTester').length
   const runningCount = children.filter(c => IN_FLIGHT(c.status)).length
   const produced = children.reduce((acc, c) => acc + (c.count || 0), 0)
+  const cancelled = children.filter(c => c.status === 'Cancelled').length
+  const remaining = total - done - failed - cancelled        // stories not yet finished
+
+  // The story currently being processed = first child in an actively-working status (children are
+  // CreatedAt-ordered). Parked Awaiting* / terminal statuses are excluded by inFlightStatuses.
+  const inFlightChildren = children.filter(c => config.inFlightStatuses.includes(c.status))
+  const current = inFlightChildren[0] ?? null
+  const othersRunning = Math.max(0, inFlightChildren.length - 1)
+  const allFinished = total > 0 && remaining === 0
 
   const tiles = [
     { label: 'Stories', value: total, color: 'primary.main' },
@@ -319,26 +378,70 @@ export default function EpicRunDetailFullScreen({ config }: { config: SessionMod
             <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(104px, 1fr))', gap: 1.5, mb: 3 }}>
               {tiles.map(t => <StatTile key={t.label} icon={<AccountTreeIcon />} label={t.label} value={t.value} color={t.color} />)}
             </Box>
-            <Typography variant="overline" color="text.secondary">Stories ({total})</Typography>
-            <Stack spacing={1} sx={{ mt: 0.5 }}>
-              {children.map(c => (
-                <Card key={c.sessionId} variant="outlined">
-                  <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
-                    <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 0.5 }}>
-                      <StatusChip value={c.status} />
-                      <Typography variant="body2" sx={{ fontWeight: 500, flex: 1, minWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                        title={c.workItemTitle}>#{c.workItemId} — {c.workItemTitle}</Typography>
-                      {c.count > 0 && <Chip size="small" variant="outlined" label={`${c.count} ${unit}${c.count === 1 ? '' : 's'}`} />}
-                      <Tooltip title="Open this story">
-                        <Button size="small" variant="outlined" endIcon={<OpenInNewIcon />}
-                          onClick={() => navigate(`${config.route}/${c.sessionId}`)}>Open</Button>
-                      </Tooltip>
-                    </Stack>
-                    {c.errorMessage && <Typography variant="caption" color="error.main" sx={{ display: 'block', mt: 0.5 }}>{c.errorMessage}</Typography>}
-                  </CardContent>
-                </Card>
-              ))}
-            </Stack>
+
+            {/* Global pipeline stepper — tracks the story currently being processed. */}
+            <Card variant="outlined" sx={{ mb: 2 }}>
+              <CardContent sx={{ py: 2 }}>
+                <AgentPipeline
+                  steps={config.pipelineSteps}
+                  activeIndex={current
+                    ? config.activeStepIndex(current.status, current.currentActivity ?? null)
+                    : (allFinished ? config.pipelineSteps.length : 0)}
+                  inFlight={!!current}
+                  failed={false}
+                  currentActivity={current?.currentActivity ?? null}
+                />
+              </CardContent>
+            </Card>
+
+            {/* Spotlight — the story being processed now, plus done / remaining. */}
+            <Typography variant="overline" color="text.secondary">
+              {current ? 'Now processing' : allFinished ? 'Run complete' : 'Idle'} · {done} of {total} done · {remaining} remaining
+            </Typography>
+            {current ? (
+              <Card variant="outlined" sx={{ mt: 0.5, mb: 3, borderLeft: '4px solid', borderLeftColor: 'warning.main' }}>
+                <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+                  <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 0.75 }}>
+                    <StatusChip value={current.status} />
+                    <Typography variant="body2" sx={{ fontWeight: 600, flex: 1, minWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      title={current.workItemTitle}>#{current.workItemId} — {current.workItemTitle}</Typography>
+                    {othersRunning > 0 && <Chip size="small" variant="outlined" label={`+${othersRunning} more running`} sx={{ flexShrink: 0 }} />}
+                    <Tooltip title="Open this story">
+                      <Button size="small" variant="outlined" endIcon={<OpenInNewIcon />}
+                        onClick={() => navigate(paths.session(config.route, current.sessionId))}>Open</Button>
+                    </Tooltip>
+                  </Stack>
+                  {current.currentActivity && <Box sx={{ mt: 1 }}><LiveActivityIndicator active text={current.currentActivity} /></Box>}
+                </CardContent>
+              </Card>
+            ) : (
+              <Card variant="outlined" sx={{ mt: 0.5, mb: 3 }}>
+                <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+                  <Typography variant="body2" color="text.secondary">
+                    {allFinished
+                      ? `All ${total} stor${total === 1 ? 'y' : 'ies'} processed — ${done} done${failed ? `, ${failed} failed` : ''}${cancelled ? `, ${cancelled} cancelled` : ''}.`
+                      : awaiting > 0
+                        ? `${awaiting} stor${awaiting === 1 ? 'y' : 'ies'} awaiting manual input · ${remaining} remaining.`
+                        : 'No story is being processed right now.'}
+                  </Typography>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Collapsible full list — every story, expandable to its child tasks. */}
+            <Button size="small" color="inherit" sx={{ px: 0.5, color: 'text.secondary', fontWeight: 600 }}
+              endIcon={<ExpandMoreIcon sx={{ transition: 'transform .2s', transform: listOpen ? 'rotate(180deg)' : 'none' }} />}
+              onClick={() => setListOpen(o => !o)}>
+              All stories ({total})
+            </Button>
+            <Collapse in={listOpen}>
+              <Stack spacing={1} sx={{ mt: 1 }}>
+                {children.map(c => (
+                  <StoryAccordion key={c.sessionId} child={c} config={config} unit={unit}
+                    highlight={current?.sessionId === c.sessionId} />
+                ))}
+              </Stack>
+            </Collapse>
           </>
         )}
       </Container>

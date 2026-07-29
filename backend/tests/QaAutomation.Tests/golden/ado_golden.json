@@ -1,6 +1,6 @@
 {
-  "areaPath": "Ideal Agile\\CRM Team",
-  "qaOwner": "mahmood.ahmad@constellationdealer.com",
+  "areaPath": "Test Area\\Test Board",
+  "qaOwner": "Mahmood Ahmad",
   "inputs": {
     "steps": [
       {
@@ -8,7 +8,7 @@
         "expected": "Record's saved <ok> — done"
       },
       {
-        "action": "Login to TargetCRM",
+        "action": "Login to TestApp",
         "expected": "Dashboard loads"
       }
     ],
@@ -42,7 +42,7 @@
       "toId": 200
     }
   },
-  "stepsXml": "<steps id=\"0\" last=\"3\"><step id=\"2\" type=\"ActionStep\"><parameterizedString isformatted=\"true\">&lt;DIV&gt;Click &quot;SAVE&quot; &amp; confirm&lt;/DIV&gt;</parameterizedString><parameterizedString isformatted=\"true\">&lt;DIV&gt;Record&#x27;s saved &lt;ok&gt; — done&lt;/DIV&gt;</parameterizedString><description/></step><step id=\"3\" type=\"ActionStep\"><parameterizedString isformatted=\"true\">&lt;DIV&gt;Login to TargetCRM&lt;/DIV&gt;</parameterizedString><parameterizedString isformatted=\"true\">&lt;DIV&gt;Dashboard loads&lt;/DIV&gt;</parameterizedString><description/></step></steps>",
+  "stepsXml": "<steps id=\"0\" last=\"3\"><step id=\"2\" type=\"ActionStep\"><parameterizedString isformatted=\"true\">&lt;DIV&gt;Click &quot;SAVE&quot; &amp; confirm&lt;/DIV&gt;</parameterizedString><parameterizedString isformatted=\"true\">&lt;DIV&gt;Record&#x27;s saved &lt;ok&gt; — done&lt;/DIV&gt;</parameterizedString><description/></step><step id=\"3\" type=\"ActionStep\"><parameterizedString isformatted=\"true\">&lt;DIV&gt;Login to TestApp&lt;/DIV&gt;</parameterizedString><parameterizedString isformatted=\"true\">&lt;DIV&gt;Dashboard loads&lt;/DIV&gt;</parameterizedString><description/></step></steps>",
   "tcPatch": [
     {
       "op": "add",
@@ -52,7 +52,7 @@
     {
       "op": "add",
       "path": "/fields/Microsoft.VSTS.TCM.Steps",
-      "value": "<steps id=\"0\" last=\"3\"><step id=\"2\" type=\"ActionStep\"><parameterizedString isformatted=\"true\">&lt;DIV&gt;Click &quot;SAVE&quot; &amp; confirm&lt;/DIV&gt;</parameterizedString><parameterizedString isformatted=\"true\">&lt;DIV&gt;Record&#x27;s saved &lt;ok&gt; — done&lt;/DIV&gt;</parameterizedString><description/></step><step id=\"3\" type=\"ActionStep\"><parameterizedString isformatted=\"true\">&lt;DIV&gt;Login to TargetCRM&lt;/DIV&gt;</parameterizedString><parameterizedString isformatted=\"true\">&lt;DIV&gt;Dashboard loads&lt;/DIV&gt;</parameterizedString><description/></step></steps>"
+      "value": "<steps id=\"0\" last=\"3\"><step id=\"2\" type=\"ActionStep\"><parameterizedString isformatted=\"true\">&lt;DIV&gt;Click &quot;SAVE&quot; &amp; confirm&lt;/DIV&gt;</parameterizedString><parameterizedString isformatted=\"true\">&lt;DIV&gt;Record&#x27;s saved &lt;ok&gt; — done&lt;/DIV&gt;</parameterizedString><description/></step><step id=\"3\" type=\"ActionStep\"><parameterizedString isformatted=\"true\">&lt;DIV&gt;Login to TestApp&lt;/DIV&gt;</parameterizedString><parameterizedString isformatted=\"true\">&lt;DIV&gt;Dashboard loads&lt;/DIV&gt;</parameterizedString><description/></step></steps>"
     },
     {
       "op": "add",
@@ -79,7 +79,7 @@
     {
       "op": "add",
       "path": "/fields/System.AreaPath",
-      "value": "Ideal Agile\\CRM Team"
+      "value": "Test Area\\Test Board"
     },
     {
       "op": "add",
@@ -94,7 +94,7 @@
     {
       "op": "add",
       "path": "/fields/Custom.QA",
-      "value": "mahmood.ahmad@constellationdealer.com"
+      "value": "Mahmood Ahmad"
     },
     {
       "op": "add",
@@ -126,7 +126,7 @@
       "path": "/relations/-",
       "value": {
         "rel": "Microsoft.VSTS.Common.TestedBy-Reverse",
-        "url": "https://dev.azure.com/ConstellationDealer/Ideal%20Agile/_apis/wit/workItems/200"
+        "url": "https://dev.azure.com/TestOrg/Test%20Project/_apis/wit/workItems/200"
       }
     }
   ],
@@ -136,7 +136,7 @@
       "path": "/relations/-",
       "value": {
         "rel": "System.LinkTypes.Related",
-        "url": "https://dev.azure.com/ConstellationDealer/Ideal%20Agile/_apis/wit/workItems/200"
+        "url": "https://dev.azure.com/TestOrg/Test%20Project/_apis/wit/workItems/200"
       }
     }
   ]

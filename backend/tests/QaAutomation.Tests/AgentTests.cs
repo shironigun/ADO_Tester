@@ -82,7 +82,8 @@ public sealed class AgentTests
         Assert.Contains("You are the Analyst agent for a QA automation system.", AgentPrompts.AnalystSystem);
         Assert.Contains("\"openQuestions\"", AgentPrompts.AnalystSystem);
         Assert.Contains("[Module] - [Feature] - Verify that", AgentPrompts.TesterSystem);
-        Assert.Contains("Step 1 is ALWAYS \"Login to TargetCRM\"", AgentPrompts.TesterSystem);
+        // Product name is injected from PROMPT_PRODUCT at load (unset in tests → generic default).
+        Assert.Contains("Step 1 is ALWAYS \"Login to the application\"", AgentPrompts.TesterSystem);
         Assert.Contains("OBSERVATION:", AgentPrompts.BugWriterSystem);
         Assert.Contains("STATIC code review", AgentPrompts.CodeVerifierSystem);
         Assert.Contains("{ACTUAL_RULE}", AgentPrompts.CodeVerifierStepSystem);   // placeholder intact pre-substitution

@@ -7,7 +7,6 @@ import AssessmentIcon from '@mui/icons-material/AssessmentOutlined'
 import MenuBookIcon from '@mui/icons-material/MenuBookOutlined'
 import HistoryIcon from '@mui/icons-material/HistoryOutlined'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
-import axios from 'axios'
 import PageHeader from '../components/PageHeader'
 import Section from '../components/Section'
 import StatTile from '../components/StatTile'
@@ -15,31 +14,31 @@ import StatusChip from '../components/StatusChip'
 import MiniDonut, { type DonutSegment } from '../components/MiniDonut'
 import EmptyState from '../components/EmptyState'
 import { Stagger, StaggerItem } from '../motion/primitives'
-
-const PROJECT_ID = 1
-
-interface SessionItem { id: number; workItemId: number; workItemTitle: string; status: string; createdAt: string }
-interface ReportItem { id: number; title: string; status: string; createdAt: string }
-interface DocItem { id: number }
+import { PROJECT_ID } from '../config/env'
+import { listSessions as listAuthorSessions, type SessionSummary } from '../api/authorTests'
+import { listSessions as listBugSessions } from '../api/findBugs'
+import { listReports, type Report } from '../api/reports'
+import { getConfig } from '../api/settings'
+import { listDocs, type Doc } from '../api/knowledgebase'
 
 interface ActivityRow { key: string; when: number; kind: string; status: string; text: string; to: string }
 
 export default function ProjectsPage() {
   const theme = useTheme()
-  const [authorSessions, setAuthorSessions] = useState<SessionItem[]>([])
-  const [bugSessions, setBugSessions] = useState<SessionItem[]>([])
-  const [reports, setReports] = useState<ReportItem[]>([])
-  const [docs, setDocs] = useState<DocItem[]>([])
+  const [authorSessions, setAuthorSessions] = useState<SessionSummary[]>([])
+  const [bugSessions, setBugSessions] = useState<SessionSummary[]>([])
+  const [reports, setReports] = useState<Report[]>([])
+  const [docs, setDocs] = useState<Doc[]>([])
+  const [ado, setAdo] = useState<{ org: string; project: string }>({ org: '', project: '' })
 
   useEffect(() => {
-    axios.get<{ items: SessionItem[] }>(`/api/author-tests/sessions/${PROJECT_ID}`, { params: { take: 50 } })
-      .then(r => setAuthorSessions(r.data.items ?? [])).catch(() => {})
-    axios.get<{ items: SessionItem[] }>(`/api/find-bugs/sessions/${PROJECT_ID}`, { params: { take: 50 } })
-      .then(r => setBugSessions(r.data.items ?? [])).catch(() => {})
-    axios.get<ReportItem[]>(`/api/reports/${PROJECT_ID}`)
-      .then(r => setReports(r.data ?? [])).catch(() => {})
-    axios.get<DocItem[]>(`/api/knowledgebase/${PROJECT_ID}`)
-      .then(r => setDocs(r.data ?? [])).catch(() => {})
+    listAuthorSessions(PROJECT_ID, 50).then(setAuthorSessions).catch(() => {})
+    listBugSessions(PROJECT_ID, 50).then(setBugSessions).catch(() => {})
+    listReports(PROJECT_ID).then(setReports).catch(() => {})
+    listDocs(PROJECT_ID).then(setDocs).catch(() => {})
+    getConfig()
+      .then(c => setAdo({ org: String(c?.['ado.organization'] ?? ''), project: String(c?.['ado.project'] ?? '') }))
+      .catch(() => {})
   }, [])
 
   // Test-session status breakdown for the donut.
@@ -86,10 +85,7 @@ export default function ProjectsPage() {
 
   return (
     <Box sx={{ pb: 4 }}>
-      <PageHeader
-        title="Dashboard"
-        subtitle="Live snapshot of the Ideal Agile workspace — sessions, bugs, reports, and recent activity."
-      />
+      <PageHeader title="Dashboard" />
 
       {/* KPI tiles */}
       <Stagger>
@@ -180,7 +176,7 @@ export default function ProjectsPage() {
       <Section
         title={
           <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-            <span>Ideal Agile</span>
+            <span>{ado.project || 'Project'}</span>
             <Chip size="small" label="Default" color="primary" />
           </Stack>
         }
@@ -188,10 +184,10 @@ export default function ProjectsPage() {
         sx={{ maxWidth: 760 }}
       >
         <Typography variant="body2" color="text.secondary">
-          ADO Organization: <strong>ConstellationDealer</strong>
+          ADO Organization: <strong>{ado.org || '—'}</strong>
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          ADO Project: <strong>Ideal Agile</strong>
+          ADO Project: <strong>{ado.project || '—'}</strong>
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
           PAT loaded from <code>.env</code> (<code>ADOACCESS_PAT</code>). Configure connection details

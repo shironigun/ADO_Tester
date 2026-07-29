@@ -9,8 +9,8 @@ public sealed class AzureDevOpsOptions
 {
     public const string SectionName = "AzureDevOps";
 
-    public string Organization { get; set; } = "ConstellationDealer";
-    public string Project { get; set; } = "Ideal Agile";
+    public string Organization { get; set; } = "";
+    public string Project { get; set; } = "";
 
     /// <summary>Personal Access Token (Basic auth). Never commit a real value.</summary>
     public string PersonalAccessToken { get; set; } = string.Empty;
@@ -20,15 +20,15 @@ public sealed class AzureDevOpsOptions
     public string ApiVersion { get; set; } = "7.1";
 
     /// <summary>Git repository used by the code-analysis (verify-against-code) phase.</summary>
-    public string Repository { get; set; } = "CRM Project";
+    public string Repository { get; set; } = "";
     public string DefaultBranch { get; set; } = "main";
 
-    /// <summary>Bug-filing house style (mirrors the targetcrm-bug-suite skill).</summary>
-    public string BugAreaPath { get; set; } = "Ideal Agile\\CRM Team";
-    public string QaOwner { get; set; } = "mahmood.ahmad@constellationdealer.com";
+    /// <summary>Bug-filing house style (mirrors the bug-suite house style).</summary>
+    public string BugAreaPath { get; set; } = "";
+    public string QaOwner { get; set; } = "Mahmood Ahmad";
 
     /// <summary>Project-scoped base URL. Org/project names contain spaces, so the project is
-    /// URL-encoded (spec §5.5). e.g. https://dev.azure.com/ConstellationDealer/Ideal%20Agile</summary>
+    /// URL-encoded (spec §5.5). e.g. https://dev.azure.com/your-org/Your%20Project</summary>
     public string BaseUrl =>
         $"https://dev.azure.com/{Organization.Trim('/')}/{Uri.EscapeDataString(Project)}";
 }

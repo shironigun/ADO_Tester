@@ -1,0 +1,154 @@
+import { api } from './client'
+import { apiUrl } from '../config/env'
+
+// ── QA Loop Runs API — /api/qaloop/runs ──────────────────────────────────────
+
+export type RunStatus = 'Queued' | 'Running' | 'Passed' | 'Failed' | 'Error' | 'Cancelled'
+
+// Matches TestRunSummary.cs exactly — NOTE reportPath/errorMessage only exist on TestRunDetail
+// (the list endpoint's DTO genuinely doesn't carry them; using run.reportPath from a list row is a
+// silent no-op, not a missing-data bug).
+export interface TestRunSummary {
+  id: number
+  module: string | null
+  levelFilter: string | null
+  profile: string
+  triggerSource: string
+  status: RunStatus
+  passed: number
+  failed: number
+  skipped: number
+  durationMs: number
+  adoTestRunId: number | null
+  errorMessage: string | null
+  startedAt: string | null
+  finishedAt: string | null
+  createdAt: string
+  activityEnabled: boolean
+}
+
+export interface TestFailureDto {
+  id: number
+  runId: number
+  testTitle: string
+  adoTestCaseId: number | null
+  classification: string
+  confidence: string
+  reason: string
+  bugDraftJson: string | null
+  bugId: number | null
+}
+
+export interface TestRunDetail extends TestRunSummary {
+  projectId: number
+  tagFilter: string | null
+  testPlanId: number | null
+  testSuiteId: number | null
+  triggerPipelineId: number | null
+  triggerBuildId: number | null
+  triggerCommitSha: string | null
+  impactAnalysisJson: string | null
+  junitPath: string | null
+  reportPath: string | null
+  eventLogJson: string | null
+  failures: TestFailureDto[]
+}
+
+export interface StartRunRequest {
+  moduleFilter?: string
+  levelFilter?: string
+  tagFilter?: string
+  profile: string
+  draftIds?: number[]
+}
+
+export interface FileBugsRequest {
+  failureIds: number[]
+  storyId?: number
+}
+
+export interface FileBugsResponse {
+  filedCount: number
+  bugIds: number[]
+}
+
+// ── Methods ───────────────────────────────────────────────────────────────────
+
+export async function startRun(req: StartRunRequest): Promise<{ runId: number }> {
+  const { data } = await api.post<{ runId: number }>('/api/qaloop/runs/start', req)
+  return data
+}
+
+export async function listRunsPage(
+  projectId: number, take: number, skip: number,
+): Promise<{ total: number; items: TestRunSummary[] }> {
+  const { data } = await api.get<{ total: number; items: TestRunSummary[] }>(
+    `/api/qaloop/runs/${projectId}`, { params: { take, skip } })
+  return data
+}
+
+export async function getRunDetail(id: number): Promise<TestRunDetail> {
+  const { data } = await api.get<TestRunDetail>(`/api/qaloop/runs/detail/${id}`)
+  return data
+}
+
+export async function triage(runId: number): Promise<{ triagedCount: number; realBugCount: number; failures: TestFailureDto[] }> {
+  const { data } = await api.post(`/api/qaloop/runs/${runId}/triage`)
+  return data
+}
+
+export async function fileBugs(runId: number, req: FileBugsRequest): Promise<FileBugsResponse> {
+  const { data } = await api.post<FileBugsResponse>(`/api/qaloop/runs/${runId}/file-bugs`, req)
+  return data
+}
+
+export interface RunFacets {
+  modules: string[]
+  levels: string[]
+  profiles: string[]
+  tags: string[]
+  defaultProfile: string
+  adoBaseUrl: string
+}
+
+export async function getRunFacets(): Promise<RunFacets> {
+  const { data } = await api.get<RunFacets>('/api/qaloop/runs/facets')
+  return data
+}
+
+export async function previewImpact(
+  changedFiles: string[], commitMessages: string[],
+): Promise<{ impactedDraftIds: number[]; reasoning: string; confidence: string }> {
+  const { data } = await api.post('/api/qaloop/runs/preview-impact', { changedFiles, commitMessages })
+  return data
+}
+
+export interface RunImpactTest {
+  id: number
+  title: string
+  level: string
+  adoTestCaseId: number | null
+}
+
+export interface RunImpact {
+  hasImpact: boolean
+  confidence?: string
+  reasoning?: string
+  fallback?: boolean
+  skippedReason?: string | null
+  impactedCount?: number
+  trigger?: {
+    source: string
+    buildId: number | null
+    commitSha: string | null
+    pipelineId: number | null
+  }
+  tests?: RunImpactTest[]
+}
+
+export async function getRunImpact(runId: number): Promise<RunImpact> {
+  const { data } = await api.get<RunImpact>(`/api/qaloop/runs/${runId}/impact`)
+  return data
+}
+
+export const runStreamUrl = (id: number) => apiUrl(`/api/qaloop/runs/${id}/stream`)

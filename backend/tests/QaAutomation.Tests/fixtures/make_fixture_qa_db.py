@@ -99,7 +99,7 @@ def seed(cx: sqlite3.Connection) -> None:
     cx.execute("INSERT INTO alembic_version (version_num) VALUES (?)", (ALEMBIC_HEAD,))
 
     cx.execute('INSERT INTO "Projects" ("Id","Name","AdoOrganization","AdoProject") VALUES (1,?,?,?)',
-               ("Ideal Agile", "ConstellationDealer", "Ideal Agile"))
+               ("Default Project", "", ""))
 
     cx.executemany('INSERT INTO "Settings" ("Key","Value") VALUES (?,?)',
                    [("llm.provider", "ClaudeCli"), ("schedule.weekly_report", "true")])
@@ -144,7 +144,7 @@ def seed(cx: sqlite3.Connection) -> None:
         'INSERT INTO "Reports" '
         '("ProjectId","FromUtc","ToUtc","Boards","TicketCount","Status","HtmlPath","ErrorMessage",'
         '"CreatedAt","Title","Trigger","Theme","SummaryJson","EventLogJson") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-        (1, DT, DT2, "CRM Team", 12, "Done", "data/reports/r1.html", None,
+        (1, DT, DT2, "Sample Board", 12, "Done", "data/reports/r1.html", None,
          DT2, "Weekly QA — Jun 12", "Manual", "Executive", '{"tldr":["12 tickets"]}', "[]"))
 
     cx.execute(

@@ -1,14 +1,25 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { Box, Chip, Stack, Typography } from '@mui/material'
-import axios from 'axios'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useEventStream, type ConsoleEvent } from '../hooks/useEventStream'
 import { MONO_FONT } from '../theme/tokens'
 import type { SessionDetail, SessionModuleConfig, SessionSummary } from './types'
 
+// Re-export the shared error helper so the session-config files importing it from `./shared` keep
+// working unchanged after the F1 consolidation into common/errors.
+export { axiosMessage } from '../common/errors'
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function sessionIdentity(config: SessionModuleConfig, s: SessionSummary | SessionDetail): string {
+  if (config.renderIdentity) return config.renderIdentity(s)
+  const title = 'workItemTitle' in s ? s.workItemTitle : null
+  return title ? `#${s.id} — ${title}` : `#${s.id}`
+}
+
 const PHASE_LABEL: Record<string, string> = {
   fetch: 'FETCH', retrieve: 'KB', analyst: 'ANALYST', tester: 'TESTER',
   bugwriter: 'BUG WRITER', push: 'PUSH', summarize: 'SUMMARIZE',
-  discover: 'DISCOVER', 'code-verify': 'VERIFY',
+  discover: 'DISCOVER', 'code-verify': 'VERIFY', dedup: 'DEDUP',
 }
 
 function fmtClock(ts: number): string {
@@ -22,129 +33,78 @@ export function parseEventLog(json: string | null | undefined): ConsoleEvent[] {
   try { const v = JSON.parse(json); return Array.isArray(v) ? v : [] } catch { return [] }
 }
 
-export function axiosMessage(e: unknown): string {
-  if (!axios.isAxiosError(e)) return e instanceof Error ? e.message : String(e)
-  const d = e.response?.data as unknown
-  if (typeof d === 'string') return d
-  if (d && typeof d === 'object') {
-    if ('detail' in d) return String((d as { detail: unknown }).detail)
-    if ('title' in d) return String((d as { title: unknown }).title)
-    if ('error' in d) return String((d as { error: unknown }).error)
-  }
-  return e.message
-}
-
 /**
- * Fetch one session's detail and poll it every 2.5s while it is in-flight.
- * Mirrors the per-page openSession/startPolling/stopPolling logic, unified.
+ * Fetch one session's detail and poll it every 2.5s while it is in-flight (F2: React Query).
+ * The interval self-gates on the cached status, so it stops the moment the session goes terminal,
+ * and `onTerminal` fires exactly once on the in-flight → terminal transition. The public shape
+ * ({ session, polling, refetch }) is unchanged so consumers don't change.
  */
 export function useSessionDetail(
   config: SessionModuleConfig,
   sessionId: number | null,
   onTerminal?: () => void,
 ) {
-  const [session, setSession] = useState<SessionDetail | null>(null)
-  const [polling, setPolling] = useState(false)
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const onTerminalRef = useRef(onTerminal)
   onTerminalRef.current = onTerminal
 
-  const stop = useCallback(() => {
-    setPolling(false)
-    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
-  }, [])
+  const query = useQuery({
+    queryKey: ['session-detail', config.key, sessionId],
+    queryFn: () => config.getDetail(sessionId as number),
+    enabled: sessionId != null,
+    // Poll while in-flight; stop (false) once terminal. Reads the just-fetched data each tick.
+    refetchInterval: (q) => {
+      const d = q.state.data
+      return d && config.inFlightStatuses.includes(d.status) ? 2500 : false
+    },
+  })
 
-  const inFlight = useCallback(
-    (s: string) => config.inFlightStatuses.includes(s),
-    [config],
-  )
+  const session = query.data ?? null
+  const polling = session != null && config.inFlightStatuses.includes(session.status)
 
-  const refetch = useCallback(async () => {
-    if (sessionId == null) return
-    try {
-      const data = await config.getDetail(sessionId)
-      setSession(data)
-      if (inFlight(data.status)) {
-        if (!pollRef.current) {
-          setPolling(true)
-          pollRef.current = setInterval(async () => {
-            try {
-              const d = await config.getDetail(sessionId)
-              setSession(d)
-              if (!inFlight(d.status)) { stop(); onTerminalRef.current?.() }
-            } catch { /* swallow transient poll errors */ }
-          }, 2500)
-        }
-      } else {
-        stop()
-      }
-    } catch { /* surfaced by caller actions */ }
-  }, [config, sessionId, inFlight, stop])
-
+  // Fire onTerminal once when a session transitions out of an in-flight status.
+  const wasInFlight = useRef(false)
   useEffect(() => {
-    stop()
-    setSession(null)
-    if (sessionId != null) refetch()
-    return stop
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId])
+    if (!session) { wasInFlight.current = false; return }
+    const nowInFlight = config.inFlightStatuses.includes(session.status)
+    if (wasInFlight.current && !nowInFlight) onTerminalRef.current?.()
+    wasInFlight.current = nowInFlight
+  }, [session, config])
+
+  const refetch = useCallback(() => { void query.refetch() }, [query])
 
   return { session, polling, refetch }
 }
 
-function mergeById(prev: SessionSummary[], next: SessionSummary[]): SessionSummary[] {
-  if (prev.length === 0) return next
-  const map = new Map(next.map(s => [s.id, s]))
-  // Keep prior order/identity where possible; overwrite mutable fields.
-  const merged = prev.map(p => map.get(p.id) ?? p)
-  // Append any genuinely new sessions that weren't in prev.
-  const seen = new Set(prev.map(p => p.id))
-  for (const n of next) if (!seen.has(n.id)) merged.unshift(n)
-  return merged
-}
-
 /**
- * Load a page of sessions and keep statuses live: poll the list endpoint every
- * 3s, but ONLY while at least one visible card is in-flight. Merge-by-id so the
- * grid never remounts (stable keys → no scroll/selection loss).
+ * Load a page of sessions and keep statuses live (F2: React Query). Polls the list endpoint every
+ * 3s, but ONLY while at least one visible card is in-flight (refetchInterval gates on the cached
+ * page). React Query's structural sharing keeps unchanged rows referentially stable, so the grid
+ * never remounts — replacing the old merge-by-id bookkeeping. keepPreviousData avoids a flash of
+ * empty while paging. Public shape ({ summaries, total, loading, refresh }) is unchanged.
  */
 export function useSessionsLive(
   config: SessionModuleConfig,
   take: number,
   skip: number,
 ) {
-  const [summaries, setSummaries] = useState<SessionSummary[]>([])
-  const [total, setTotal] = useState(0)
-  const [loading, setLoading] = useState(true)
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const query = useQuery({
+    queryKey: ['sessions', config.key, take, skip],
+    queryFn: () => config.listSessions(take, skip),
+    placeholderData: keepPreviousData,
+    refetchInterval: (q) => {
+      const items = q.state.data?.items ?? []
+      return items.some(s => config.inFlightStatuses.includes(s.status)) ? 3000 : false
+    },
+  })
 
-  const refresh = useCallback(async () => {
-    try {
-      const { items, total } = await config.listSessions(take, skip)
-      setSummaries(prev => mergeById(prev, items ?? []))
-      setTotal(total ?? 0)
-    } catch { /* swallow */ }
-    finally { setLoading(false) }
-  }, [config, take, skip])
+  const refresh = useCallback(() => { void query.refetch() }, [query])
 
-  // Reset + load when paging or module changes.
-  useEffect(() => {
-    setLoading(true)
-    setSummaries([])
-    refresh()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, take, skip])
-
-  // Gated poll: run only while a visible card is in-flight.
-  const anyInFlight = summaries.some(s => config.inFlightStatuses.includes(s.status))
-  useEffect(() => {
-    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
-    if (!anyInFlight) return
-    pollRef.current = setInterval(refresh, 3000)
-    return () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null } }
-  }, [anyInFlight, refresh])
-
-  return { summaries, total, loading, refresh }
+  return {
+    summaries: query.data?.items ?? [],
+    total: query.data?.total ?? 0,
+    loading: query.isLoading,
+    refresh,
+  }
 }
 
 /** Timeline tab — a slim, timestamped chronology of pipeline milestones (no verbose

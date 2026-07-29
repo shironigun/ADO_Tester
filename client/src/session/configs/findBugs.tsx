@@ -20,7 +20,6 @@ import VisibilityIcon from '@mui/icons-material/Visibility'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import RuleIcon from '@mui/icons-material/Rule'
 import { alpha } from '@mui/material/styles'
-import axios from 'axios'
 import AgentPipeline, { type PipelineStep } from '../../components/AgentPipeline'
 import AgentConsole from '../../components/AgentConsole'
 import AnalysisPanel from '../../components/AnalysisPanel'
@@ -30,14 +29,22 @@ import StatusChip from '../../components/StatusChip'
 import { ThinkingShimmer } from '../../components/LoadingSkeleton'
 import type {
   AnalyticsColumn, DetailBodyProps, SessionDetail, SessionModuleConfig,
-  SessionSummary, StartFormProps, WorkItemOption,
+  StartFormProps, WorkItemOption,
 } from '../types'
+// (SessionSummary is referenced only via api/findBugs now.)
 import { parseEventLog } from '../shared'
+import { PROJECT_ID } from '../../config/env'
+import { useAdoWorkItemUrl } from '../../common/adoLinks'
+import { searchWorkItems } from '../../api/authorTests'
+import {
+  listSessionsPage, getSessionDetail, startSession, getLinkedRefs, getTestCases,
+  runBugWriter as apiRunBugWriter, cancelSession, patchDraft, approveAllDrafts, pushSession,
+  bugFromVerdict, saveAnalysis, sessionStreamUrl,
+  type AttachedTestCase, type LinkedChange,
+} from '../../api/findBugs'
+import { getConfig, saveConfig, getAdoBranches } from '../../api/settings'
 
-const PROJECT_ID = 1
-const ADO_ORG = 'ConstellationDealer'
-const ADO_PROJECT = 'Ideal Agile'
-const ADO_WI_URL = (id: number) => `https://dev.azure.com/${encodeURIComponent(ADO_ORG)}/${encodeURIComponent(ADO_PROJECT)}/_workitems/edit/${id}`
+// ADO work-item deep-links are built from the configured org/project via useAdoWorkItemUrl().
 
 type Severity = 'Critical' | 'High' | 'Medium' | 'Low'
 type DraftStatus = 'Draft' | 'Approved' | 'Rejected' | 'Pushed'
@@ -49,10 +56,7 @@ interface CodeVerdict {
   failedStepIndex?: number | null
   steps?: VerdictStep[]
 }
-interface AttachedTestCase {
-  key: string; title: string; preconditions: string; source: 'plan' | 'draft'
-  adoTestCaseId?: number | null; steps: { action: string; expected: string }[]
-}
+// AttachedTestCase + LinkedChange are imported from api/findBugs.
 // A report row = one attached test case, enriched with its verdict if verification has run.
 interface ReportRow {
   key?: string  // stable selection id; only attached cases have one (verdict-only rows don't)
@@ -104,6 +108,7 @@ function BugDraftCard({ draft, onApprove, onReject, onSave }: {
   draft: BugDraft; onApprove: () => void; onReject: () => void
   onSave: (patch: Partial<BugDraft>) => Promise<void> | void
 }) {
+  const wiUrl = useAdoWorkItemUrl()
   const initialSteps = (): string[] => { try { return JSON.parse(draft.reproStepsJson) } catch { return [] } }
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -205,7 +210,7 @@ function BugDraftCard({ draft, onApprove, onReject, onSave }: {
             {draft.adoBugId && (
               <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
                 <Typography variant="caption" color="success.main">ADO Bug #{draft.adoBugId}</Typography>
-                <IconButton size="small" component="a" href={`https://dev.azure.com/${ADO_ORG}/${encodeURIComponent(ADO_PROJECT)}/_workitems/edit/${draft.adoBugId}`} target="_blank" rel="noreferrer"><OpenInNewIcon fontSize="small" /></IconButton>
+                <IconButton size="small" component="a" href={wiUrl(draft.adoBugId)} target="_blank" rel="noreferrer"><OpenInNewIcon fontSize="small" /></IconButton>
               </Stack>
             )}
           </Stack>
@@ -233,10 +238,11 @@ function BugDraftCard({ draft, onApprove, onReject, onSave }: {
 const verdictColor = (s: string) => (s === 'pass' ? 'success' : s === 'fail' ? 'error' : 'warning') as 'success' | 'error' | 'warning'
 
 function SourceChip({ source, adoTestCaseId }: { source?: 'plan' | 'draft'; adoTestCaseId?: number | null }) {
+  const wiUrl = useAdoWorkItemUrl()
   if (source === 'plan') {
     return adoTestCaseId
       ? <Chip size="small" color="info" variant="outlined" clickable component="a"
-          href={ADO_WI_URL(adoTestCaseId)} target="_blank" rel="noreferrer"
+          href={wiUrl(adoTestCaseId)} target="_blank" rel="noreferrer"
           icon={<OpenInNewIcon />} label={`Test Plan · #${adoTestCaseId}`} />
       : <Chip size="small" color="info" variant="outlined" label="Test Plan" />
   }
@@ -244,7 +250,7 @@ function SourceChip({ source, adoTestCaseId }: { source?: 'plan' | 'draft'; adoT
     // A draft that was already pushed to ADO carries its Test Case id — link it.
     return adoTestCaseId
       ? <Chip size="small" variant="outlined" clickable component="a"
-          href={ADO_WI_URL(adoTestCaseId)} target="_blank" rel="noreferrer"
+          href={wiUrl(adoTestCaseId)} target="_blank" rel="noreferrer"
           icon={<OpenInNewIcon />} label={`Draft · #${adoTestCaseId}`} />
       : <Chip size="small" variant="outlined" label="Draft (Author Tests)" />
   }
@@ -517,11 +523,11 @@ function TestExecutionReport({
 }
 
 function BugPushResults({ session }: { session: SessionDetail }) {
+  const url = useAdoWorkItemUrl()
   const drafts = session.drafts as unknown as BugDraft[]
   const pushed = drafts.filter(d => d.status === 'Pushed' && d.adoBugId)
   if (pushed.length === 0) return null
   if (!['Done', 'Cancelled', 'Failed'].includes(session.status)) return null
-  const url = (id: number) => `https://dev.azure.com/${ADO_ORG}/${encodeURIComponent(ADO_PROJECT)}/_workitems/edit/${id}`
   return (
     <Card sx={{ mt: 3, borderColor: 'success.main' }}>
       <CardContent>
@@ -540,9 +546,8 @@ function BugPushResults({ session }: { session: SessionDetail }) {
   )
 }
 
-type LinkedChange = { kind: 'pr' | 'commit'; id: string; title: string; url: string }
-
 function BugDetailBody({ session, refetch, onError }: DetailBodyProps) {
+  const wiUrl = useAdoWorkItemUrl()
   const drafts = session.drafts as unknown as BugDraft[]
   const [actualText, setActualText] = useState(session.actualBehavior ?? '')
   const [prIdsText, setPrIdsText] = useState('')
@@ -559,19 +564,28 @@ function BugDetailBody({ session, refetch, onError }: DetailBodyProps) {
   const [cases, setCases] = useState<AttachedTestCase[]>([])
   const [casesLoaded, setCasesLoaded] = useState(false)
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
+  // Branch the code-verification reads from — defaults to the Settings ado.default_branch, editable here.
+  const [branch, setBranch] = useState('')
+  const [branches, setBranches] = useState<string[]>([])
+  const [branchesLoading, setBranchesLoading] = useState(false)
 
   useEffect(() => { setActualText(session.actualBehavior ?? '') }, [session.actualBehavior])
   useEffect(() => {
+    getConfig().then(cfg => setBranch(String(cfg['ado.default_branch'] ?? ''))).catch(() => {})
+    setBranchesLoading(true)
+    getAdoBranches().then(setBranches).catch(() => setBranches([])).finally(() => setBranchesLoading(false))
+  }, [])
+  useEffect(() => {
     let cancelled = false
-    axios.get<{ pullRequestIds: string[]; commitShas: string[]; changes?: LinkedChange[] }>(`/api/find-bugs/sessions/${session.id}/linked-refs`)
-      .then(r => { if (!cancelled) setLinkedRefs({ pullRequestIds: r.data.pullRequestIds ?? [], commitShas: r.data.commitShas ?? [], changes: r.data.changes ?? [] }) }).catch(() => {})
+    getLinkedRefs(session.id)
+      .then(refs => { if (!cancelled) setLinkedRefs(refs) }).catch(() => {})
     return () => { cancelled = true }
   }, [session.id])
   useEffect(() => {
     let cancelled = false
     setCasesLoaded(false)
-    axios.get<AttachedTestCase[]>(`/api/find-bugs/sessions/${session.id}/test-cases`)
-      .then(r => { if (!cancelled) { const cs = r.data ?? []; setCases(cs); setSelectedKeys(new Set(cs.map(c => c.key))) } })
+    getTestCases(session.id)
+      .then(cs => { if (!cancelled) { setCases(cs); setSelectedKeys(new Set(cs.map(c => c.key))) } })
       .catch(() => {})
       .finally(() => { if (!cancelled) setCasesLoaded(true) })
     return () => { cancelled = true }
@@ -591,21 +605,23 @@ function BugDetailBody({ session, refetch, onError }: DetailBodyProps) {
   const splitIds = (t: string) => t.split(/[\s,]+/).map(x => x.trim()).filter(Boolean)
   const runBugWriter = async () => {
     try {
+      // Persist the chosen branch first so code-verification reads from it (live-applies to the ADO client).
+      if (branch) await saveConfig({ 'ado.default_branch': branch })
       // Code verification is always on (anchored on the ticket's change). actualBehavior is optional.
-      await axios.post(`/api/find-bugs/sessions/${session.id}/run`, { actualBehavior: actualText, verifyCode: true, prIds: splitIds(prIdsText), commitIds: splitIds(commitIdsText), selectedTestCases: selectedCaseKeys })
+      await apiRunBugWriter(session.id, { actualBehavior: actualText, verifyCode: true, prIds: splitIds(prIdsText), commitIds: splitIds(commitIdsText), selectedTestCases: selectedCaseKeys })
       refetch()
     } catch (e) { onError(e, 'Run Bug Writer failed') }
   }
-  const cancel = async () => { try { await axios.post(`/api/find-bugs/sessions/${session.id}/cancel`); refetch() } catch (e) { onError(e, 'Cancel failed') } }
-  const approveDraft = async (id: number) => { try { await axios.patch(`/api/find-bugs/drafts/${id}`, { status: 'Approved' }); refetch() } catch (e) { onError(e, 'Approve failed') } }
-  const rejectDraft = async (id: number) => { try { await axios.patch(`/api/find-bugs/drafts/${id}`, { status: 'Rejected' }); refetch() } catch (e) { onError(e, 'Reject failed') } }
-  const approveAll = async () => { try { await axios.post(`/api/find-bugs/sessions/${session.id}/approve-all`); refetch() } catch (e) { onError(e, 'Approve all failed') } }
-  const saveDraft = async (id: number, patch: Partial<BugDraft>) => { try { await axios.patch(`/api/find-bugs/drafts/${id}`, patch); refetch() } catch (e) { onError(e, 'Save failed') } }
-  const push = async () => { setPushing(true); try { await axios.post(`/api/find-bugs/sessions/${session.id}/push`); refetch() } catch (e) { onError(e, 'Push failed') } finally { setPushing(false) } }
+  const cancel = async () => { try { await cancelSession(session.id); refetch() } catch (e) { onError(e, 'Cancel failed') } }
+  const approveDraft = async (id: number) => { try { await patchDraft(id, { status: 'Approved' }); refetch() } catch (e) { onError(e, 'Approve failed') } }
+  const rejectDraft = async (id: number) => { try { await patchDraft(id, { status: 'Rejected' }); refetch() } catch (e) { onError(e, 'Reject failed') } }
+  const approveAll = async () => { try { await approveAllDrafts(session.id); refetch() } catch (e) { onError(e, 'Approve all failed') } }
+  const saveDraft = async (id: number, patch: Partial<BugDraft>) => { try { await patchDraft(id, patch); refetch() } catch (e) { onError(e, 'Save failed') } }
+  const push = async () => { setPushing(true); try { await pushSession(session.id); refetch() } catch (e) { onError(e, 'Push failed') } finally { setPushing(false) } }
   const createBugFromVerdict = async (r: ReportRow) => {
     setCreatingKey(rowKey(r))
     try {
-      await axios.post(`/api/find-bugs/sessions/${session.id}/bug-from-verdict`, {
+      await bugFromVerdict(session.id, {
         testCase: r.title, source: r.source, adoTestCaseId: r.adoTestCaseId ?? undefined,
         evidence: r.evidence ?? '', reasoning: r.reasoning ?? '',
         failedStepIndex: r.failedStepIndex ?? undefined,
@@ -641,7 +657,7 @@ function BugDetailBody({ session, refetch, onError }: DetailBodyProps) {
   const activeIdx = terminalFailed ? reachedIdx : activeStepIndex(session.status, session.currentActivity)
   const sel = Math.min(picked ?? activeIdx, PIPELINE_STEPS.length - 1)
   const [view, setView] = useState<'findings' | 'activity'>('findings')
-  const streamUrl = `/api/find-bugs/sessions/${session.id}/stream`
+  const streamUrl = sessionStreamUrl(session.id)
   const phaseLabel = PIPELINE_STEPS[sel]?.label ?? ''
 
   return (
@@ -682,7 +698,7 @@ function BugDetailBody({ session, refetch, onError }: DetailBodyProps) {
             <Chip size="small" label={`#${session.workItemId}`} />
             {wiType && <Chip size="small" variant="outlined" label={wiType} />}
             <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }}>{session.workItemTitle}</Typography>
-            <Link href={ADO_WI_URL(session.workItemId)} target="_blank" rel="noreferrer" variant="body2">Open in Azure DevOps</Link>
+            <Link href={wiUrl(session.workItemId as number)} target="_blank" rel="noreferrer" variant="body2">Open in Azure DevOps</Link>
           </Stack>
         </CardContent></Card>
       )}
@@ -692,7 +708,7 @@ function BugDetailBody({ session, refetch, onError }: DetailBodyProps) {
         <>
           {session.status === 'Analyzing' && !session.analysisJson && <AnalystProgress streamUrl={streamUrl} />}
           <AnalysisPanel analysisJson={session.analysisJson}
-            onSave={async (a) => { await axios.patch(`/api/find-bugs/sessions/${session.id}/analysis`, a); refetch() }} />
+            onSave={async (a) => { await saveAnalysis(session.id, a); refetch() }} />
           {session.status !== 'Analyzing' && !session.analysisJson && (
             <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: 'center' }}>No analysis available.</Typography>
           )}
@@ -747,6 +763,20 @@ function BugDetailBody({ session, refetch, onError }: DetailBodyProps) {
                     No linked PRs/commits — Bug Writer will anchor on the closest matching code.
                   </Typography>
                 )}
+
+                <Box sx={{ mt: 2, maxWidth: 380 }}>
+                  <Autocomplete
+                    freeSolo size="small" options={branches} value={branch}
+                    onChange={(_, v) => setBranch(v || '')}
+                    onInputChange={(_, v) => setBranch(v)}
+                    loading={branchesLoading}
+                    renderInput={p => (
+                      <TextField {...p} label="Branch to test against" placeholder="main"
+                        helperText={branchesLoading ? 'Loading branches…'
+                          : 'Agent reads code from this branch. Saved to Settings on run.'} />
+                    )}
+                  />
+                </Box>
 
                 <Box sx={{ mt: 1.5 }}>
                   <Button size="small" color="inherit" sx={{ px: 0.5, color: 'text.secondary' }}
@@ -866,8 +896,7 @@ function BugStartForm({ onStarted, onError, onClose }: StartFormProps) {
   useEffect(() => {
     if (wiQuery.length < 2) { setWiOptions([]); return }
     const t = setTimeout(() => {
-      axios.get<WorkItemOption[]>('/api/author-tests/search', { params: { q: wiQuery } })
-        .then(r => setWiOptions(r.data)).catch(() => setWiOptions([]))
+      searchWorkItems(wiQuery).then(setWiOptions).catch(() => setWiOptions([]))
     }, 400)
     return () => clearTimeout(t)
   }, [wiQuery])
@@ -876,8 +905,8 @@ function BugStartForm({ onStarted, onError, onClose }: StartFormProps) {
     if (!selectedWi) return
     setStarting(true)
     try {
-      const { data } = await axios.post<{ sessionId: number }>(`/api/find-bugs/${PROJECT_ID}/start`, { workItemId: selectedWi.id })
-      onClose(); onStarted(data.sessionId)
+      const { sessionId } = await startSession(PROJECT_ID, { workItemId: selectedWi.id })
+      onClose(); onStarted(sessionId)
     } catch (e) { onError(e, 'Start failed') } finally { setStarting(false) }
   }
 
@@ -921,12 +950,9 @@ export const findBugsConfig: SessionModuleConfig = {
   pipelineSteps: PIPELINE_STEPS,
   activeStepIndex,
   analyticsColumns,
-  listSessions: async (take, skip) => {
-    const { data } = await axios.get<{ total: number; items: SessionSummary[] }>(`/api/find-bugs/sessions/${PROJECT_ID}`, { params: { take, skip } })
-    return data
-  },
-  getDetail: async (id) => { const { data } = await axios.get<SessionDetail>(`/api/find-bugs/sessions/detail/${id}`); return data },
-  streamUrl: (id) => `/api/find-bugs/sessions/${id}/stream`,
+  listSessions: (take, skip) => listSessionsPage(PROJECT_ID, take, skip),
+  getDetail: (id) => getSessionDetail(id),
+  streamUrl: sessionStreamUrl,
   StartForm: BugStartForm,
   DetailBody: BugDetailBody,
 }

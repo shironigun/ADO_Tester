@@ -1,45 +1,46 @@
-# QA Automation — .NET backend (migration in progress)
+# QA Automation — .NET backend
 
-The .NET 8 re-platform of the `ADO_Tester` backend. Built to **run locally now** (Kestrel + SQLite,
-zero cloud cost) and stay **Azure App Service-ready** for a later company deploy. The authoritative
-brief is [`../docs/dotnet-migration-spec.md`](../docs/dotnet-migration-spec.md) — read its §10 for the
-locked decisions (local-first, SQLite, adopt the existing `qa.db`, official Anthropic package).
+The .NET 8 backend for the `ADO_Tester` QA Automation app. It runs locally (Kestrel + SQLite, zero
+cloud cost) and stays **Azure App Service-ready** for a later company deploy. This is now the **sole
+backend**: it replaced the original Python FastAPI app, which was **retired on 2026-06-21** (recover
+it from git history if a parity reference is ever needed).
 
-> **The live Python backend in `../backend/` is the source of truth.** During the migration the .NET
-> lives here in `dotnet/`; once it reaches parity and is verified, this tree **replaces `../backend/`**.
+- Authoritative migration brief + locked decisions: [`../docs/dotnet-migration-spec.md`](../docs/dotnet-migration-spec.md) (§10).
+- End-to-end runtime status + current open issues: [`../docs/manual-verification-and-open-issues.md`](../docs/manual-verification-and-open-issues.md).
 
 ## Layout
 
 ```
-dotnet/
+backend/
   QaAutomation.sln
   src/
-    QaAutomation.Api/            # ASP.NET Core 8 host — Program.cs, Configurations/, Middlewares/
-    QaAutomation.Core/           # Abstractions/, Configuration/ (options), Models/ (entities/DTOs)
-    QaAutomation.Infrastructure/ # EF data, ADO client, LLM, agents, orchestrators, KB, reports
+    QaAutomation.Api/            # ASP.NET Core 8 host — Program.cs, Controllers/, Middlewares/, Streaming/ (SSE)
+    QaAutomation.Core/           # Abstractions/, Configuration/ (options), Models/ (entities/DTOs), Agents/ (JsonUtils)
+    QaAutomation.Infrastructure/ # EF data, ADO client, LLM, agents, orchestrators, events, KB, reports, batches, settings, logging
   tests/
     QaAutomation.Tests/          # xUnit
-  _recovered/                    # see below — NOT compiled
+  data/                          # qa.db + KB uploads + report HTML — git-ignored, auto-created on first run
 ```
-
-### `_recovered/` — reference only, not built
-Scaffolding recovered from git `7b16806` that depends on a not-yet-built Data layer (it was only
-~40% complete and does **not** compile as-is). It is parked here, **outside every `.csproj`**, as a
-starting point. Each later phase pulls the relevant file back into a project and rewrites it,
-**diffing against the Python**, never trusting the scaffold. Do not add `_recovered/` to a project.
 
 ## Run (local dev)
 
 ```powershell
 # from repo root
-dotnet run --project dotnet\src\QaAutomation.Api
+dotnet run --project backend\src\QaAutomation.Api
 ```
 
+- Listens on `http://localhost:5250` (the `http` launch profile / canonical backend port); override with `ASPNETCORE_URLS`.
 - Health: `GET /api/health` → `{"status":"ok"}`
 - Swagger UI (Development only): `/swagger`
-- Override the port with `ASPNETCORE_URLS=http://localhost:5250` (the canonical backend port).
+- Secrets load from the repo-root `.env` (DotNetEnv walks up the tree). The SQLite DB + FTS5 index auto-create on first run, adopting an existing `data/qa.db` if present — no separate migration step.
 
 ## Phase status (see spec §6)
+
+The full migration has landed. B0–B4 below were each verified by golden-file diffs against the
+then-live Python plus adversarial port-parity audits. B5+ (orchestration/SSE/EventBus, KB, reports,
+batches, settings/diagnostics, and the eight feature controllers) is built and smoke-tested end-to-end
+— see the [verification log](../docs/manual-verification-and-open-issues.md) for what is confirmed
+working and the remaining open issues (notably large-ticket Tester generation, Open Issue #1).
 
 - **B0 — Skeleton ✅** solution + 4 projects, `Program.cs` (`AddCustom*`), Swagger, CORS (`:5173`/`:5174`),
   ProblemDetails + `ExceptionHandlingMiddleware` (first), flat `/api` routes, `GET /api/health`. Builds clean.
@@ -79,5 +80,8 @@ dotnet run --project dotnet\src\QaAutomation.Api
     `1e10` vs `10000000000.0`; array spacing `[1,2]` vs `[1, 2]`); (2) bare `NaN`/`Infinity` are rejected
     (Python accepts them as `"nan"` garbage) and duplicate keys degrade to a retry (Python last-wins);
     (3) the all-attempts-failed error snippet uses simple quoting vs Python `repr()`.
-- **B5+ — pending:** orchestrators/SSE/EventBus, KB, reports, batches, settings/diagnostics,
-  comprehensive tests. (B5–B10 / F0–F5 in the spec.)
+- **B5+ — built & smoke-tested ✅** orchestrators/SSE/EventBus, KB, reports, batches,
+  settings/diagnostics, and the eight feature controllers (AuthorTests, FindBugs, Batches,
+  Knowledgebase, Reports, Settings, Diagnostics, Logs) are all in place; the frontend re-architecture
+  (F0–F5) is done. Confirmed end-to-end against live ADO + `ClaudeCli` in the verification log; the
+  one blocking open issue is large-ticket Tester generation (Open Issue #1).

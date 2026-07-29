@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  Alert, Autocomplete, Box, Button, Card, CardContent, Chip, CircularProgress,
+  Alert, Autocomplete, Box, Button, Card, CardContent, Checkbox, Chip, CircularProgress,
   Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl,
   FormControlLabel, IconButton, InputLabel, Link, MenuItem, Select, Stack, Switch,
   Table, TableBody, TableCell, TableHead, TableRow, TextField, ToggleButton,
@@ -23,7 +23,7 @@ import RuleIcon from '@mui/icons-material/Rule'
 import SearchIcon from '@mui/icons-material/Search'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
 import PsychologyIcon from '@mui/icons-material/Psychology'
-import axios from 'axios'
+import TravelExploreIcon from '@mui/icons-material/TravelExplore'
 import AgentPipeline, { type PipelineStep } from '../../components/AgentPipeline'
 import AgentConsole from '../../components/AgentConsole'
 import AnalysisPanel from '../../components/AnalysisPanel'
@@ -33,15 +33,22 @@ import StatusChip from '../../components/StatusChip'
 import TesterProgress from '../../components/TesterProgress'
 import type {
   AnalyticsColumn, DetailBodyProps, SessionDetail, SessionModuleConfig,
-  SessionSummary, StartFormProps, WorkItemOption,
+  StartFormProps, WorkItemOption,
 } from '../types'
-import { axiosMessage, parseEventLog } from '../shared'
+import { parseEventLog } from '../shared'
+import { axiosMessage } from '../../common/errors'
+import { useAdoWorkItemUrl } from '../../common/adoLinks'
+import { PROJECT_ID } from '../../config/env'
+import {
+  getPlans, getSuites, searchWorkItems, startSession, listSessionsPage, getSessionDetail,
+  patchDraft, approveAllDrafts, runTester as apiRunTester, cancelSession, pushSession, pushDraft, saveAnalysis,
+  rerunAnalyst as apiRerunAnalyst, refineTester as apiRefineTester,
+  rescanPlan, getScanStatus,
+  sessionStreamUrl, type TestPlan, type TestSuite, type TestFeedbackItem,
+} from '../../api/authorTests'
+import { getConfig } from '../../api/settings'
 
-const ADO_WI_URL = (id: number) => `https://dev.azure.com/${encodeURIComponent(ADO_ORG)}/${encodeURIComponent(ADO_PROJECT)}/_workitems/edit/${id}`
-
-const PROJECT_ID = 1
-const ADO_ORG = 'ConstellationDealer'
-const ADO_PROJECT = 'Ideal Agile'
+// ADO work-item deep-links are built from the configured org/project via useAdoWorkItemUrl().
 
 interface Step { action: string; expected: string }
 interface Draft {
@@ -50,12 +57,11 @@ interface Draft {
   adoTestCaseId: number | null
 }
 interface DraftPatch { title?: string; preconditions?: string; steps?: Step[] }
-interface TestPlan { id: number; name: string }
-interface TestSuite { id: number; name: string }
 
 const PIPELINE_STEPS: PipelineStep[] = [
   { key: 'fetch',    label: 'Fetch ticket',  icon: <SearchIcon /> },
   { key: 'retrieve', label: 'Retrieve KB',   icon: <MenuBookIcon /> },
+  { key: 'discover', label: 'Discover code', icon: <TravelExploreIcon /> },
   { key: 'analyst',  label: 'Analyst',       icon: <PsychologyIcon /> },
   { key: 'tester',   label: 'Tester',        icon: <RuleIcon /> },
 ]
@@ -63,32 +69,39 @@ const PIPELINE_STEPS: PipelineStep[] = [
 function activeStepIndex(status: string, activity: string | null): number {
   const a = (activity ?? '').toLowerCase()
   if (status === 'Done' || status === 'Drafted') return PIPELINE_STEPS.length
-  if (status === 'Pushing') return 3 // push fires from the Tester phase — keep that circle lit
-  if (status === 'AwaitingTester') return 3
+  if (status === 'Pushing') return 4 // push fires from the Tester phase — keep that circle lit
+  if (status === 'AwaitingTester') return 4
   if (status === 'Failed' || status === 'Cancelled') {
     // currentActivity is overwritten with a generic terminal string on failure, so these substring
-    // checks rarely match — BugDetailBody/AuthorDetailBody refine this from durable session data.
-    if (a.includes('analyst')) return 2
-    if (a.includes('retriev')) return 1
-    if (a.includes('fetch'))   return 0
-    if (a.includes('tester'))  return 3
+    // checks rarely match — reachedIdx derived from durable session data is the authoritative fallback.
+    if (a.includes('tester'))   return 4
+    if (a.includes('analyst'))  return 3
+    if (a.includes('discover') || a.includes('triage')) return 2
+    if (a.includes('retriev'))  return 1
+    if (a.includes('fetch'))    return 0
     return 0
   }
-  if (status === 'Drafting' || a.includes('tester')) return 3
-  if (a.includes('analyst'))   return 2
+  if (status === 'Drafting' || a.includes('tester')) return 4
+  if (a.includes('analyst'))   return 3
+  if (a.includes('discover') || a.includes('triage')) return 2
   if (a.includes('retriev'))   return 1
   if (a.includes('fetch') || a.includes('work item')) return 0
   return 0
 }
 
 // ── Draft card: compact row + detail/edit dialog ─────────────────────────────
-function TestDraftCard({ draft, onApprove, onReject, onSave }: {
-  draft: Draft; onApprove: () => void; onReject: () => void
+function TestDraftCard({ draft, onApprove, onReject, onPush, onSave, canPush,
+  feedback, onFeedbackChange, markedRemove, onToggleRemove }: {
+  draft: Draft; onApprove: () => void; onReject: () => void; onPush: () => Promise<void>; canPush: boolean
   onSave: (patch: DraftPatch) => Promise<void> | void
+  feedback?: string; onFeedbackChange?: (v: string) => void
+  markedRemove?: boolean; onToggleRemove?: (v: boolean) => void
 }) {
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [pushing, setPushing] = useState(false)
+  const doPush = async () => { setPushing(true); try { await onPush() } finally { setPushing(false) } }
   const initialSteps = (): Step[] => { try { return JSON.parse(draft.stepsJson) } catch { return [] } }
   const [title, setTitle] = useState(draft.title)
   const [steps, setSteps] = useState<Step[]>(initialSteps())
@@ -132,12 +145,35 @@ function TestDraftCard({ draft, onApprove, onReject, onSave }: {
             {draft.adoTestCaseId && <Chip size="small" color="success" variant="outlined" label={`TC #${draft.adoTestCaseId}`} />}
             {isEditable && (
               <>
-                <Tooltip title="Approve"><IconButton size="small" color="success" onClick={onApprove}><CheckIcon fontSize="small" /></IconButton></Tooltip>
-                <Tooltip title="Reject"><IconButton size="small" color="error" onClick={onReject}><CloseIcon fontSize="small" /></IconButton></Tooltip>
+                {draft.status === 'Approved' ? (
+                  <Tooltip title={canPush ? 'Push this test case to ADO' : 'Choose a Test Plan + Suite below first'}>
+                    <span>
+                      <Button size="small" variant="outlined" color="success" disabled={!canPush || pushing}
+                        startIcon={pushing ? <CircularProgress size={14} /> : <PushPinIcon />} onClick={doPush}>
+                        Push
+                      </Button>
+                    </span>
+                  </Tooltip>
+                ) : (
+                  <Tooltip title="Approve"><IconButton size="small" color="success" onClick={onApprove}><CheckIcon fontSize="small" /></IconButton></Tooltip>
+                )}
+                <Tooltip title="Remove"><IconButton size="small" color="error" onClick={onReject}><CloseIcon fontSize="small" /></IconButton></Tooltip>
               </>
             )}
             <Button size="small" variant="outlined" startIcon={<VisibilityIcon />} onClick={openView}>View</Button>
           </Stack>
+          {isEditable && onFeedbackChange && (
+            <Stack direction="row" spacing={1} sx={{ mt: 1, alignItems: 'flex-start' }}>
+              <TextField size="small" fullWidth multiline placeholder="Feedback for this test (used on Regenerate)"
+                value={feedback ?? ''} onChange={e => onFeedbackChange(e.target.value)}
+                disabled={markedRemove} />
+              <Tooltip title="Mark this test for removal on Regenerate">
+                <FormControlLabel sx={{ m: 0, whiteSpace: 'nowrap' }}
+                  control={<Checkbox size="small" checked={!!markedRemove} onChange={(_, v) => onToggleRemove?.(v)} />}
+                  label={<Typography variant="caption">Remove</Typography>} />
+              </Tooltip>
+            </Stack>
+          )}
         </CardContent>
       </Card>
 
@@ -194,8 +230,19 @@ function TestDraftCard({ draft, onApprove, onReject, onSave }: {
           ) : (
             <>
               {isEditable && <Button startIcon={<EditIcon />} onClick={openEdit}>Edit</Button>}
-              {isEditable && <Button color="error" startIcon={<CloseIcon />} onClick={() => { onReject(); setOpen(false) }}>Reject</Button>}
-              {isEditable && <Button color="success" variant="contained" startIcon={<CheckIcon />} onClick={() => { onApprove(); setOpen(false) }}>Approve</Button>}
+              {isEditable && <Button color="error" startIcon={<CloseIcon />} onClick={() => { onReject(); setOpen(false) }}>Remove</Button>}
+              {isEditable && (draft.status === 'Approved' ? (
+                <Tooltip title={canPush ? '' : 'Choose a Test Plan + Suite first'}>
+                  <span>
+                    <Button color="success" variant="contained" disabled={!canPush || pushing}
+                      startIcon={pushing ? <CircularProgress size={16} /> : <PushPinIcon />}
+                      onClick={async () => { await doPush(); setOpen(false) }}>Push to ADO</Button>
+                  </span>
+                </Tooltip>
+              ) : (
+                <Button color="success" variant="contained" startIcon={<CheckIcon />}
+                  onClick={() => { onApprove(); setOpen(false) }}>Approve</Button>
+              ))}
               <Button onClick={() => setOpen(false)}>Close</Button>
             </>
           )}
@@ -209,11 +256,11 @@ function TestDraftCard({ draft, onApprove, onReject, onSave }: {
 function TestPushResults({ session, context }: {
   session: SessionDetail; context: { plan: TestPlan; suite: TestSuite } | undefined
 }) {
+  const wiUrl = useAdoWorkItemUrl()
   const drafts = session.drafts as unknown as Draft[]
   const pushed = drafts.filter(d => d.status === 'Pushed' && d.adoTestCaseId)
   if (pushed.length === 0) return null
   if (!['Done', 'Cancelled', 'Failed'].includes(session.status)) return null
-  const wiUrl = (id: number) => `https://dev.azure.com/${encodeURIComponent(ADO_ORG)}/${encodeURIComponent(ADO_PROJECT)}/_workitems/edit/${id}`
 
   function downloadCsv() {
     const header = ['SessionId','StoryId','StoryTitle','TestCaseId','TestCaseTitle','PlanId','PlanName','SuiteId','SuiteName','AdoUrl']
@@ -256,6 +303,7 @@ function TestPushResults({ session, context }: {
 
 // ── Detail body (pipeline + gate + tiles→popup + push) ───────────────────────
 function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
+  const wiUrl = useAdoWorkItemUrl()
   const drafts = session.drafts as unknown as Draft[]
   const [plans, setPlans] = useState<TestPlan[]>([])
   const [suites, setSuites] = useState<TestSuite[]>([])
@@ -266,33 +314,131 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
   const [pushedContext, setPushedContext] = useState<{ plan: TestPlan; suite: TestSuite }>()
   const [tcOpen, setTcOpen] = useState(false)
   const [tcFilter, setTcFilter] = useState<'all' | 'Draft' | 'Approved' | 'Pushed' | 'Rejected'>('all')
+  // Free-text context + feedback-driven refine state.
+  const [testerCtx, setTesterCtx] = useState(session.testerContext ?? '')
+  const [analystFeedback, setAnalystFeedback] = useState('')
+  const [analystBusy, setAnalystBusy] = useState(false)
+  const [overallFeedback, setOverallFeedback] = useState('')
+  const [perTestFb, setPerTestFb] = useState<Record<number, string>>({})
+  const [removeSet, setRemoveSet] = useState<Record<number, boolean>>({})
+  const [refineBusy, setRefineBusy] = useState(false)
 
-  useEffect(() => { axios.get<TestPlan[]>('/api/author-tests/plans').then(r => setPlans(r.data)).catch(() => {}) }, [])
+  // Reference plan dedup state (seeded from session).
+  const [refPlanId, setRefPlanId] = useState<number | ''>(session.referenceTestPlanId ?? '')
+  const [refSuiteId, setRefSuiteId] = useState<number | ''>(session.referenceTestSuiteId ?? '')
+  const [refSuites, setRefSuites] = useState<TestSuite[]>([])
+  const [navHint, setNavHint] = useState(session.planNavigationHint ?? '')
+  const [scanStatus, setScanStatus] = useState<{ caseCount: number; scannedAt: string } | null>(null)
+  const [rescanning, setRescanning] = useState(false)
+
+  useEffect(() => { getPlans().then(setPlans).catch(() => {}) }, [])
   useEffect(() => {
     if (!selectedPlan) { setSuites([]); return }
-    axios.get<TestSuite[]>(`/api/author-tests/plans/${selectedPlan}/suites`).then(r => setSuites(r.data)).catch(() => {})
+    getSuites(selectedPlan).then(setSuites).catch(() => {})
   }, [selectedPlan])
+
+  // Ref plan suites + scan status.
+  useEffect(() => {
+    if (!refPlanId) { setRefSuites([]); return }
+    getSuites(refPlanId).then(setRefSuites).catch(() => {})
+  }, [refPlanId])
+  useEffect(() => {
+    if (!refPlanId) { setScanStatus(null); return }
+    getScanStatus(refPlanId, refSuiteId !== '' ? refSuiteId : undefined)
+      .then(s => { if (s.scanId) setScanStatus({ caseCount: s.caseCount!, scannedAt: s.scannedAt! }) })
+      .catch(() => {})
+  }, [refPlanId, refSuiteId])
+
+  // Seed the push Plan/Suite from the Settings defaults (defaults.test_plan_id / _suite_id) so they're
+  // pre-filled here. Fills only empty selectors — a manual choice is never overridden.
+  const [pendingDefaultSuite, setPendingDefaultSuite] = useState<number | ''>('')
+  useEffect(() => {
+    getConfig().then(cfg => {
+      const planId = Number(cfg['defaults.test_plan_id']) || ''
+      const suiteId = Number(cfg['defaults.test_suite_id']) || ''
+      if (planId) setSelectedPlan(prev => (prev === '' ? planId : prev))
+      if (suiteId) setPendingDefaultSuite(suiteId)
+    }).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  // Apply the default suite once its plan's suites have loaded (avoids an out-of-range Select value).
+  useEffect(() => {
+    if (pendingDefaultSuite !== '' && selectedSuite === '' && suites.some(s => s.id === pendingDefaultSuite)) {
+      setSelectedSuite(pendingDefaultSuite)
+      setPendingDefaultSuite('')
+    }
+  }, [suites, pendingDefaultSuite, selectedSuite])
 
   const inFlight = ['Analyzing', 'Drafting', 'Pushing'].includes(session.status)
   const approvedCount = drafts.filter(d => d.status === 'Approved').length
   const canPush = approvedCount > 0 && !!selectedPlan && !!selectedSuite
 
-  const approveDraft = async (id: number) => { try { await axios.patch(`/api/author-tests/drafts/${id}`, { status: 'Approved' }); refetch() } catch (e) { onError(e, 'Approve failed') } }
-  const rejectDraft = async (id: number) => { try { await axios.patch(`/api/author-tests/drafts/${id}`, { status: 'Rejected' }); refetch() } catch (e) { onError(e, 'Reject failed') } }
-  const approveAll = async () => { try { await axios.post(`/api/author-tests/sessions/${session.id}/approve-all`); refetch() } catch (e) { onError(e, 'Approve all failed') } }
+  const approveDraft = async (id: number) => { try { await patchDraft(id, { status: 'Approved' }); refetch() } catch (e) { onError(e, 'Approve failed') } }
+  const rejectDraft = async (id: number) => { try { await patchDraft(id, { status: 'Rejected' }); refetch() } catch (e) { onError(e, 'Reject failed') } }
+  const pushDraftRow = async (id: number) => {
+    if (!selectedPlan || !selectedSuite) return
+    setPushError('')
+    try {
+      await pushDraft(id, { testPlanId: selectedPlan, testSuiteId: selectedSuite })
+      const plan = plans.find(p => p.id === selectedPlan); const suite = suites.find(s => s.id === selectedSuite)
+      if (plan && suite) setPushedContext({ plan, suite })
+      refetch()
+    } catch (e) { setPushError(axiosMessage(e)) }
+  }
+  const approveAll = async () => { try { await approveAllDrafts(session.id); refetch() } catch (e) { onError(e, 'Approve all failed') } }
   const saveDraft = async (id: number, patch: DraftPatch) => {
     const body: { title?: string; stepsJson?: string } = {}
     if (patch.title !== undefined) body.title = patch.title
     if (patch.steps !== undefined) body.stepsJson = JSON.stringify(patch.steps)
-    try { await axios.patch(`/api/author-tests/drafts/${id}`, body); refetch() } catch (e) { onError(e, 'Save failed') }
+    try { await patchDraft(id, body); refetch() } catch (e) { onError(e, 'Save failed') }
   }
-  const runTester = async () => { try { await axios.post(`/api/author-tests/sessions/${session.id}/run-tester`); refetch() } catch (e) { onError(e, 'Run Tester failed') } }
-  const cancel = async () => { try { await axios.post(`/api/author-tests/sessions/${session.id}/cancel`); refetch() } catch (e) { onError(e, 'Cancel failed') } }
+  const rescan = async () => {
+    if (!refPlanId) return
+    setRescanning(true)
+    try {
+      const result = await rescanPlan(refPlanId, refSuiteId !== '' ? refSuiteId : undefined)
+      setScanStatus({ caseCount: result.caseCount, scannedAt: result.scannedAt })
+    } catch (e) { onError(e, 'Rescan failed') } finally { setRescanning(false) }
+  }
+  const runTester = async () => {
+    try {
+      await apiRunTester(session.id, {
+        additionalContext: testerCtx.trim() || undefined,
+        referenceTestPlanId: refPlanId !== '' ? refPlanId : undefined,
+        referenceTestSuiteId: refSuiteId !== '' ? refSuiteId : undefined,
+        planNavigationHint: navHint.trim() || undefined,
+      })
+      refetch()
+    }
+    catch (e) { onError(e, 'Run Tester failed') }
+  }
+  const refineAnalyst = async () => {
+    if (!analystFeedback.trim()) return
+    setAnalystBusy(true)
+    try { await apiRerunAnalyst(session.id, analystFeedback.trim()); setAnalystFeedback(''); refetch() }
+    catch (e) { onError(e, 'Refine analysis failed') } finally { setAnalystBusy(false) }
+  }
+  const regenerateTester = async () => {
+    const perTest: TestFeedbackItem[] = []
+    for (const d of drafts) {
+      if (d.status === 'Pushed') continue
+      const fb = (perTestFb[d.id] ?? '').trim()
+      const rm = !!removeSet[d.id]
+      if (fb || rm) perTest.push({ draftId: d.id, feedback: fb || undefined, remove: rm })
+    }
+    if (!overallFeedback.trim() && perTest.length === 0) return
+    setRefineBusy(true)
+    try {
+      await apiRefineTester(session.id, { overallFeedback: overallFeedback.trim() || undefined, perTest })
+      setOverallFeedback(''); setPerTestFb({}); setRemoveSet({}); refetch()
+    } catch (e) { onError(e, 'Regenerate failed') } finally { setRefineBusy(false) }
+  }
+  const cancel = async () => { try { await cancelSession(session.id); refetch() } catch (e) { onError(e, 'Cancel failed') } }
   const push = async () => {
     if (!selectedPlan || !selectedSuite) return
     setPushing(true); setPushError('')
     try {
-      await axios.post(`/api/author-tests/sessions/${session.id}/push`, { testPlanId: selectedPlan, testSuiteId: selectedSuite })
+      await pushSession(session.id, { testPlanId: selectedPlan, testSuiteId: selectedSuite })
       const plan = plans.find(p => p.id === selectedPlan); const suite = suites.find(s => s.id === selectedSuite)
       if (plan && suite) setPushedContext({ plan, suite })
       refetch()
@@ -318,12 +464,15 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
   // On a terminal failure/cancel currentActivity is a generic "Failed: …" string, so infer the
   // furthest phase reached from durable data, landing the failed circle + default panel there.
   const terminalFailed = session.status === 'Failed' || session.status === 'Cancelled'
-  const reachedIdx = drafts.length > 0 ? 3 : session.analysisJson ? 2 : kbFiles.length > 0 ? 1 : 0
+  const dedupEv = persisted.find(e => e.phase === 'dedup')
+  const skippedDups = ((dedupEv?.data as Record<string, unknown> | undefined)?.skipped as Array<{ title: string; matchedTitle?: string; matchedAdoId?: number }> | undefined) ?? []
+  const flaggedDups = ((dedupEv?.data as Record<string, unknown> | undefined)?.flagged as Array<{ title: string; matchedTitle?: string; matchedAdoId?: number }> | undefined) ?? []
+  const reachedIdx = drafts.length > 0 ? 4 : session.analysisJson ? 3 : session.codeContext ? 2 : kbFiles.length > 0 ? 1 : 0
   const activeIdx = terminalFailed ? reachedIdx : activeStepIndex(session.status, session.currentActivity)
   const [picked, setPicked] = useState<number | null>(null)
   const sel = Math.min(picked ?? activeIdx, PIPELINE_STEPS.length - 1)
   const [view, setView] = useState<'findings' | 'activity'>('findings')
-  const streamUrl = `/api/author-tests/sessions/${session.id}/stream`
+  const streamUrl = sessionStreamUrl(session.id)
 
   const phaseLabel = PIPELINE_STEPS[sel]?.label ?? ''
 
@@ -348,12 +497,54 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
 
       {session.status === 'AwaitingTester' && (
         <Alert severity="info" icon={false} sx={{ mb: 2 }}>
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ alignItems: { sm: 'center' } }}>
-            <Box sx={{ flex: 1 }}>
+          <Stack spacing={1.5}>
+            <Box>
               <Typography variant="body2" sx={{ fontWeight: 600 }}>Analyst done — review (and edit) the analysis, then run the Tester</Typography>
               <Typography variant="caption" color="text.secondary">Open the Analyst circle to review/edit. Edits you save steer the Tester.</Typography>
             </Box>
-            <Button variant="contained" size="small" onClick={runTester}>Run Tester</Button>
+            <TextField label="Extra context for the Tester (optional)" size="small" multiline minRows={2} fullWidth
+              value={testerCtx} onChange={e => setTesterCtx(e.target.value)}
+              placeholder="Anything the Tester should keep in mind (special data, environment, flows to emphasize)…" />
+            <Box>
+              <Typography variant="caption" color="text.secondary" sx={{ mb: 0.75, display: 'block' }}>Reference Test Plan (optional — avoid recreating existing tests)</Typography>
+              <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
+                <FormControl size="small" sx={{ minWidth: 200 }}>
+                  <InputLabel>Reference Test Plan</InputLabel>
+                  <Select label="Reference Test Plan" value={refPlanId}
+                    onChange={e => { setRefPlanId(e.target.value as number); setRefSuiteId('') }}>
+                    <MenuItem value=""><em>None</em></MenuItem>
+                    {plans.map(p => <MenuItem key={p.id} value={p.id}>{p.name} <Box component="span" sx={{ ml: 1, color: 'text.secondary', fontSize: '0.85em' }}>#{p.id}</Box></MenuItem>)}
+                  </Select>
+                </FormControl>
+                <FormControl size="small" sx={{ minWidth: 200 }} disabled={!refPlanId}>
+                  <InputLabel>Suite scope (optional)</InputLabel>
+                  <Select label="Suite scope (optional)" value={refSuiteId}
+                    onChange={e => setRefSuiteId(e.target.value as number)}>
+                    <MenuItem value=""><em>All suites</em></MenuItem>
+                    {refSuites.map(s => <MenuItem key={s.id} value={s.id}>{s.name} <Box component="span" sx={{ ml: 1, color: 'text.secondary', fontSize: '0.85em' }}>#{s.id}</Box></MenuItem>)}
+                  </Select>
+                </FormControl>
+                {!!refPlanId && (
+                  <Button size="small" variant="outlined" disabled={rescanning}
+                    startIcon={rescanning ? <CircularProgress size={12} /> : undefined}
+                    onClick={rescan}>
+                    {rescanning ? 'Rescanning…' : 'Rescan plan'}
+                  </Button>
+                )}
+              </Stack>
+              {!!refPlanId && scanStatus && (
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                  Indexed {scanStatus.caseCount} cases · scanned {new Date(scanStatus.scannedAt).toLocaleString()}
+                </Typography>
+              )}
+            </Box>
+            <TextField label="Plan navigation hint (optional)" size="small" fullWidth
+              value={navHint} onChange={e => setNavHint(e.target.value)}
+              placeholder='e.g. "Only Billing → Invoices; ignore Regression folder"'
+              disabled={!refPlanId} />
+            <Box sx={{ textAlign: 'right' }}>
+              <Button variant="contained" size="small" onClick={runTester}>Run Tester</Button>
+            </Box>
           </Stack>
         </Alert>
       )}
@@ -378,7 +569,7 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
             <Chip size="small" label={`#${session.workItemId}`} />
             {wiType && <Chip size="small" variant="outlined" label={wiType} />}
             <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }}>{session.workItemTitle}</Typography>
-            <Link href={ADO_WI_URL(session.workItemId)} target="_blank" rel="noreferrer" variant="body2">Open in Azure DevOps</Link>
+            <Link href={wiUrl(session.workItemId as number)} target="_blank" rel="noreferrer" variant="body2">Open in Azure DevOps</Link>
           </Stack>
         </CardContent></Card>
       )}
@@ -399,23 +590,85 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
       )}
 
       {view === 'findings' && sel === 2 && (
-        <>
-          {session.status === 'Analyzing' && !session.analysisJson && <AnalystProgress streamUrl={streamUrl} />}
-          <AnalysisPanel analysisJson={session.analysisJson}
-            onSave={async (a) => { await axios.patch(`/api/author-tests/sessions/${session.id}/analysis`, a); refetch() }} />
-          {session.status !== 'Analyzing' && !session.analysisJson && (
-            <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: 'center' }}>No analysis available.</Typography>
+        <Card variant="outlined"><CardContent>
+          <Typography variant="subtitle2" gutterBottom>Code discovery</Typography>
+          {session.codeContext ? (
+            <Box component="pre" sx={{ fontFamily: 'monospace', fontSize: '0.75rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 400, overflowY: 'auto', bgcolor: 'action.hover', p: 1.5, borderRadius: 1 }}>
+              {session.codeContext}
+            </Box>
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              {inFlight ? 'Discovering code…' : 'No code context was discovered for this story.'}
+            </Typography>
           )}
-        </>
+        </CardContent></Card>
       )}
 
       {view === 'findings' && sel === 3 && (
         <>
+          {session.status === 'Analyzing' && !session.analysisJson && <AnalystProgress streamUrl={streamUrl} />}
+          <AnalysisPanel analysisJson={session.analysisJson}
+            onSave={async (a) => { await saveAnalysis(session.id, a); refetch() }} />
+          {session.status !== 'Analyzing' && !session.analysisJson && (
+            <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: 'center' }}>No analysis available.</Typography>
+          )}
+          {!!session.analysisJson && !inFlight && (
+            <Card variant="outlined" sx={{ mt: 2 }}><CardContent>
+              <Typography variant="subtitle2" gutterBottom>Refine analysis with feedback</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Missing edge cases, permissions, or a whole area? Describe what to add — the Analyst improves
+                the existing analysis in place (it won't start over).
+              </Typography>
+              <TextField size="small" multiline minRows={2} fullWidth sx={{ mt: 1 }}
+                value={analystFeedback} onChange={e => setAnalystFeedback(e.target.value)}
+                placeholder="e.g. No edge cases for expired sessions; add admin-vs-viewer permission checks." />
+              <Box sx={{ textAlign: 'right', mt: 1 }}>
+                <Button variant="outlined" size="small" disabled={analystBusy || !analystFeedback.trim()}
+                  startIcon={analystBusy ? <CircularProgress size={14} /> : <PsychologyIcon />} onClick={refineAnalyst}>
+                  Refine analysis
+                </Button>
+              </Box>
+            </CardContent></Card>
+          )}
+        </>
+      )}
+
+      {view === 'findings' && sel === 4 && (
+        <>
           {session.status === 'Drafting' && drafts.length === 0 && <TesterProgress streamUrl={streamUrl} />}
           {drafts.length === 0 && session.status !== 'Drafting' && (
             <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: 'center' }}>
-              {session.status === 'AwaitingTester' ? 'Tester has not run yet — click “Run Tester” above.' : 'No test cases yet.'}
+              {session.status === 'AwaitingTester' ? 'Tester has not run yet — click "Run Tester" above.' : 'No test cases yet.'}
             </Typography>
+          )}
+          {(skippedDups.length > 0 || flaggedDups.length > 0) && (
+            <Card variant="outlined" sx={{ mb: 2, borderColor: 'info.main' }}><CardContent>
+              <Typography variant="subtitle2" gutterBottom>Dedup — existing ADO tests considered</Typography>
+              {skippedDups.length > 0 && (
+                <Box sx={{ mb: 1 }}>
+                  <Typography variant="caption" color="text.secondary">Skipped (already covered):</Typography>
+                  <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                    {skippedDups.map((d, i) => (
+                      <Tooltip key={i} title={d.matchedTitle ? `Matched: ${d.matchedTitle}${d.matchedAdoId ? ` (TC #${d.matchedAdoId})` : ''}` : ''}>
+                        <Chip size="small" color="info" variant="outlined" label={d.title} />
+                      </Tooltip>
+                    ))}
+                  </Stack>
+                </Box>
+              )}
+              {flaggedDups.length > 0 && (
+                <Box>
+                  <Typography variant="caption" color="text.secondary">Similar to existing (kept for review):</Typography>
+                  <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                    {flaggedDups.map((d, i) => (
+                      <Tooltip key={i} title={d.matchedTitle ? `Similar to: ${d.matchedTitle}${d.matchedAdoId ? ` (TC #${d.matchedAdoId})` : ''}` : ''}>
+                        <Chip size="small" color="warning" variant="outlined" label={d.title} />
+                      </Tooltip>
+                    ))}
+                  </Stack>
+                </Box>
+              )}
+            </CardContent></Card>
           )}
           {drafts.length > 0 && (
         <>
@@ -447,7 +700,10 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
               <Stack spacing={1.5}>
                 {visible.map(d => (
                   <TestDraftCard key={d.id} draft={d}
-                    onApprove={() => approveDraft(d.id)} onReject={() => rejectDraft(d.id)} onSave={p => saveDraft(d.id, p)} />
+                    onApprove={() => approveDraft(d.id)} onReject={() => rejectDraft(d.id)} onPush={() => pushDraftRow(d.id)} onSave={p => saveDraft(d.id, p)}
+                    canPush={!!selectedPlan && !!selectedSuite}
+                    feedback={perTestFb[d.id]} onFeedbackChange={v => setPerTestFb(m => ({ ...m, [d.id]: v }))}
+                    markedRemove={!!removeSet[d.id]} onToggleRemove={v => setRemoveSet(m => ({ ...m, [d.id]: v }))} />
                 ))}
                 {visible.length === 0 && (
                   <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: 'center' }}>
@@ -455,6 +711,23 @@ function AuthorDetailBody({ session, refetch, onError }: DetailBodyProps) {
                   </Typography>
                 )}
               </Stack>
+              <Divider sx={{ my: 2.5 }} />
+              <Typography variant="subtitle2" gutterBottom>Regenerate with feedback</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Leave feedback on individual tests above (or mark some to remove), and/or give overall direction.
+                The Tester updates flagged tests, adds new ones, and drops only those you marked — pushed tests are kept.
+              </Typography>
+              <TextField size="small" multiline minRows={2} fullWidth sx={{ mt: 1 }}
+                value={overallFeedback} onChange={e => setOverallFeedback(e.target.value)}
+                placeholder="Overall feedback — e.g. add negative cases for invalid input; split the long happy-path test." />
+              <Box sx={{ textAlign: 'right', mt: 1 }}>
+                <Button variant="outlined" size="small"
+                  disabled={refineBusy || (!overallFeedback.trim()
+                    && !Object.values(perTestFb).some(v => (v ?? '').trim())
+                    && !Object.values(removeSet).some(Boolean))}
+                  startIcon={refineBusy ? <CircularProgress size={14} /> : <RuleIcon />}
+                  onClick={regenerateTester}>Regenerate with feedback</Button>
+              </Box>
               <Divider sx={{ my: 2.5 }} />
               <Typography variant="subtitle2" gutterBottom>Push approved to ADO</Typography>
               <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
@@ -494,16 +767,27 @@ function AuthorStartForm({ onStarted, onError, onClose }: StartFormProps) {
   const [selectedWi, setSelectedWi] = useState<WorkItemOption | null>(null)
   const [autoHandoff, setAutoHandoff] = useState(true)
   const [pauseAtReview, setPauseAtReview] = useState(false)
+  const [additional, setAdditional] = useState('')
   const [starting, setStarting] = useState(false)
+  const [startPlans, setStartPlans] = useState<TestPlan[]>([])
+  const [startSuites, setStartSuites] = useState<TestSuite[]>([])
+  const [startRefPlanId, setStartRefPlanId] = useState<number | ''>('')
+  const [startRefSuiteId, setStartRefSuiteId] = useState<number | ''>('')
+  const [startNavHint, setStartNavHint] = useState('')
 
   useEffect(() => {
     if (wiQuery.length < 2) { setWiOptions([]); return }
     const t = setTimeout(() => {
-      axios.get<WorkItemOption[]>('/api/author-tests/search', { params: { q: wiQuery } })
-        .then(r => setWiOptions(r.data)).catch(() => setWiOptions([]))
+      searchWorkItems(wiQuery).then(setWiOptions).catch(() => setWiOptions([]))
     }, 400)
     return () => clearTimeout(t)
   }, [wiQuery])
+
+  useEffect(() => { getPlans().then(setStartPlans).catch(() => {}) }, [])
+  useEffect(() => {
+    if (!startRefPlanId) { setStartSuites([]); return }
+    getSuites(startRefPlanId).then(setStartSuites).catch(() => {})
+  }, [startRefPlanId])
 
   async function start() {
     if (!selectedWi) return
@@ -511,8 +795,14 @@ function AuthorStartForm({ onStarted, onError, onClose }: StartFormProps) {
     try {
       // Auto + pause-at-review reuses the manual stop: don't auto-trigger Tester.
       const auto = autoHandoff && !pauseAtReview
-      const { data } = await axios.post<{ sessionId: number }>(`/api/author-tests/${PROJECT_ID}/start`, { workItemId: selectedWi.id, autoHandoff: auto })
-      onClose(); onStarted(data.sessionId)
+      const { sessionId } = await startSession(PROJECT_ID, {
+        workItemId: selectedWi.id, autoHandoff: auto,
+        additionalContext: additional.trim() || undefined,
+        referenceTestPlanId: startRefPlanId !== '' ? startRefPlanId : undefined,
+        referenceTestSuiteId: startRefSuiteId !== '' ? startRefSuiteId : undefined,
+        planNavigationHint: startNavHint.trim() || undefined,
+      })
+      onClose(); onStarted(sessionId)
     } catch (e) { onError(e, 'Start failed') } finally { setStarting(false) }
   }
 
@@ -539,6 +829,36 @@ function AuthorStartForm({ onStarted, onError, onClose }: StartFormProps) {
       </Box>
       <FormControlLabel control={<Switch checked={pauseAtReview} disabled={!autoHandoff} onChange={(_, v) => setPauseAtReview(v)} />}
         label={<Typography variant="body2">Pause at analysis review <Typography component="span" variant="caption" color="text.secondary">(stop before Tester)</Typography></Typography>} />
+      <TextField label="Additional context (optional)" size="small" multiline minRows={2} fullWidth
+        value={additional} onChange={e => setAdditional(e.target.value)}
+        placeholder="Anything not in the story — e.g. the feature lives at route /admin/settings, Billing tab. Guides the Analyst (and code discovery)."
+        helperText="Free-text guidance for the Analyst. Extra Tester context can be added later, at the review gate." />
+      <Box>
+        <Typography variant="body2" sx={{ mb: 0.75, fontWeight: 500 }}>Reference Test Plan (optional)</Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>Point the Tester at an existing plan so it avoids recreating covered tests.</Typography>
+        <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap', gap: 1 }}>
+          <FormControl size="small" sx={{ minWidth: 200 }}>
+            <InputLabel>Reference Test Plan</InputLabel>
+            <Select label="Reference Test Plan" value={startRefPlanId}
+              onChange={e => { setStartRefPlanId(e.target.value as number); setStartRefSuiteId('') }}>
+              <MenuItem value=""><em>None</em></MenuItem>
+              {startPlans.map(p => <MenuItem key={p.id} value={p.id}>{p.name} <Box component="span" sx={{ ml: 1, color: 'text.secondary', fontSize: '0.85em' }}>#{p.id}</Box></MenuItem>)}
+            </Select>
+          </FormControl>
+          <FormControl size="small" sx={{ minWidth: 200 }} disabled={!startRefPlanId}>
+            <InputLabel>Suite scope (optional)</InputLabel>
+            <Select label="Suite scope (optional)" value={startRefSuiteId}
+              onChange={e => setStartRefSuiteId(e.target.value as number)}>
+              <MenuItem value=""><em>All suites</em></MenuItem>
+              {startSuites.map(s => <MenuItem key={s.id} value={s.id}>{s.name} <Box component="span" sx={{ ml: 1, color: 'text.secondary', fontSize: '0.85em' }}>#{s.id}</Box></MenuItem>)}
+            </Select>
+          </FormControl>
+        </Stack>
+      </Box>
+      <TextField label="Plan navigation hint (optional)" size="small" fullWidth
+        value={startNavHint} onChange={e => setStartNavHint(e.target.value)}
+        placeholder='e.g. "Only Billing → Invoices; ignore Regression folder"'
+        disabled={!startRefPlanId} />
       <Button variant="contained" onClick={start} disabled={starting || !selectedWi}>
         {starting ? <CircularProgress size={18} sx={{ color: 'white' }} /> : 'Run Analyst + Tester'}
       </Button>
@@ -567,12 +887,9 @@ export const authorTestsConfig: SessionModuleConfig = {
   pipelineSteps: PIPELINE_STEPS,
   activeStepIndex,
   analyticsColumns,
-  listSessions: async (take, skip) => {
-    const { data } = await axios.get<{ total: number; items: SessionSummary[] }>(`/api/author-tests/sessions/${PROJECT_ID}`, { params: { take, skip } })
-    return data
-  },
-  getDetail: async (id) => { const { data } = await axios.get<SessionDetail>(`/api/author-tests/sessions/detail/${id}`); return data },
-  streamUrl: (id) => `/api/author-tests/sessions/${id}/stream`,
+  listSessions: (take, skip) => listSessionsPage(PROJECT_ID, take, skip),
+  getDetail: (id) => getSessionDetail(id),
+  streamUrl: sessionStreamUrl,
   StartForm: AuthorStartForm,
   DetailBody: AuthorDetailBody,
 }

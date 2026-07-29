@@ -17,6 +17,194 @@ namespace QaAutomation.Infrastructure.Data.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.11");
 
+            modelBuilder.Entity("QaAutomation.Core.Models.ApiTestDraft", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("Id");
+
+                    b.Property<int?>("AdoTestCaseId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("AdoTestCaseId");
+
+                    b.Property<int?>("CaseIndex")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("CaseIndex");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("CreatedAt");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("ErrorMessage");
+
+                    b.Property<string>("Level")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Level");
+
+                    b.Property<string>("Preconditions")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Preconditions");
+
+                    b.Property<string>("SchemaJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("SchemaJson");
+
+                    b.Property<int>("SessionId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("SessionId");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("SortOrder");
+
+                    b.Property<string>("SourceRoutesJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("SourceRoutesJson");
+
+                    b.Property<string>("SpecCode")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("SpecCode");
+
+                    b.Property<string>("SpecFilePath")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("SpecFilePath");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Status");
+
+                    b.Property<string>("StepsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("StepsJson");
+
+                    b.Property<string>("Tags")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Tags");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Title");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("UpdatedAt");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SessionId")
+                        .HasDatabaseName("ix_ApiTestDrafts_SessionId");
+
+                    b.ToTable("ApiTestDrafts", (string)null);
+                });
+
+            modelBuilder.Entity("QaAutomation.Core.Models.ApiTestSession", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("Id");
+
+                    b.Property<bool>("ActivityEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true)
+                        .HasColumnName("ActivityEnabled");
+
+                    b.Property<string>("AnalysisJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("AnalysisJson");
+
+                    b.Property<bool>("AutoHandoff")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("AutoHandoff");
+
+                    b.Property<string>("Branch")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Branch");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("CreatedAt");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("ErrorMessage");
+
+                    b.Property<string>("EventLogJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("EventLogJson");
+
+                    b.Property<string>("FrontendModule")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("FrontendModule");
+
+                    b.Property<string>("FrontendPath")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("FrontendPath");
+
+                    b.Property<string>("InventoryJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("InventoryJson");
+
+                    b.Property<string>("Module")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Module");
+
+                    b.Property<int>("ProjectId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("ProjectId");
+
+                    b.Property<string>("Repository")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Repository");
+
+                    b.Property<string>("SourceDirsJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("SourceDirsJson");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Status");
+
+                    b.Property<int?>("TestPlanId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("TestPlanId");
+
+                    b.Property<int?>("TestSuiteId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("TestSuiteId");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("UpdatedAt");
+
+                    b.Property<int?>("WorkItemId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("WorkItemId");
+
+                    b.Property<string>("WorkItemTitle")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("WorkItemTitle");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "CreatedAt")
+                        .HasDatabaseName("ix_ApiTestSessions_ProjectId_CreatedAt");
+
+                    b.ToTable("ApiTestSessions", (string)null);
+                });
+
             modelBuilder.Entity("QaAutomation.Core.Models.AppSetting", b =>
                 {
                     b.Property<string>("Key")
@@ -308,6 +496,66 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                     b.ToTable("Documents", (string)null);
                 });
 
+            modelBuilder.Entity("QaAutomation.Core.Models.PipelineWatch", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("Id");
+
+                    b.Property<int>("AdoPipelineId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("AdoPipelineId");
+
+                    b.Property<string>("AdoPipelineName")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("AdoPipelineName");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("CreatedAt");
+
+                    b.Property<bool>("Enabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true)
+                        .HasColumnName("Enabled");
+
+                    b.Property<DateTime?>("LastPollAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("LastPollAt");
+
+                    b.Property<string>("LastPollError")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("LastPollError");
+
+                    b.Property<int?>("LastSeenBuildId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("LastSeenBuildId");
+
+                    b.Property<string>("Module")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Module");
+
+                    b.Property<int>("ProjectId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("ProjectId");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("UpdatedAt");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "AdoPipelineId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_PipelineWatches_ProjectId_AdoPipelineId");
+
+                    b.ToTable("PipelineWatches", (string)null);
+                });
+
             modelBuilder.Entity("QaAutomation.Core.Models.Project", b =>
                 {
                     b.Property<int>("Id")
@@ -410,6 +658,408 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                     b.ToTable("Reports", (string)null);
                 });
 
+            modelBuilder.Entity("QaAutomation.Core.Models.SchemaConnection", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("Id");
+
+                    b.Property<string>("ConnectionString")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("ConnectionString");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("CreatedAt");
+
+                    b.Property<string>("DbDatabase")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("DbDatabase");
+
+                    b.Property<string>("DbUser")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("DbUser");
+
+                    b.Property<string>("Environment")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("Default")
+                        .HasColumnName("Environment");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("IsDefault");
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("ProductId");
+
+                    b.Property<string>("Server")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Server");
+
+                    b.Property<string>("ServiceName")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("ServiceName");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("UpdatedAt");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProductId")
+                        .HasDatabaseName("ix_SchemaConnections_ProductId");
+
+                    b.ToTable("SchemaConnections", (string)null);
+                });
+
+            modelBuilder.Entity("QaAutomation.Core.Models.SchemaEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("Id");
+
+                    b.Property<double?>("Confidence")
+                        .HasColumnType("REAL")
+                        .HasColumnName("Confidence");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("CreatedAt");
+
+                    b.Property<string>("DisplayColumnsJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("DisplayColumnsJson");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("DisplayName");
+
+                    b.Property<string>("IdColumn")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("IdColumn");
+
+                    b.Property<bool>("IsEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true)
+                        .HasColumnName("IsEnabled");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Key");
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("ProductId");
+
+                    b.Property<string>("RootTableName")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("RootTableName");
+
+                    b.Property<string>("ScopeColumn")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("ScopeColumn");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("SortOrder");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Source");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("UpdatedAt");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProductId", "Key")
+                        .IsUnique()
+                        .HasDatabaseName("ix_SchemaEntities_ProductId_Key");
+
+                    b.ToTable("SchemaEntities", (string)null);
+                });
+
+            modelBuilder.Entity("QaAutomation.Core.Models.SchemaProduct", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("Id");
+
+                    b.Property<string>("AdoProject")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("AdoProject");
+
+                    b.Property<string>("AdoRepository")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("AdoRepository");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("CreatedAt");
+
+                    b.Property<string>("DefaultBranch")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("DefaultBranch");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Description");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Name");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("UpdatedAt");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("SchemaProducts", (string)null);
+                });
+
+            modelBuilder.Entity("QaAutomation.Core.Models.SchemaRelation", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("Id");
+
+                    b.Property<double?>("Confidence")
+                        .HasColumnType("REAL")
+                        .HasColumnName("Confidence");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("CreatedAt");
+
+                    b.Property<string>("Evidence")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Evidence");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Kind");
+
+                    b.Property<int>("ScanId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("ScanId");
+
+                    b.Property<string>("SourceColumn")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("SourceColumn");
+
+                    b.Property<int>("SourceTableId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("SourceTableId");
+
+                    b.Property<string>("TargetColumn")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("TargetColumn");
+
+                    b.Property<int>("TargetTableId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("TargetTableId");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ScanId")
+                        .HasDatabaseName("ix_SchemaRelations_ScanId");
+
+                    b.HasIndex("SourceTableId")
+                        .HasDatabaseName("ix_SchemaRelations_SourceTableId");
+
+                    b.ToTable("SchemaRelations", (string)null);
+                });
+
+            modelBuilder.Entity("QaAutomation.Core.Models.SchemaScan", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("Id");
+
+                    b.Property<string>("Branch")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Branch");
+
+                    b.Property<string>("CommitId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("CommitId");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("CompletedAt");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("CreatedAt");
+
+                    b.Property<int>("EntityCount")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("EntityCount");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("ErrorMessage");
+
+                    b.Property<string>("EventLogJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("EventLogJson");
+
+                    b.Property<string>("Phase")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Phase");
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("ProductId");
+
+                    b.Property<int>("RelationCount")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("RelationCount");
+
+                    b.Property<int>("ServiceCount")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("ServiceCount");
+
+                    b.Property<DateTime?>("StartedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("StartedAt");
+
+                    b.Property<string>("StatsJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("StatsJson");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Status");
+
+                    b.Property<int>("TableCount")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("TableCount");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProductId", "CreatedAt")
+                        .HasDatabaseName("ix_SchemaScans_ProductId_CreatedAt");
+
+                    b.ToTable("SchemaScans", (string)null);
+                });
+
+            modelBuilder.Entity("QaAutomation.Core.Models.SchemaService", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("Id");
+
+                    b.Property<string>("DbContextClass")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("DbContextClass");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Name");
+
+                    b.Property<int>("ScanId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("ScanId");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("SortOrder");
+
+                    b.Property<string>("SourcePath")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("SourcePath");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ScanId")
+                        .HasDatabaseName("ix_SchemaServices_ScanId");
+
+                    b.ToTable("SchemaServices", (string)null);
+                });
+
+            modelBuilder.Entity("QaAutomation.Core.Models.SchemaTable", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("Id");
+
+                    b.Property<string>("ColumnsJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("ColumnsJson");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("CreatedAt");
+
+                    b.Property<bool>("IsExternalRef")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("IsExternalRef");
+
+                    b.Property<bool>("IsKeyless")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("IsKeyless");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Name");
+
+                    b.Property<string>("OwnerServiceName")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("OwnerServiceName");
+
+                    b.Property<int>("ScanId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("ScanId");
+
+                    b.Property<int?>("ServiceId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("ServiceId");
+
+                    b.Property<string>("SourceFile")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("SourceFile");
+
+                    b.Property<string>("SqlSchema")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("SqlSchema");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ScanId")
+                        .HasDatabaseName("ix_SchemaTables_ScanId");
+
+                    b.HasIndex("ServiceId")
+                        .HasDatabaseName("ix_SchemaTables_ServiceId");
+
+                    b.ToTable("SchemaTables", (string)null);
+                });
+
             modelBuilder.Entity("QaAutomation.Core.Models.TestCaseDraft", b =>
                 {
                     b.Property<int>("Id")
@@ -455,6 +1105,187 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                         .HasDatabaseName("ix_TestCaseDrafts_SessionId");
 
                     b.ToTable("TestCaseDrafts", (string)null);
+                });
+
+            modelBuilder.Entity("QaAutomation.Core.Models.TestFailure", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("Id");
+
+                    b.Property<int?>("AdoTestCaseId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("AdoTestCaseId");
+
+                    b.Property<string>("ArtifactPaths")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("ArtifactPaths");
+
+                    b.Property<string>("BugDraftJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("BugDraftJson");
+
+                    b.Property<int?>("BugId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("BugId");
+
+                    b.Property<string>("Classification")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Classification");
+
+                    b.Property<string>("Confidence")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Confidence");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Reason");
+
+                    b.Property<int>("RunId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("RunId");
+
+                    b.Property<string>("TestTitle")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("TestTitle");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RunId")
+                        .HasDatabaseName("ix_TestFailures_RunId");
+
+                    b.ToTable("TestFailures", (string)null);
+                });
+
+            modelBuilder.Entity("QaAutomation.Core.Models.TestRun", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("Id");
+
+                    b.Property<bool>("ActivityEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true)
+                        .HasColumnName("ActivityEnabled");
+
+                    b.Property<int?>("AdoTestRunId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("AdoTestRunId");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("CreatedAt");
+
+                    b.Property<long>("DurationMs")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("DurationMs");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("ErrorMessage");
+
+                    b.Property<string>("EventLogJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Failed")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("Failed");
+
+                    b.Property<DateTime?>("FinishedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("FinishedAt");
+
+                    b.Property<string>("ImpactAnalysisJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("ImpactAnalysisJson");
+
+                    b.Property<string>("JunitPath")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("JunitPath");
+
+                    b.Property<string>("LevelBreakdownJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LevelFilter")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("LevelFilter");
+
+                    b.Property<string>("Module")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Module");
+
+                    b.Property<int>("Passed")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("Passed");
+
+                    b.Property<string>("Profile")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Profile");
+
+                    b.Property<int>("ProjectId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("ProjectId");
+
+                    b.Property<string>("ReportPath")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("ReportPath");
+
+                    b.Property<int>("Skipped")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("Skipped");
+
+                    b.Property<DateTime?>("StartedAt")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("StartedAt");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Status");
+
+                    b.Property<string>("TagFilter")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("TagFilter");
+
+                    b.Property<int?>("TestPlanId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("TestPlanId");
+
+                    b.Property<int?>("TestSuiteId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("TestSuiteId");
+
+                    b.Property<int?>("TriggerBuildId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("TriggerBuildId");
+
+                    b.Property<string>("TriggerCommitSha")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("TriggerCommitSha");
+
+                    b.Property<int?>("TriggerPipelineId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("TriggerPipelineId");
+
+                    b.Property<string>("TriggerSource")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("TriggerSource");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "CreatedAt")
+                        .HasDatabaseName("ix_TestRuns_ProjectId_CreatedAt");
+
+                    b.ToTable("TestRuns", (string)null);
                 });
 
             modelBuilder.Entity("QaAutomation.Core.Models.TestSession", b =>
@@ -518,6 +1349,24 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                     b.ToTable("TestSessions", (string)null);
                 });
 
+            modelBuilder.Entity("QaAutomation.Core.Models.ApiTestDraft", b =>
+                {
+                    b.HasOne("QaAutomation.Core.Models.ApiTestSession", null)
+                        .WithMany("Drafts")
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("QaAutomation.Core.Models.ApiTestSession", b =>
+                {
+                    b.HasOne("QaAutomation.Core.Models.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("QaAutomation.Core.Models.BugDraft", b =>
                 {
                     b.HasOne("QaAutomation.Core.Models.BugSession", null)
@@ -536,6 +1385,69 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("QaAutomation.Core.Models.PipelineWatch", b =>
+                {
+                    b.HasOne("QaAutomation.Core.Models.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("QaAutomation.Core.Models.SchemaConnection", b =>
+                {
+                    b.HasOne("QaAutomation.Core.Models.SchemaProduct", null)
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("QaAutomation.Core.Models.SchemaEntity", b =>
+                {
+                    b.HasOne("QaAutomation.Core.Models.SchemaProduct", null)
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("QaAutomation.Core.Models.SchemaRelation", b =>
+                {
+                    b.HasOne("QaAutomation.Core.Models.SchemaScan", null)
+                        .WithMany()
+                        .HasForeignKey("ScanId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("QaAutomation.Core.Models.SchemaScan", b =>
+                {
+                    b.HasOne("QaAutomation.Core.Models.SchemaProduct", null)
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("QaAutomation.Core.Models.SchemaService", b =>
+                {
+                    b.HasOne("QaAutomation.Core.Models.SchemaScan", null)
+                        .WithMany()
+                        .HasForeignKey("ScanId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("QaAutomation.Core.Models.SchemaTable", b =>
+                {
+                    b.HasOne("QaAutomation.Core.Models.SchemaScan", null)
+                        .WithMany()
+                        .HasForeignKey("ScanId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("QaAutomation.Core.Models.TestCaseDraft", b =>
                 {
                     b.HasOne("QaAutomation.Core.Models.TestSession", null)
@@ -545,9 +1457,37 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("QaAutomation.Core.Models.TestFailure", b =>
+                {
+                    b.HasOne("QaAutomation.Core.Models.TestRun", null)
+                        .WithMany("Failures")
+                        .HasForeignKey("RunId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("QaAutomation.Core.Models.TestRun", b =>
+                {
+                    b.HasOne("QaAutomation.Core.Models.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("QaAutomation.Core.Models.ApiTestSession", b =>
+                {
+                    b.Navigation("Drafts");
+                });
+
             modelBuilder.Entity("QaAutomation.Core.Models.BugSession", b =>
                 {
                     b.Navigation("Drafts");
+                });
+
+            modelBuilder.Entity("QaAutomation.Core.Models.TestRun", b =>
+                {
+                    b.Navigation("Failures");
                 });
 
             modelBuilder.Entity("QaAutomation.Core.Models.TestSession", b =>
