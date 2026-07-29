@@ -126,7 +126,7 @@ run against standing test story **177540** (see `.cursor/rules/ralph-loop-ops.md
   `ScriptInventoryService` scanning both spec roots, parsing `@qa-meta`, cross-referencing `ApiTestDraft`,
   producing `linked`/`orphan_disk`/`orphan_db`/`no_meta` reconcile states. **AC:** B/T; all four reconcile
   states covered by tests; UI-root scan no-ops gracefully when `PlaywrightRoot` unset.
-- [ ] **QLV2-303** — `PlaywrightRunSpec` += `Headed`/`Workers` (additive, zero change for QA Runs);
+- [x] **QLV2-303** — `PlaywrightRunSpec` += `Headed`/`Workers` (additive, zero change for QA Runs);
   `IScriptBoardExecutionService`/service (filter → resolve specs → `ScriptBoardRun` row → execute via
   `IPlaywrightRunner`, `RunId = -runId` disk-namespace trick, reuses `RunCancellationRegistry`);
   `ScriptsBoardController` (`inventory`, `runs` POST/GET/cancel/stream). **AC:** B/T; end-to-end

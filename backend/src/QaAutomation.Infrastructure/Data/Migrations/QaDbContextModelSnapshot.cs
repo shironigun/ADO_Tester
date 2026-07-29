@@ -1174,6 +1174,10 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("JunitPath");
 
+                    b.Property<string>("Module")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("Module");
+
                     b.Property<int>("Passed")
                         .HasColumnType("INTEGER")
                         .HasColumnName("Passed");

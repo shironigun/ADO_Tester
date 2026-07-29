@@ -11,6 +11,10 @@ public sealed class ScriptBoardRun
     public int ProjectId { get; set; }
     /// <summary>Human-readable description of what was selected, e.g. "module=leads, bucket=smoke".</summary>
     public string SelectionSummary { get; set; } = "";
+    /// <summary>Resolved single module for Allure-history keying (mirrors <see cref="TestRun.Module"/>'s
+    /// role in <c>PlaywrightRunner.HistoryFile</c>). Null when the selection spans multiple modules or
+    /// none was resolvable — the run's history then lands under the shared "_all" bucket.</summary>
+    public string? Module { get; set; }
     /// <summary>Resolved absolute spec file paths this run executed (JSON string[]), for re-run/audit.</summary>
     public string SpecFilePathsJson { get; set; } = "[]";
     public bool Headed { get; set; }

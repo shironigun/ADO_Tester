@@ -276,6 +276,11 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
             : "";
 
         var captureOpts = spec.EnableCapture ? ", screenshot: 'only-on-failure', trace: 'on-first-retry'" : "";
+        // Scripts Board (QLV2-303): headed/workers are additive overrides — both default to today's
+        // QA-Runs behavior (headless, env-driven workers) when unset, so this is a zero-behavior-change
+        // for every existing caller.
+        var headedOpts = spec.Headed ? ", headless: false" : "";
+        var workersExpr = spec.Workers is int w ? w.ToString() : "Number(process.env.AUTOMATION_WORKERS ?? '6')";
 
         var config = $$"""
             import { defineConfig } from '@playwright/test';
@@ -289,10 +294,10 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
               expect: { timeout: 10_000 },
               // Parallelise across spec files (workers) for speed; keep tests within a file ordered.
               fullyParallel: false,
-              workers: Number(process.env.AUTOMATION_WORKERS ?? '6'),
+              workers: {{workersExpr}},
               retries: 0,
               reporter: [['junit', { outputFile: 'junit.xml' }], ['json', { outputFile: 'results.json' }], ['allure-playwright', { resultsDir: 'allure-results' }]{{htmlReporter}}],
-              use: { baseURL: process.env.BASE_URL ?? 'http://localhost'{{captureOpts}} },
+              use: { baseURL: process.env.BASE_URL ?? 'http://localhost'{{captureOpts}}{{headedOpts}} },
               projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
             });
             """;

@@ -4,8 +4,8 @@
 - **Design:** `solution.md` (authoritative vision brief) · **Ruleset:** `Ralph loop.md`
 - **Backlog:** `prd.md` (tasks `QLV2-###`, grouped by slab, built in order) · **Guide:** `blueprint.md`
 - **Started:** 2026-07-29
-- **Status:** SLAB 2 COMPLETE. Slab 3 decomposed (QLV2-301..309). **QLV2-301 + QLV2-302 VERIFIED**
-  (176/176 tests pass). Resume point: **QLV2-303**. ADO PAT is currently expired (401) — see blocker note.
+- **Status:** SLAB 2 COMPLETE. Slab 3 decomposed (QLV2-301..309). **QLV2-301/302/303 VERIFIED**
+  (182/182 tests pass). Resume point: **QLV2-304**. ADO PAT is currently expired (401) — see blocker note.
 
 ## Operational note (2026-07-29)
 - This machine's `Shell` tool cannot enforce the sandbox policy without `required_permissions: ["all"]`
@@ -19,7 +19,7 @@
 | ---- | --------------------------------------------------------- | ------------------------------------------ |
 | 1    | Free-text + merge-refine in QA Loop                       | **COMPLETE** (QLV2-101..113, all VERIFIED) |
 | 2    | UI testing phase (Playwright agents via MCP + Claude CLI) | **COMPLETE** (QLV2-201..208, all VERIFIED) |
-| 3    | Scripts Board module                                      | In progress — 301+302 VERIFIED, 303 next   |
+| 3    | Scripts Board module                                      | In progress — 301-303 VERIFIED, 304 next   |
 
 ---
 
@@ -223,3 +223,29 @@
   risk; `dotnet build`+`dotnet test` (which spin up their own temp SQLite DBs via `DatabaseInitializer`)
   are sufficient confidence for this task. **If you still have a stuck backend process from an earlier
   manual test session, restart it** to pick up the new table.
+- **Root-caused the port-5250 mystery** (relevant for all future manual verification on this machine):
+  it's **Docker Desktop's `com.docker.backend.exe`**, not a stray dotnet process — it holds a wide
+  range of ports including 5250 on `0.0.0.0`/`[::]` (WSL2 networking proxy behavior), which is why
+  `Get-Process`/`Get-NetTCPConnection` looked inconsistent earlier. **Not touching it** — killing Docker's
+  backend would break the user's Docker environment for an unrelated reason. This means the backend dev
+  server can intermittently fail to bind :5250 on this machine depending on Docker's state; if that
+  happens, stop the conflicting container/Docker or free the port before `dotnet run`.
+
+### 2026-07-29 (QLV2-303 — execution service + controller)
+- **QLV2-303** — `PlaywrightRunSpec` += `Headed`/`Workers` (both default to today's behavior when unset —
+  `PlaywrightRunner.WriteRunConfig` only branches when set, byte-identical config for every existing
+  caller). `ScriptBoardRun` += `Module` column (migration `AddScriptBoardRunModule`, both providers) —
+  resolved once at `StartAsync` time (explicit `filter.Module`, else the single distinct module across
+  matched inventory items, else null → Allure `"_all"` bucket). `IScriptBoardExecutionService`/
+  `ScriptBoardExecutionService` (`Infrastructure/ScriptsBoard/`): `StartAsync` resolves either explicit
+  `SpecFilePaths` (wins outright) or an inventory filter (module/level/type/bucket/tag, excluding
+  `orphan_db` items with no file to run) → throws `ArgumentException` on zero matches → persists a
+  `Queued` `ScriptBoardRun`; `ExecuteAsync` sets `Running` → builds `PlaywrightRunSpec` with
+  **`RunId = -runId`** → `IPlaywrightRunner.RunAsync` → maps counts → `Passed`/`Failed`/`Cancelled`/`Error`
+  (exact mirror of `RunExecutionService`'s lifecycle). New `ScriptsBoardContracts.cs` (inventory + run
+  DTOs). New `ScriptsBoardController` (`GET inventory`, `POST runs`, `GET runs`, `GET runs/{id}`,
+  `GET runs/{id}/stream`, `POST runs/{id}/cancel`) — background-task-with-own-scope is a direct copy of
+  `QaRunsController.Start`, cancellation reuses the **same `RunCancellationRegistry` singleton** keyed by
+  `-runId`. Both registered in `DependencyInjection.cs`. New `ScriptBoardExecutionServiceTests.cs` (6
+  tests: module+level narrowing, explicit-paths bypass, zero-match throws, Passed/Failed/Cancelled
+  lifecycle incl. the negative-RunId assertion). **182/182 tests pass**, `dotnet build` clean.

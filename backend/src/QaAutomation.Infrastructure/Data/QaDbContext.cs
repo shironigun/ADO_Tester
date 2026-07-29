@@ -420,6 +420,7 @@ public sealed class QaDbContext : DbContext
             e.Property(x => x.Id).HasColumnName("Id").ValueGeneratedOnAdd();
             e.Property(x => x.ProjectId).HasColumnName("ProjectId").IsRequired();
             e.Property(x => x.SelectionSummary).HasColumnName("SelectionSummary").IsRequired();
+            e.Property(x => x.Module).HasColumnName("Module");
             e.Property(x => x.SpecFilePathsJson).HasColumnName("SpecFilePathsJson").IsRequired();
             e.Property(x => x.Headed).HasColumnName("Headed").IsRequired().HasDefaultValue(false);
             e.Property(x => x.Workers).HasColumnName("Workers");

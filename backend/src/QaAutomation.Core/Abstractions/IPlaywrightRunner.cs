@@ -30,6 +30,12 @@ public sealed class PlaywrightRunSpec
     /// <summary>When true, injects screenshot:'only-on-failure' and trace:'on-first-retry' into the
     /// playwright.config.ts. Set for UI-phase runs (DraftKind=UiScript); always false for API runs.</summary>
     public bool EnableCapture { get; init; } = false;
+    /// <summary>Scripts Board (QLV2-303): runs headed (visible browser) instead of the default headless.
+    /// Always false for QA Runs, which never sets it.</summary>
+    public bool Headed { get; init; } = false;
+    /// <summary>Scripts Board (QLV2-303): overrides the AUTOMATION_WORKERS env default when set. Null
+    /// (the QA Runs default) preserves today's env-driven worker count exactly.</summary>
+    public int? Workers { get; init; }
 }
 
 /// <summary>Outcome of a Playwright run.</summary>

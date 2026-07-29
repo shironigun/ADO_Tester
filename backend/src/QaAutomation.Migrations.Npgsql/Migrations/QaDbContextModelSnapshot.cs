@@ -1217,6 +1217,10 @@ namespace QaAutomation.Migrations.Npgsql.Migrations
                         .HasColumnType("text")
                         .HasColumnName("JunitPath");
 
+                    b.Property<string>("Module")
+                        .HasColumnType("text")
+                        .HasColumnName("Module");
+
                     b.Property<int>("Passed")
                         .HasColumnType("integer")
                         .HasColumnName("Passed");
