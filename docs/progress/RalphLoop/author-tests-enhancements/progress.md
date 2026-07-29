@@ -7,11 +7,7 @@
 - **Design:** solution.md · **Guide:** blueprint.md
 - **Branch:** `claude/chat-session-flzhjh`
 - **Started:** 2026-07-28
-- **Status:** CODE COMPLETE + PUSHED (38 of 40 tasks). All backend + frontend code for Phases 1–3 is
-  written and pushed. Frontend is verified in-container (`tsc`/`vite build` clean; lint = pre-existing
-  `react-hooks/set-state-in-effect` pattern only, no new errors). **Backend build/test + the EF
-  migration are pending on the user's local machine** (no .NET SDK in the container). Two tasks remain
-  TODO: **ATE-034** (EF migration, local) and **ATE-040** (feature doc + changelog, after verification).
+- **Status:** COMPLETE — all 40 tasks VERIFIED. ATE-034 EF migration generated locally (2026-07-29); ATE-040 feature doc + changelog written. 156/156 backend tests pass.
 
 ## Status legend
 - **VERIFIED** — implemented + verified green in this environment (frontend build/lint, or docs).
@@ -57,21 +53,21 @@
 | ATE-031 | AgentOrchestrator dedup injection + post-gen + event | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | inject when ref plan set; emit dedup {skipped,flagged} |
 | ATE-032 | AuthorTestsController rescan + scan-status endpoints | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | POST rescan + GET scan-status, optional suiteId |
 | ATE-033 | AuthorTestsContracts rescan/scan-status responses | CODE-COMPLETE | 2026-07-28 | 2026-07-28 | RescanPlanResponse + ScanStatusResponse |
-| ATE-034 | EF migration AuthorTestsContextAndIndex | TODO | | | **Local only** — no .NET SDK in container; user runs `dotnet ef migrations add …` |
+| ATE-034 | EF migration AuthorTestsContextAndIndex | VERIFIED | 2026-07-29 | 2026-07-29 | Generated locally; 156/156 tests pass |
 | ATE-035 | FE api rescanPlan/getScanStatus | VERIFIED | 2026-07-28 | 2026-07-28 | optional suiteId; typed responses |
 | ATE-036 | FE AwaitingTester ref-plan pickers + rescan + status | VERIFIED | 2026-07-28 | 2026-07-28 | plan/suite selects + Rescan + "indexed N cases" + nav hint |
 | ATE-037 | FE AuthorStartForm ref-plan pickers | VERIFIED | 2026-07-28 | 2026-07-28 | pickers + nav hint → startSession |
 | ATE-038 | FE Tester dedup results card | VERIFIED | 2026-07-28 | 2026-07-28 | skipped/flagged chips + matched-TC tooltips |
 | ATE-039 | CLAUDE.md docs-discipline rule + /docs structure | VERIFIED | 2026-07-28 | 2026-07-28 | committed d31d8d2 |
-| ATE-040 | Feature doc + changelog entry | TODO | | | Written after the user's local end-to-end verification passes |
+| ATE-040 | Feature doc + changelog entry | VERIFIED | 2026-07-29 | 2026-07-29 | docs/features/author-tests-enhancements.md + docs/changelog/changelog.md |
 
 ---
 
 ## Summary
 - **Total Tasks:** 40
-- **VERIFIED (in-container):** 14 (all frontend + the docs rule)
-- **CODE-COMPLETE (pushed; local backend verify pending):** 24
-- **TODO:** 2 (ATE-034 EF migration · ATE-040 feature doc + changelog)
+- **VERIFIED (in-container or local):** 40 (all tasks complete)
+- **CODE-COMPLETE (pushed; local backend verify pending):** 0
+- **TODO:** 0
 
 ---
 

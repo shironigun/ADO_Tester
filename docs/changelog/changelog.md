@@ -1,0 +1,39 @@
+# Changelog
+
+Newest entries first.
+
+---
+
+## 2026-07-29
+
+### fix(build): Merge-conflict resolution + build fixes (master sync)
+- Merged `origin/master` (168 remote commits) into local `master` via `--allow-unrelated-histories`.
+- Fixed `GeneratedTestCase` CS0104 naming collision introduced by the merge: renamed the lightweight dedup record in `IExistingTestsIndexService` → `DedupTestCase` (`AgentOrchestrator` and `ExistingTestsIndexService` updated).
+- Fixed `QaAutomation.Migrations.Npgsql.csproj` XML comment containing illegal `--` sequences.
+- Added `ITextSearchProvider` (SqliteFts5Search) registration to all 5 test harnesses so `DatabaseInitializer` DI resolves correctly.
+- Added `NullCodeContextService` / `NullExistingTestsIndexService` stubs to `AgentOrchestratorTests` and `BugOrchestratorTests` to match new orchestrator constructor signatures.
+- **156/156 tests pass.**
+
+### feat(ate): ATE-034 — EF migration `AuthorTestsContextAndIndex`
+- Adds 6 nullable context/reference-plan columns to `TestSessions`.
+- Adds `TestPlanScans` and `ExistingTestCaseIndexEntries` tables.
+- Migration file: `20260729012836_AuthorTestsContextAndIndex`.
+
+---
+
+## 2026-07-28
+
+### feat(ate): Author Tests Enhancements — Phase 1, 2, 3
+Full implementation of free-text context, code discovery, refine loops, and existing-test dedup.
+See [`docs/features/author-tests-enhancements.md`](features/author-tests-enhancements.md) for details.
+- **38 tasks** (ATE-001 through ATE-039) implemented and pushed in branch `claude/chat-session-flzhjh`.
+- Backend: new `TestSession` columns, `AuthorRunContext`, extended contracts, `ICodeContextService` / `CodeContextService`, `IExistingTestsIndexService` / `ExistingTestsIndexService`, `TestPlanScan` + `ExistingTestCaseIndexEntry` entities, Analyst/Tester refine overloads, `AgentOrchestrator` refine methods + `ReconcileDrafts`, 4 new controller endpoints, DI singletons.
+- Frontend: pipeline step insert (Discover = step 2), Analyst refine panel, Tester refine UI (per-test + overall), reference-plan pickers (start form + Analyst gate), dedup result card, code-context card, API methods for all new endpoints.
+
+### feat(pgm): PostgreSQL Migration — Phase 1, 2, 3 + migrations-assembly scaffold
+Full dual-provider plumbing + FTS abstraction.
+See [`docs/progress/RalphLoop/postgresql-migration/progress.md`](progress/RalphLoop/postgresql-migration/progress.md) for details.
+- `ITextSearchProvider` abstraction (`SqliteFts5Search` + `PostgresFtsSearch`).
+- `DatabaseOptions` + `DATABASE_PROVIDER` env-var boot-time provider selection.
+- `KnowledgebaseService` and `ExistingTestsIndexService` delegate all FTS to the provider.
+- `QaAutomation.Migrations.Npgsql` project scaffolded; Npgsql Initial migration pending.
