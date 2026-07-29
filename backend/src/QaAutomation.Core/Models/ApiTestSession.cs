@@ -25,6 +25,12 @@ public sealed class ApiTestSession
     public string? InventoryJson { get; set; }
     /// <summary>Serialized SurfaceMatrix JSON.</summary>
     public string? AnalysisJson { get; set; }
+    /// <summary>Free-text provided at scan start — feeds the Analyzer and the generators (what to focus on, what to skip).</summary>
+    public string? AdditionalContext { get; set; }
+    /// <summary>Free-text provided at the Analyze→Generate gate — steers all three generator agents.</summary>
+    public string? GenerateContext { get; set; }
+    /// <summary>Most recent refine feedback (persisted for UI re-seed).</summary>
+    public string? LastFeedback { get; set; }
     /// <summary>Persisted narrative of live SSE events (JSON array); replayed on Last-Event-ID.</summary>
     public string? EventLogJson { get; set; }
     public string? ErrorMessage { get; set; }

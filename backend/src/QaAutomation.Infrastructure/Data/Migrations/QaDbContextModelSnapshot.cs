@@ -119,6 +119,9 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                         .HasDefaultValue(true)
                         .HasColumnName("ActivityEnabled");
 
+                    b.Property<string>("AdditionalContext")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("AnalysisJson")
                         .HasColumnType("TEXT")
                         .HasColumnName("AnalysisJson");
@@ -151,9 +154,15 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("FrontendPath");
 
+                    b.Property<string>("GenerateContext")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("InventoryJson")
                         .HasColumnType("TEXT")
                         .HasColumnName("InventoryJson");
+
+                    b.Property<string>("LastFeedback")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("Module")
                         .IsRequired()
