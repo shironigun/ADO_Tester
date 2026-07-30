@@ -143,8 +143,60 @@ public sealed class FrontendModuleService : IFrontendModuleService
         if (block.Length == 0)
             return [];
 
-        return await LlmExtractModulesAsync(llm, block.ToString(), root, baseUrl, ct);
+        var modules = await LlmExtractModulesAsync(llm, block.ToString(), root, baseUrl, ct);
+        // The LLM may return an import/file path (e.g. components/inventory/Inventory) although
+        // FrontendPath is consumed as a directory by QA Loop. Resolve it against the branch tree on
+        // every AI discovery pass, then persist the actual component directory.
+        return NormalizeComponentPaths(modules, tsx);
     }
+
+    private static IReadOnlyList<FrontendModule> NormalizeComponentPaths(
+        IReadOnlyList<FrontendModule> modules, IReadOnlyList<string> branchSourcePaths)
+    {
+        return modules.Select(module =>
+        {
+            var requested = module.ComponentPath.Trim('/');
+            var exact = branchSourcePaths.FirstOrDefault(path =>
+                SameImportTarget(path, requested));
+
+            if (exact is not null)
+                return module with { ComponentPath = ParentDirectory(exact) };
+
+            // If the model returned an import-style file path not present in the filtered list, remove
+            // its terminal component filename rather than treating that file as a folder and appending /apis.
+            var leaf = requested.LastIndexOf('/');
+            if (leaf > 0 && LooksLikeComponentFile(requested[(leaf + 1)..]))
+                return module with { ComponentPath = requested[..leaf] };
+
+            return module;
+        }).ToList();
+    }
+
+    private static bool SameImportTarget(string filePath, string importPath)
+    {
+        var file = StripExtension(filePath.Trim('/'));
+        var target = StripExtension(importPath.Trim('/'));
+        return string.Equals(file, target, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(file, $"{target}/index", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string StripExtension(string path)
+    {
+        var ext = Path.GetExtension(path);
+        return string.IsNullOrEmpty(ext) ? path : path[..^ext.Length];
+    }
+
+    private static string ParentDirectory(string path)
+    {
+        var index = path.LastIndexOf('/');
+        return index > 0 ? path[..index] : path;
+    }
+
+    private static bool LooksLikeComponentFile(string name) =>
+        name.EndsWith("page", StringComparison.OrdinalIgnoreCase)
+        || name.EndsWith("view", StringComparison.OrdinalIgnoreCase)
+        || name.EndsWith("component", StringComparison.OrdinalIgnoreCase)
+        || char.IsUpper(name.FirstOrDefault());
 
     private static int RouteScore(string path)
     {
