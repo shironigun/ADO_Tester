@@ -743,7 +743,7 @@ public sealed class QaLoopOrchestratorTests
 
         public async Task<string> GenerateScriptAsync(
             string caseTitle, string stepsJson, string bucket, int tcIdPending,
-            IProgress<string>? progress, CancellationToken ct)
+            IProgress<string>? progress, CancellationToken ct, string? moduleRoute = null)
         {
             var dir = Path.Combine(_dataDir, "generated", "ui", bucket);
             Directory.CreateDirectory(dir);

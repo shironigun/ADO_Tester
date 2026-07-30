@@ -8,6 +8,7 @@ public sealed class DiagnosticsStatus
     public bool AdoPatPresent { get; init; }
     public bool AnthropicKeyPresent { get; init; }
     public bool AzureOpenAiConfigured { get; init; }
+    public bool OllamaConfigured { get; init; }
     public bool ClaudeCliAvailable { get; init; }
     public string? ClaudeCliVersion { get; init; }
     public bool CopilotCliAvailable { get; init; }

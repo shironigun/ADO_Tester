@@ -47,6 +47,32 @@ public sealed class LlmTests
     }
 
     [Fact]
+    public async Task Ollama_uses_native_chat_endpoint_bearer_auth_and_message_content()
+    {
+        const string key = "ollama-secret";
+        var handler = new StubHttpHandler(_ => (HttpStatusCode.OK,
+            """{"model":"llama3.2","message":{"role":"assistant","content":"Native reply"},"done":true}"""));
+        var client = new OllamaLlmClient(new HttpClient(handler), "https://ollama.com", key, "llama3.2", 4096);
+
+        var result = await client.CompleteAsync("SYS", "USER");
+
+        Assert.Equal("Native reply", result);
+        Assert.Equal("https://ollama.com/api/chat", handler.LastRequest!.RequestUri!.ToString());
+        Assert.Equal($"Bearer {key}", handler.LastRequest.Headers.Authorization!.ToString());
+        using var body = JsonDocument.Parse(handler.LastBody!);
+        Assert.Equal("llama3.2", body.RootElement.GetProperty("model").GetString());
+        Assert.False(body.RootElement.GetProperty("stream").GetBoolean());
+        Assert.Equal("SYS", body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString());
+        Assert.Equal("USER", body.RootElement.GetProperty("messages")[1].GetProperty("content").GetString());
+    }
+
+    [Theory]
+    [InlineData("http://localhost:11434", "http://localhost:11434/api")]
+    [InlineData("http://localhost:11434/api/", "http://localhost:11434/api")]
+    public void Ollama_normalizes_host_or_api_root(string configured, string expected)
+        => Assert.Equal(expected, OllamaLlmClient.NormalizeBaseUrl(configured));
+
+    [Fact]
     public void StreamProgress_snapshot_tracks_chars_and_ticks()
     {
         var p = new StreamProgress();

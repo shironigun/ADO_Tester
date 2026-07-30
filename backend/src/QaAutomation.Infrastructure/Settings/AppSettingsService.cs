@@ -24,6 +24,7 @@ public sealed class AppSettingsService : IAppSettingsService
         "anthropic.api_key", "anthropic.model",
         "azure_openai.endpoint", "azure_openai.api_key", "azure_openai.deployment",
         "openai.base_url", "openai.api_key", "openai.model",
+        "ollama.base_url", "ollama.api_key", "ollama.model",
         "claude_cli.path", "claude_cli.model", "claude_cli.timeout_seconds",
         "copilot_cli.path", "copilot_cli.model", "copilot_cli.context", "copilot_cli.effort", "copilot_cli.timeout_seconds",
         "defaults.test_plan_id", "defaults.test_suite_id",
@@ -39,7 +40,7 @@ public sealed class AppSettingsService : IAppSettingsService
     ];
 
     public static readonly IReadOnlySet<string> SecretKeys =
-        new HashSet<string> { "ado.pat", "anthropic.api_key", "azure_openai.api_key", "openai.api_key", "teams.webhook_url", "qaloop.app_password" };
+        new HashSet<string> { "ado.pat", "anthropic.api_key", "azure_openai.api_key", "openai.api_key", "ollama.api_key", "teams.webhook_url", "qaloop.app_password" };
 
     /// <summary>The option-backed keys whose effective value lives in the typed options (DB-or-env).</summary>
     private static readonly IReadOnlySet<string> OptionKeys = new HashSet<string>
@@ -48,6 +49,7 @@ public sealed class AppSettingsService : IAppSettingsService
         "anthropic.api_key", "anthropic.model",
         "azure_openai.endpoint", "azure_openai.api_key", "azure_openai.deployment",
         "openai.base_url", "openai.api_key", "openai.model",
+        "ollama.base_url", "ollama.api_key", "ollama.model",
         "claude_cli.path", "claude_cli.model", "claude_cli.timeout_seconds",
         "copilot_cli.path", "copilot_cli.model", "copilot_cli.context", "copilot_cli.effort", "copilot_cli.timeout_seconds",
         "teams.webhook_url", "teams.template",
@@ -78,6 +80,7 @@ public sealed class AppSettingsService : IAppSettingsService
     private readonly IOptionsMonitor<AnthropicOptions> _anthropic;
     private readonly IOptionsMonitor<AzureOpenAiOptions> _azure;
     private readonly IOptionsMonitor<OpenAiCompatibleOptions> _openai;
+    private readonly IOptionsMonitor<OllamaOptions> _ollama;
     private readonly IOptionsMonitor<ClaudeCliOptions> _claudeCli;
     private readonly IOptionsMonitor<CopilotCliOptions> _copilotCli;
     private readonly IOptionsMonitor<QaLoopOptions> _qaLoop;
@@ -85,6 +88,7 @@ public sealed class AppSettingsService : IAppSettingsService
     private readonly IOptionsMonitorCache<AnthropicOptions> _anthropicCache;
     private readonly IOptionsMonitorCache<AzureOpenAiOptions> _azureCache;
     private readonly IOptionsMonitorCache<OpenAiCompatibleOptions> _openaiCache;
+    private readonly IOptionsMonitorCache<OllamaOptions> _ollamaCache;
     private readonly IOptionsMonitorCache<ClaudeCliOptions> _claudeCliCache;
     private readonly IOptionsMonitorCache<CopilotCliOptions> _copilotCliCache;
     private readonly IOptionsMonitorCache<QaLoopOptions> _qaLoopCache;
@@ -93,11 +97,11 @@ public sealed class AppSettingsService : IAppSettingsService
     public AppSettingsService(
         IServiceScopeFactory scopes, RuntimeSettings runtime,
         IOptionsMonitor<AzureDevOpsOptions> ado, IOptionsMonitor<AnthropicOptions> anthropic,
-        IOptionsMonitor<AzureOpenAiOptions> azure, IOptionsMonitor<OpenAiCompatibleOptions> openai,
+        IOptionsMonitor<AzureOpenAiOptions> azure, IOptionsMonitor<OpenAiCompatibleOptions> openai, IOptionsMonitor<OllamaOptions> ollama,
         IOptionsMonitor<ClaudeCliOptions> claudeCli, IOptionsMonitor<CopilotCliOptions> copilotCli,
         IOptionsMonitor<QaLoopOptions> qaLoop,
         IOptionsMonitorCache<AzureDevOpsOptions> adoCache, IOptionsMonitorCache<AnthropicOptions> anthropicCache,
-        IOptionsMonitorCache<AzureOpenAiOptions> azureCache, IOptionsMonitorCache<OpenAiCompatibleOptions> openaiCache,
+        IOptionsMonitorCache<AzureOpenAiOptions> azureCache, IOptionsMonitorCache<OpenAiCompatibleOptions> openaiCache, IOptionsMonitorCache<OllamaOptions> ollamaCache,
         IOptionsMonitorCache<ClaudeCliOptions> claudeCliCache, IOptionsMonitorCache<CopilotCliOptions> copilotCliCache,
         IOptionsMonitorCache<QaLoopOptions> qaLoopCache,
         ILogger<AppSettingsService> log)
@@ -108,6 +112,7 @@ public sealed class AppSettingsService : IAppSettingsService
         _anthropic = anthropic;
         _azure = azure;
         _openai = openai;
+        _ollama = ollama;
         _claudeCli = claudeCli;
         _copilotCli = copilotCli;
         _qaLoop = qaLoop;
@@ -115,6 +120,7 @@ public sealed class AppSettingsService : IAppSettingsService
         _anthropicCache = anthropicCache;
         _azureCache = azureCache;
         _openaiCache = openaiCache;
+        _ollamaCache = ollamaCache;
         _claudeCliCache = claudeCliCache;
         _copilotCliCache = copilotCliCache;
         _qaLoopCache = qaLoopCache;
@@ -192,6 +198,7 @@ public sealed class AppSettingsService : IAppSettingsService
         _anthropicCache.Clear();
         _azureCache.Clear();
         _openaiCache.Clear();
+        _ollamaCache.Clear();
         _claudeCliCache.Clear();
         _copilotCliCache.Clear();
         _qaLoopCache.Clear();
@@ -229,6 +236,9 @@ public sealed class AppSettingsService : IAppSettingsService
         "openai.base_url" => _openai.CurrentValue.BaseUrl,
         "openai.api_key" => _openai.CurrentValue.ApiKey,
         "openai.model" => _openai.CurrentValue.Model,
+        "ollama.base_url" => _ollama.CurrentValue.BaseUrl,
+        "ollama.api_key" => _ollama.CurrentValue.ApiKey,
+        "ollama.model" => _ollama.CurrentValue.Model,
         "claude_cli.path" => _claudeCli.CurrentValue.Path,
         "claude_cli.model" => _claudeCli.CurrentValue.Model,
         "claude_cli.timeout_seconds" => _claudeCli.CurrentValue.TimeoutSeconds.ToString(),

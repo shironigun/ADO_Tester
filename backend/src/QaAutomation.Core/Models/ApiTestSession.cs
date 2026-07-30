@@ -20,6 +20,8 @@ public sealed class ApiTestSession
     public string? FrontendModule { get; set; }
     /// <summary>Repo-relative frontend component folder whose apis/ the scan traces to the backend.</summary>
     public string? FrontendPath { get; set; }
+    /// <summary>Serialized ModuleSourceDiscovery evidence selected for this scan.</summary>
+    public string? DiscoveryJson { get; set; }
     public ApiSessionStatus Status { get; set; } = ApiSessionStatus.Analyzing;
     /// <summary>Serialized InventoryDoc JSON.</summary>
     public string? InventoryJson { get; set; }

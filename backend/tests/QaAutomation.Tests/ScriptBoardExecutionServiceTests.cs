@@ -50,7 +50,7 @@ public sealed class ScriptBoardExecutionServiceTests : IDisposable
         Options.Create(new StorageOptions { DataDirectory = _dataDir, KnowledgebaseFolderName = "kb" }),
         Options.Create(new QaLoopOptions { ScriptsFolderName = "scripts" }));
 
-    private ScriptBoardExecutionService CreateSut(QaDbContext db, IPlaywrightRunner runner) =>
+    private ScriptBoardExecutionService CreateSut(QaDbContext db, IScriptsBoardRunner runner) =>
         new(db, CreateInventory(db), runner, _bus);
 
     private async Task<(int SessionId, string SpecPath)> SeedStampedSpecAsync(QaDbContext db, string module, string bucket = "")
@@ -179,22 +179,19 @@ public sealed class ScriptBoardExecutionServiceTests : IDisposable
         Assert.Equal(TestRunStatus.Cancelled, run!.Status);
     }
 
-    private sealed class StubPlaywrightRunner : IPlaywrightRunner
+    private sealed class StubPlaywrightRunner : IScriptsBoardRunner
     {
         public PlaywrightRunResult ResultToReturn { get; set; } = new();
         public bool ThrowCancelled { get; set; }
         public PlaywrightRunSpec? LastSpec { get; private set; }
 
-        public Task<PlaywrightRunResult> RunAsync(PlaywrightRunSpec spec, string eventKey, CancellationToken ct = default)
+        public Task<PlaywrightRunResult> RunWithLiveTermAsync(
+            PlaywrightRunSpec spec, string eventKey, CancellationToken ct = default)
         {
             LastSpec = spec;
             if (ThrowCancelled) throw new OperationCanceledException();
             return Task.FromResult(ResultToReturn);
         }
 
-        public Task<string?> RebuildReportAsync(PlaywrightRunSpec spec, string eventKey, CancellationToken ct = default) =>
-            Task.FromResult<string?>(null);
-
-        public void DeleteRunArtifacts(int runId) { }
     }
 }

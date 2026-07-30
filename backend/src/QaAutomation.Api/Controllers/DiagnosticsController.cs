@@ -23,6 +23,7 @@ public sealed class DiagnosticsController : ControllerBase
     private readonly IOptionsMonitor<AzureDevOpsOptions> _adoOptions;
     private readonly IOptionsMonitor<AnthropicOptions> _anthropic;
     private readonly IOptionsMonitor<AzureOpenAiOptions> _azure;
+    private readonly IOptionsMonitor<OllamaOptions> _ollama;
     private readonly IOptionsMonitor<ClaudeCliOptions> _claudeCli;
     private readonly IOptionsMonitor<CopilotCliOptions> _copilotCli;
     private readonly ILogger<DiagnosticsController> _log;
@@ -30,7 +31,7 @@ public sealed class DiagnosticsController : ControllerBase
     public DiagnosticsController(
         ILlmProviderState providerState, ILlmClientFactory llmFactory, IAzureDevOpsClient ado,
         IOptionsMonitor<AzureDevOpsOptions> adoOptions, IOptionsMonitor<AnthropicOptions> anthropic,
-        IOptionsMonitor<AzureOpenAiOptions> azure, IOptionsMonitor<ClaudeCliOptions> claudeCli,
+        IOptionsMonitor<AzureOpenAiOptions> azure, IOptionsMonitor<OllamaOptions> ollama, IOptionsMonitor<ClaudeCliOptions> claudeCli,
         IOptionsMonitor<CopilotCliOptions> copilotCli,
         ILogger<DiagnosticsController> log)
     {
@@ -40,6 +41,7 @@ public sealed class DiagnosticsController : ControllerBase
         _adoOptions = adoOptions;
         _anthropic = anthropic;
         _azure = azure;
+        _ollama = ollama;
         _claudeCli = claudeCli;
         _copilotCli = copilotCli;
         _log = log;
@@ -56,6 +58,7 @@ public sealed class DiagnosticsController : ControllerBase
         var ado = _adoOptions.CurrentValue;
         var anthropic = _anthropic.CurrentValue;
         var azure = _azure.CurrentValue;
+        var ollama = _ollama.CurrentValue;
         return new DiagnosticsStatus
         {
             ActiveProvider = provider.ToString(),
@@ -64,6 +67,7 @@ public sealed class DiagnosticsController : ControllerBase
             AzureOpenAiConfigured = !string.IsNullOrEmpty(azure.Endpoint)
                                     && !string.IsNullOrEmpty(azure.ApiKey)
                                     && !string.IsNullOrEmpty(azure.Deployment),
+            OllamaConfigured = !string.IsNullOrEmpty(ollama.BaseUrl),
             ClaudeCliAvailable = claudeAvailable,
             ClaudeCliVersion = claudeVersion,
             CopilotCliAvailable = copilotAvailable,

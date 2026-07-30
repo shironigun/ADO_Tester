@@ -4,8 +4,9 @@
 - **Design:** `solution.md` (authoritative vision brief) · **Ruleset:** `Ralph loop.md`
 - **Backlog:** `prd.md` (tasks `QLV2-###`, grouped by slab, built in order) · **Guide:** `blueprint.md`
 - **Started:** 2026-07-29
-- **Status:** SLAB 2 COMPLETE. Slab 3 decomposed (QLV2-301..309). **QLV2-301/302/303 VERIFIED**
-  (182/182 tests pass). Resume point: **QLV2-304**. ADO PAT is currently expired (401) — see blocker note.
+- **Status:** SLAB 2 COMPLETE. Slab 3 decomposed (QLV2-301..309). **QLV2-301/302/303 VERIFIED**;
+  QLV2-304 implementation complete with 183/183 tests green, but its required live raw-SSE check is
+  pending. Resume point: **QLV2-304 verification**. ADO PAT is currently expired (401) — see blocker note.
 
 ## Aside: QA Loop scan silently produced 0 routes/0 drafts (2026-07-30)
 
@@ -288,3 +289,15 @@ saw must be in whatever DB their running backend process was actually pointed at
   `-runId`. Both registered in `DependencyInjection.cs`. New `ScriptBoardExecutionServiceTests.cs` (6
   tests: module+level narrowing, explicit-paths bypass, zero-match throws, Passed/Failed/Cancelled
   lifecycle incl. the negative-RunId assertion). **182/182 tests pass**, `dotnet build` clean.
+
+### 2026-07-30 (QLV2-304 — implementation complete; live verification pending)
+- Added live-only `EventKinds.Term`, shared `PlaywrightConfigWriter`/`PlaywrightResultParser`, and a
+  separate `IScriptsBoardRunner`/`ScriptsBoardRunner` raw-byte process path (`FORCE_COLOR=1` → raw ANSI
+  `term` SSE events). The new runner shares the existing Playwright runtime/auth/concurrency/report
+  pipeline while leaving `PlaywrightRunner.SpawnAsync` unchanged. `ScriptBoardExecutionService` now uses
+  it; existing execution tests use an `IScriptsBoardRunner` stub and preserve negative RunId coverage.
+- Verification: Infrastructure build clean; `dotnet test tests\QaAutomation.Tests\QaAutomation.Tests.csproj`
+  **183/183** green. Full solution build is blocked only because user-owned `QaAutomation.Api` PID 48580
+  locks its output DLLs. Required raw-SSE manual check is pending after backend restart, so QLV2-304
+  remains unchecked. Focused Scripts Board records now live in
+  `docs/progress/RalphLoop/scripts-board/progress.md`.

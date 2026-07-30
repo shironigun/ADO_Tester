@@ -19,6 +19,7 @@ public sealed class LlmClientFactory : ILlmClientFactory
     private readonly IOptionsMonitor<AnthropicOptions> _anthropic;
     private readonly IOptionsMonitor<AzureOpenAiOptions> _azure;
     private readonly IOptionsMonitor<OpenAiCompatibleOptions> _openai;
+    private readonly IOptionsMonitor<OllamaOptions> _ollama;
     private readonly IOptionsMonitor<ClaudeCliOptions> _claudeCli;
     private readonly IOptionsMonitor<CopilotCliOptions> _copilotCli;
     private readonly IOptionsMonitor<StorageOptions> _storage;
@@ -30,6 +31,7 @@ public sealed class LlmClientFactory : ILlmClientFactory
         IOptionsMonitor<AnthropicOptions> anthropic,
         IOptionsMonitor<AzureOpenAiOptions> azure,
         IOptionsMonitor<OpenAiCompatibleOptions> openai,
+        IOptionsMonitor<OllamaOptions> ollama,
         IOptionsMonitor<ClaudeCliOptions> claudeCli,
         IOptionsMonitor<CopilotCliOptions> copilotCli,
         IOptionsMonitor<StorageOptions> storage,
@@ -40,6 +42,7 @@ public sealed class LlmClientFactory : ILlmClientFactory
         _anthropic = anthropic;
         _azure = azure;
         _openai = openai;
+        _ollama = ollama;
         _claudeCli = claudeCli;
         _copilotCli = copilotCli;
         _storage = storage;
@@ -55,6 +58,7 @@ public sealed class LlmClientFactory : ILlmClientFactory
         {
             LlmProvider.AzureOpenAI => BuildAzure(maxTokens),
             LlmProvider.OpenAICompatible => BuildOpenAi(maxTokens),
+            LlmProvider.Ollama => BuildOllama(maxTokens),
             LlmProvider.ClaudeCli => new ClaudeCliLlmClient(_claudeCli.CurrentValue, _storage.CurrentValue, _loggerFactory.CreateLogger<ClaudeCliLlmClient>()),
             LlmProvider.CopilotCli => new CopilotCliLlmClient(_copilotCli.CurrentValue, _storage.CurrentValue, _loggerFactory.CreateLogger<CopilotCliLlmClient>()),
             _ => BuildAnthropic(maxTokens),
@@ -78,4 +82,12 @@ public sealed class LlmClientFactory : ILlmClientFactory
         var o = _openai.CurrentValue;
         return new OpenAiCompatibleLlmClient(o.BaseUrl, o.ApiKey, o.Model, maxTokens);
     }
+
+    private ILlmClient BuildOllama(int maxTokens)
+    {
+        var o = _ollama.CurrentValue;
+        return new OllamaLlmClient(_httpFactory.CreateClient(OllamaHttpClientName), o.BaseUrl, o.ApiKey, o.Model, maxTokens);
+    }
+
+    public const string OllamaHttpClientName = "ollama";
 }

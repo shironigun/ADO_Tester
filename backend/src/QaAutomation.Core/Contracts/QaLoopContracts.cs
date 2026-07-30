@@ -23,6 +23,8 @@ public sealed class ScanStartRequest
     public int? TestPlanId { get; set; }
     public int? TestSuiteId { get; set; }
     public bool AutoHandoff { get; set; } = false;
+    /// <summary>Enables the optional, downstream UI Phase for this session.</summary>
+    public bool HasUiPhase { get; set; }
     /// <summary>Free-text at scan start — steers the Analyzer and generators (what to focus on / skip).</summary>
     public string? AdditionalContext { get; set; }
 }
@@ -168,6 +170,7 @@ public sealed class ApiSessionDetail
     public string? FrontendModule { get; set; }
     public string? FrontendPath { get; set; }
     public string? SourceDirsJson { get; set; }
+    public string? DiscoveryJson { get; set; }
     public ApiSessionStatus Status { get; set; }
     public string? InventoryJson { get; set; }
     public string? AnalysisJson { get; set; }
@@ -190,6 +193,7 @@ public sealed class ApiSessionDetail
         Branch = s.Branch, WorkItemId = s.WorkItemId, WorkItemTitle = s.WorkItemTitle,
         TestPlanId = s.TestPlanId, TestSuiteId = s.TestSuiteId,
         FrontendModule = s.FrontendModule, FrontendPath = s.FrontendPath, SourceDirsJson = s.SourceDirsJson,
+        DiscoveryJson = s.DiscoveryJson,
         Status = s.Status,
         InventoryJson = s.InventoryJson, AnalysisJson = s.AnalysisJson, EventLogJson = s.EventLogJson,
         AdditionalContext = s.AdditionalContext, GenerateContext = s.GenerateContext, LastFeedback = s.LastFeedback,

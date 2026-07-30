@@ -33,6 +33,7 @@ public sealed class LlmProviderFactoryTests : IDisposable
     [InlineData(LlmProvider.Anthropic, "Anthropic")]
     [InlineData(LlmProvider.AzureOpenAI, "AzureOpenAI")]
     [InlineData(LlmProvider.OpenAICompatible, "OpenAICompatible")]
+    [InlineData(LlmProvider.Ollama, "Ollama")]
     [InlineData(LlmProvider.ClaudeCli, "ClaudeCli")]
     [InlineData(LlmProvider.CopilotCli, "CopilotCli")]
     public async Task Factory_builds_client_for_active_provider(LlmProvider provider, string expectedName)

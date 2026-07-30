@@ -848,6 +848,12 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
         return rid;
     }
 
+    /// <summary>Resolve a caller-supplied repo id/name, or fall back to the configured default
+    /// repository (ado.repository) when it's null OR blank. Guards against a blank id building a
+    /// malformed ".../repositories//items" URL that ADO misreads as a repo literally named "items".</summary>
+    private async Task<string> ResolveRepoOrDefaultAsync(string? repoId, CancellationToken ct)
+        => string.IsNullOrWhiteSpace(repoId) ? await ResolveRepositoryIdAsync(null, ct) : repoId.Trim();
+
     public async Task<IReadOnlyList<string>> DiscoverBranchesAsync(string? repository = null, CancellationToken ct = default)
     {
         var rid = await ResolveRepositoryIdAsync(repository, ct);
@@ -954,14 +960,14 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
 
     public async Task<IReadOnlyList<string>> GetPullRequestChangedFilesAsync(string prId, string? repoId = null, CancellationToken ct = default)
     {
-        var rid = repoId ?? await ResolveRepositoryIdAsync(null, ct);
+        var rid = await ResolveRepoOrDefaultAsync(repoId, ct);
         var changes = await PrLatestIterationChangesAsync(rid, prId, ct);
         return changes is null ? [] : ChangePaths(changes.Value);
     }
 
     public async Task<IReadOnlyList<ChangedFile>> GetPullRequestDiffAsync(string prId, string? repoId = null, CancellationToken ct = default)
     {
-        var rid = repoId ?? await ResolveRepositoryIdAsync(null, ct);
+        var rid = await ResolveRepoOrDefaultAsync(repoId, ct);
         var changes = await PrLatestIterationChangesAsync(rid, prId, ct);
         return changes is null ? [] : ChangeEntries(changes.Value);
     }
@@ -983,7 +989,7 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
 
     public async Task<IReadOnlyList<string>> GetCommitChangedFilesAsync(string sha, string? repoId = null, CancellationToken ct = default)
     {
-        var rid = repoId ?? await ResolveRepositoryIdAsync(null, ct);
+        var rid = await ResolveRepoOrDefaultAsync(repoId, ct);
         using var doc = await GetDocAsync(
             $"{Opts.BaseUrl}/_apis/git/repositories/{rid}/commits/{sha}/changes?api-version={Opts.ApiVersion}",
             $"Commit {sha} changes", ct);
@@ -993,7 +999,7 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
 
     public async Task<IReadOnlyList<ChangedFile>> GetCommitDiffAsync(string sha, string? repoId = null, CancellationToken ct = default)
     {
-        var rid = repoId ?? await ResolveRepositoryIdAsync(null, ct);
+        var rid = await ResolveRepoOrDefaultAsync(repoId, ct);
         using var doc = await GetDocAsync(
             $"{Opts.BaseUrl}/_apis/git/repositories/{rid}/commits/{sha}/changes?api-version={Opts.ApiVersion}",
             $"Commit {sha} diff", ct);
@@ -1003,7 +1009,7 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
 
     public async Task<IReadOnlyList<string>> GetCommitsForPathAsync(string path, int top = 5, string? repoId = null, CancellationToken ct = default)
     {
-        var rid = repoId ?? await ResolveRepositoryIdAsync(null, ct);
+        var rid = await ResolveRepoOrDefaultAsync(repoId, ct);
         var url = $"{Opts.BaseUrl}/_apis/git/repositories/{rid}/commits" +
                   $"?searchCriteria.itemPath={Quote(path)}&searchCriteria.$top={top}&api-version={Opts.ApiVersion}";
         using var doc = await GetDocAsync(url, $"Commits for {path}", ct);
@@ -1016,7 +1022,7 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
 
     public async Task<string> GetFileContentAsync(string path, string? @ref = null, string? repoId = null, string versionType = "branch", CancellationToken ct = default)
     {
-        var rid = repoId ?? await ResolveRepositoryIdAsync(null, ct);
+        var rid = await ResolveRepoOrDefaultAsync(repoId, ct);
         var version = @ref ?? Opts.DefaultBranch;
         var url = $"{Opts.BaseUrl}/_apis/git/repositories/{rid}/items" +
                   $"?path={Quote(path)}&includeContent=true" +
@@ -1036,7 +1042,7 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
     public async Task<IReadOnlyList<string>> ListRepoFilePathsAsync(
         string scopePath, string? branch = null, string? repoId = null, CancellationToken ct = default)
     {
-        var rid = repoId ?? await ResolveRepositoryIdAsync(null, ct);
+        var rid = await ResolveRepoOrDefaultAsync(repoId, ct);
         var version = string.IsNullOrWhiteSpace(branch) ? Opts.DefaultBranch : branch!;
         var scope = string.IsNullOrWhiteSpace(scopePath) ? "/" : (scopePath.StartsWith('/') ? scopePath : "/" + scopePath);
         var url = $"{Opts.BaseUrl}/_apis/git/repositories/{rid}/items" +
@@ -1059,6 +1065,9 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
     public async Task<IReadOnlyList<string>> SearchCodeAsync(string text, int top = 20, string? repoId = null, CancellationToken ct = default)
     {
         var org = Opts.Organization.Trim('/');
+        // Code Search accepts a repository name or id. A QA Loop session may target a repository other
+        // than the global ADO default, so never discard the explicit per-call selection.
+        var repository = string.IsNullOrWhiteSpace(repoId) ? Opts.Repository : repoId;
         var url = $"https://almsearch.dev.azure.com/{org}/{Quote(Opts.Project)}/_apis/search/codesearchresults?api-version={Opts.ApiVersion}";
         var body = new JsonObject
         {
@@ -1067,7 +1076,7 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
             ["filters"] = new JsonObject
             {
                 ["Project"] = new JsonArray { Opts.Project },
-                ["Repository"] = new JsonArray { Opts.Repository },
+                ["Repository"] = new JsonArray { repository },
             },
         };
         using var doc = await SendDocAsync(HttpMethod.Post, url, body, "application/json", "Code Search", ct);

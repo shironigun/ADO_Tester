@@ -57,6 +57,7 @@ You also need at least one of these credentials:
   - Anthropic API key (paid) → <https://console.anthropic.com>
   - Azure OpenAI (3 fields)
   - OpenAI-compatible — **GitHub Models is free**: a GitHub PAT works → <https://github.com/settings/tokens>
+  - Ollama — native local or cloud API support
 
 ---
 
@@ -100,6 +101,10 @@ AZURE_OPENAI_DEPLOYMENT=gpt-4o-mini
 OPENAI_BASE_URL=https://models.inference.ai.azure.com
 OPENAI_API_KEY=<GitHub PAT or OpenAI key>
 OPENAI_MODEL=gpt-4o-mini
+# OR native Ollama (cloud)
+OLLAMA_BASE_URL=https://ollama.com/api
+OLLAMA_API_KEY=<Ollama API key>
+OLLAMA_MODEL=llama3.2
 ```
 
 Set your ADO org and project on the **Settings** page (values saved there override anything in `.env`).
@@ -186,7 +191,8 @@ If all three pass, you're good. (Quick backend-only smoke test: `GET http://loca
 | `ClaudeCli`        | local `claude` CLI logged in | **Default.** Uses your Pro/Max sub, no API key, no per-run cost. Slower (~2–5s/call). |
 | `Anthropic`        | `ANTHROPIC_API_KEY` (paid)   | Most stable for large generations; ~$0.15–$0.60/ticket.                               |
 | `AzureOpenAI`      | endpoint + key + deployment  | Use if procurement requires Azure-native AI.                                          |
-| `OpenAICompatible` | base URL + key + model       | **GitHub Models = free**, also Groq / OpenAI / Ollama.                                |
+| `OpenAICompatible` | base URL + key + model       | **GitHub Models = free**, also Groq / OpenAI.                                         |
+| `Ollama`           | native API base URL + key + model | Native API: local `http://localhost:11434/api` or cloud `https://ollama.com/api`. |
 
 Switch any time from the **AppBar dropdown** (`Llm`). The choice persists in SQLite — survives
 restart.

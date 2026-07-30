@@ -118,6 +118,12 @@ public static class DependencyInjection
             o.ApiKey = rt.Get("openai.api_key") ?? o.ApiKey;
             o.Model = rt.Get("openai.model") ?? o.Model;
         });
+        services.AddOptions<OllamaOptions>().PostConfigure<RuntimeSettings>((o, rt) =>
+        {
+            o.BaseUrl = rt.Get("ollama.base_url") ?? o.BaseUrl;
+            o.ApiKey = rt.Get("ollama.api_key") ?? o.ApiKey;
+            o.Model = rt.Get("ollama.model") ?? o.Model;
+        });
         services.AddOptions<ClaudeCliOptions>().PostConfigure<RuntimeSettings>((o, rt) =>
         {
             o.Path = rt.Get("claude_cli.path") ?? o.Path;
@@ -205,6 +211,14 @@ public static class DependencyInjection
                 o.ApiKey = Env("OPENAI_API_KEY") ?? o.ApiKey;
                 o.Model = Env("OPENAI_MODEL") ?? o.Model;
             });
+        services.AddOptions<OllamaOptions>()
+            .Bind(config.GetSection(OllamaOptions.SectionName))
+            .PostConfigure(o =>
+            {
+                o.BaseUrl = Env("OLLAMA_BASE_URL") ?? o.BaseUrl;
+                o.ApiKey = Env("OLLAMA_API_KEY") ?? o.ApiKey;
+                o.Model = Env("OLLAMA_MODEL") ?? o.Model;
+            });
 
         services.AddOptions<ClaudeCliOptions>()
             .Bind(config.GetSection(ClaudeCliOptions.SectionName))
@@ -228,6 +242,7 @@ public static class DependencyInjection
 
         // Anthropic provider is built per-call on a pooled HttpClient. 10-min timeout matches the SDK default.
         services.AddHttpClient(LlmClientFactory.AnthropicHttpClientName, c => c.Timeout = TimeSpan.FromMinutes(10));
+        services.AddHttpClient(LlmClientFactory.OllamaHttpClientName, c => c.Timeout = TimeSpan.FromMinutes(10));
 
         // Provider state + factory are singletons; the factory builds a fresh client per call (spec §5.6).
         services.AddSingleton<ILlmProviderState, LlmProviderState>();
@@ -331,9 +346,13 @@ public static class DependencyInjection
         services.AddSingleton<IQaLoopOrchestrator, QaLoopOrchestrator>();
         services.AddScoped<IPlaywrightAgentService, PlaywrightAgentService>();
         services.AddSingleton<AllureEnricher>();
-        services.AddSingleton<IPlaywrightRunner, PlaywrightRunner>();
+        services.AddSingleton<PlaywrightRunner>();
+        services.AddSingleton<IPlaywrightRunner>(sp => sp.GetRequiredService<PlaywrightRunner>());
+        services.AddSingleton<IScriptsBoardRunner, ScriptsBoard.ScriptsBoardRunner>();
         services.AddScoped<RunExecutionService>();
         services.AddSingleton<ITeamsNotifier, TeamsNotifier>();
+        services.AddScoped<IFrontendModuleService, QaLoop.FrontendModuleService>();
+        services.AddScoped<IModuleSourceDiscoveryService, QaLoop.ModuleSourceDiscoveryService>();
         services.AddScoped<IScriptInventoryService, ScriptsBoard.ScriptInventoryService>();
         services.AddScoped<IScriptBoardExecutionService, ScriptsBoard.ScriptBoardExecutionService>();
         // Registered as its own concrete type (not just AddHostedService<T>, which only exposes T as

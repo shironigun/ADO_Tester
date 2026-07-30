@@ -58,6 +58,9 @@ const K = {
   OPENAI_BASE_URL: 'openai.base_url',
   OPENAI_KEY: 'openai.api_key',
   OPENAI_MODEL: 'openai.model',
+  OLLAMA_BASE_URL: 'ollama.base_url',
+  OLLAMA_KEY: 'ollama.api_key',
+  OLLAMA_MODEL: 'ollama.model',
   CLAUDE_CLI_PATH: 'claude_cli.path',
   CLAUDE_CLI_MODEL: 'claude_cli.model',
   CLAUDE_CLI_TIMEOUT: 'claude_cli.timeout_seconds',
@@ -239,6 +242,9 @@ export default function SettingsPage() {
   const [openaiBase, setOpenaiBase] = useState('')
   const [openaiKey, setOpenaiKey] = useState('')
   const [openaiModel, setOpenaiModel] = useState('')
+  const [ollamaBase, setOllamaBase] = useState('')
+  const [ollamaKey, setOllamaKey] = useState('')
+  const [ollamaModel, setOllamaModel] = useState('')
   const [claudeCliPath, setClaudeCliPath] = useState('')
   const [claudeCliModel, setClaudeCliModel] = useState('')
   const [claudeCliTimeout, setClaudeCliTimeout] = useState('180')
@@ -313,6 +319,8 @@ export default function SettingsPage() {
       setAzureDeploy(String(data[K.AZURE_DEPLOY] ?? ''))
       setOpenaiBase(String(data[K.OPENAI_BASE_URL] ?? ''))
       setOpenaiModel(String(data[K.OPENAI_MODEL] ?? ''))
+      setOllamaBase(String(data[K.OLLAMA_BASE_URL] ?? ''))
+      setOllamaModel(String(data[K.OLLAMA_MODEL] ?? ''))
       setClaudeCliPath(String(data[K.CLAUDE_CLI_PATH] ?? 'claude'))
       setClaudeCliModel(String(data[K.CLAUDE_CLI_MODEL] ?? ''))
       setClaudeCliTimeout(String(data[K.CLAUDE_CLI_TIMEOUT] ?? '180'))
@@ -434,6 +442,7 @@ export default function SettingsPage() {
         [K.ANTHROPIC_KEY, setAnthropicKey],
         [K.AZURE_KEY, setAzureKey],
         [K.OPENAI_KEY, setOpenaiKey],
+        [K.OLLAMA_KEY, setOllamaKey],
         [K.TEAMS_WEBHOOK, setTeamsWebhook],
       ] as const).forEach(([k, setter]) => { if (values[k]) setter('') })
     } catch (e) { setError(axiosMessage(e)) }
@@ -626,7 +635,7 @@ export default function SettingsPage() {
                       </StaggerItem>
 
                       <StaggerItem>
-                        <ProviderCard name="OpenAI-compatible" blurb="GitHub Models (free) · Groq · OpenAI · Ollama."
+                        <ProviderCard name="OpenAI-compatible" blurb="GitHub Models (free) · Groq · OpenAI."
                           active={activeProvider === 'OpenAICompatible'} ready={!!config[`${K.OPENAI_KEY}.set`]}>
                           <TextField label="Base URL" size="small" fullWidth value={openaiBase}
                             onChange={e => setOpenaiBase(e.target.value)}
@@ -638,6 +647,23 @@ export default function SettingsPage() {
                           <Button size="small" variant="text" sx={{ alignSelf: 'flex-end' }}
                             onClick={() => save({
                               [K.OPENAI_BASE_URL]: openaiBase, [K.OPENAI_KEY]: openaiKey, [K.OPENAI_MODEL]: openaiModel,
+                            })}>Save</Button>
+                        </ProviderCard>
+                      </StaggerItem>
+
+                      <StaggerItem>
+                        <ProviderCard name="Ollama" blurb="Native Ollama API — local daemon or authenticated Ollama Cloud."
+                          active={activeProvider === 'Ollama'} ready={!!env?.ollamaConfigured}>
+                          <TextField label="Native API base URL" size="small" fullWidth value={ollamaBase}
+                            onChange={e => setOllamaBase(e.target.value)}
+                            placeholder="https://ollama.com/api" />
+                          <SecretField label="API key (optional locally)" value={ollamaKey} set={setOllamaKey}
+                            isSet={Boolean(config[`${K.OLLAMA_KEY}.set`])} />
+                          <TextField label="Model" size="small" fullWidth value={ollamaModel}
+                            onChange={e => setOllamaModel(e.target.value)} placeholder="llama3.2" />
+                          <Button size="small" variant="text" sx={{ alignSelf: 'flex-end' }}
+                            onClick={() => save({
+                              [K.OLLAMA_BASE_URL]: ollamaBase, [K.OLLAMA_KEY]: ollamaKey, [K.OLLAMA_MODEL]: ollamaModel,
                             })}>Save</Button>
                         </ProviderCard>
                       </StaggerItem>
@@ -1043,6 +1069,7 @@ export default function SettingsPage() {
                               <StatusPill ok={env.adoPatPresent} label="ADO PAT" />
                               <StatusPill ok={env.anthropicKeyPresent} label="Anthropic key" />
                               <StatusPill ok={env.azureOpenAiConfigured} label="Azure OpenAI" />
+                              <StatusPill ok={env.ollamaConfigured} label="Ollama" />
                               <StatusPill ok={env.claudeCliAvailable} label="Claude CLI"
                                 value={env.claudeCliVersion ?? (env.claudeCliAvailable ? 'ok' : 'missing')} />
                               <StatusPill ok={env.copilotCliAvailable} label="Copilot CLI"

@@ -9,6 +9,7 @@ import CloseIcon from '@mui/icons-material/Close'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import PushPinIcon from '@mui/icons-material/PushPin'
 import QrCode2Icon from '@mui/icons-material/QrCode2'
+import RefreshIcon from '@mui/icons-material/Refresh'
 import type { PipelineStep } from '../../components/AgentPipeline'
 import AgentConsole from '../../components/AgentConsole'
 import AgentPipeline from '../../components/AgentPipeline'
@@ -85,13 +86,16 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
   const [branchesLoading, setBranchesLoading] = useState(false)
   const [loading, setLoading]         = useState(false)
   const [additionalContext, setAdditionalContext] = useState('')
+  const [sourceDirs, setSourceDirs]       = useState('')
   const [hasUiPhase, setHasUiPhase]   = useState(false)
 
   // Load saved defaults from Settings and pre-populate fields on mount.
   useEffect(() => {
     getConfig().then(async cfg => {
-      const defRepo   = String(cfg['qaloop.default_repository'] ?? '')
-      const defBranch = String(cfg['qaloop.default_branch'] ?? '')
+      // Per-QA-Loop defaults override the shared Azure DevOps Settings. When the former are unset,
+      // scan forms should inherit the repository + default branch already configured for ADO.
+      const defRepo   = String(cfg['qaloop.default_repository'] || cfg['ado.repository'] || '')
+      const defBranch = String(cfg['qaloop.default_branch'] || cfg['ado.default_branch'] || '')
       const defPlanId = cfg['qaloop.default_plan_id'] ? Number(cfg['qaloop.default_plan_id']) : null
       const defSuiteId = cfg['qaloop.default_suite_id'] ? Number(cfg['qaloop.default_suite_id']) : null
 
@@ -119,7 +123,12 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
   async function loadFrontendModules() {
     if (fmodules.length > 0) return
     setFmLoading(true)
-    try { setFmodules(await listFrontendModules()) } catch { /* ignore */ }
+    try { setFmodules(await listFrontendModules(repo ?? undefined, branch ?? undefined)) } catch { /* ignore */ }
+    finally { setFmLoading(false) }
+  }
+  async function rediscoverModules() {
+    setFmLoading(true)
+    try { setFmodules(await listFrontendModules(repo ?? undefined, branch ?? undefined, true)) } catch { /* ignore */ }
     finally { setFmLoading(false) }
   }
   async function loadRepos() {
@@ -164,6 +173,7 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
         workItemId: story?.id ?? undefined,
         autoHandoff: true,
         additionalContext: additionalContext.trim() || undefined,
+        sourceDirs: sourceDirs.split(/[\n;,]/).map(dir => dir.trim()).filter(Boolean),
         hasUiPhase: hasUiPhase || undefined,
       }
       const { sessionId } = await startScan(PROJECT_ID, req)
@@ -178,30 +188,60 @@ export function QaLoopStartForm({ onStarted, onError, onClose }: StartFormProps)
   return (
     <Box component="form" onSubmit={handleSubmit}>
       <Stack spacing={2}>
-        <Autocomplete
-          options={fmodules} value={fmodule} loading={fmLoading}
-          getOptionLabel={m => `${m.moduleName} — ${m.routePath}`}
-          isOptionEqualToValue={(a, b) => a.componentPath === b.componentPath}
-          onOpen={loadFrontendModules}
-          onChange={(_, v) => setFmodule(v)}
-          renderInput={p => <TextField {...p} required label="Frontend module" size="small"
-            helperText={fmLoading ? 'Loading modules…'
-              : fmodule ? fmodule.url
-              : 'Pick a product module — the scan traces its frontend to the backend API'} />}
-        />
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
+          <Autocomplete sx={{ flex: 1 }}
+            options={fmodules} value={fmodule} loading={fmLoading}
+            getOptionLabel={m => `${m.moduleName} — ${m.routePath}`}
+            isOptionEqualToValue={(a, b) => a.componentPath === b.componentPath}
+            onOpen={loadFrontendModules}
+            onChange={(_, v) => setFmodule(v)}
+            renderInput={p => <TextField {...p} required label="Frontend module" size="small"
+              helperText={fmLoading ? 'Loading modules…'
+                : fmodule ? fmodule.url
+                : 'Pick a product module — the scan traces its frontend to the backend API'} />}
+          />
+          <Tooltip title="Rediscover modules — re-scan the repo (uses AI when the route file isn't found)">
+            <span>
+              <IconButton onClick={rediscoverModules} disabled={fmLoading} sx={{ mt: 0.5 }} aria-label="Rediscover modules">
+                {fmLoading ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />}
+              </IconButton>
+            </span>
+          </Tooltip>
+        </Stack>
         <Autocomplete
           options={repos} value={repo} loading={reposLoading}
           onOpen={loadRepos}
-          onChange={(_, v) => { setRepo(v); setBranch(null); setBranches([]); if (v) loadBranches(v) }}
+          onChange={(_, v) => {
+            setRepo(v)
+            setBranch(null)
+            setBranches([])
+            setFmodule(null)
+            setFmodules([])
+            if (v) loadBranches(v)
+          }}
           renderInput={p => <TextField {...p} label="Repository (optional)" size="small"
             helperText={reposLoading ? 'Loading repositories…' : undefined} />}
         />
         <Autocomplete
           options={branches} value={branch} loading={branchesLoading} disabled={!repo}
           onOpen={() => { if (repo) loadBranches(repo) }}
-          onChange={(_, v) => setBranch(v)}
+          onChange={(_, v) => {
+            setBranch(v)
+            setFmodule(null)
+            setFmodules([])
+          }}
           renderInput={p => <TextField {...p} label="Branch (optional)" size="small"
             helperText={!repo ? 'Pick a repository first' : branchesLoading ? 'Loading branches…' : undefined} />}
+        />
+        <TextField
+          label="Source directories override (optional)"
+          size="small"
+          fullWidth
+          multiline
+          minRows={2}
+          value={sourceDirs}
+          onChange={e => setSourceDirs(e.target.value)}
+          helperText="One repo-relative directory per line. Leave blank for smart branch discovery."
         />
         <Autocomplete
           options={plans} getOptionLabel={p => `${p.id} — ${p.name}`}

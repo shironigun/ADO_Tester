@@ -155,6 +155,10 @@ namespace QaAutomation.Migrations.Npgsql.Migrations
                         .HasColumnType("timestamp without time zone")
                         .HasColumnName("CreatedAt");
 
+                    b.Property<string>("DiscoveryJson")
+                        .HasColumnType("text")
+                        .HasColumnName("DiscoveryJson");
+
                     b.Property<string>("ErrorMessage")
                         .HasColumnType("text")
                         .HasColumnName("ErrorMessage");

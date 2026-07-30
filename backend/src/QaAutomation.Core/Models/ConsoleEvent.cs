@@ -53,6 +53,8 @@ public static class EventKinds
     public const string Stat = "stat";
     public const string Result = "result";
     public const string Error = "error";
+    /// <summary>Raw ANSI terminal chunk for live execution views. Intentionally not persisted.</summary>
+    public const string Term = "term";
 
     /// <summary>Durable kinds persisted to EventLogJson. Token/thinking deltas are live-only.</summary>
     public static readonly IReadOnlySet<string> Narrative =

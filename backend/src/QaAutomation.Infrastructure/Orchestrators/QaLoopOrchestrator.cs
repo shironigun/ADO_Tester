@@ -293,7 +293,7 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
 
                     var specPath = await playwright.GenerateScriptAsync(
                         uiCase.Title, uiCase.StepsJson, uiCase.Bucket ?? "regression",
-                        uiCase.Id, progress, ct);
+                        uiCase.Id, progress, ct, session.FrontendModule);
 
                     var rawCode = File.Exists(specPath) ? await File.ReadAllTextAsync(specPath, ct) : "";
                     // QLV2-301: stamp @qa-meta (SourceDraftId null — the UiScript draft row doesn't
@@ -759,7 +759,8 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
 
             // Fetch source from ADO repo
             Pub(key, EventKinds.Phase, EventPhases.Fetch, $"Fetching source for module '{session.Module}'");
-            var source = await FetchSourceAsync(session, key, ct);
+            var sourceDiscovery = scope.ServiceProvider.GetService<IModuleSourceDiscoveryService>();
+            var source = await FetchSourceAsync(session, key, sourceDiscovery, ct);
             // QAL-xxx: a source fetch that degrades to the bare "Module: {name}" placeholder (no code
             // context at all) used to log as a plain Success here, indistinguishable from a real fetch —
             // the analyzer would then silently find 0 routes with no visible explanation. FetchSourceAsync
@@ -809,7 +810,7 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
                     try
                     {
                         // ponytail: SearchCodeAsync searches the configured ado.repository (single product repo).
-                        var hit = (await _ado.SearchCodeAsync(pathOrTerm, top: 1, ct: fct)).FirstOrDefault();
+                        var hit = (await _ado.SearchCodeAsync(pathOrTerm, top: 1, repoId: repo, ct: fct)).FirstOrDefault();
                         if (!string.IsNullOrEmpty(hit))
                         {
                             var content = await _ado.GetFileContentAsync(hit, @ref: branch, repoId: repo, ct: fct);
@@ -1155,7 +1156,8 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
 
     // ── Source fetch ─────────────────────────────────────────────────────────
 
-    private async Task<string> FetchSourceAsync(ApiTestSession session, string key, CancellationToken ct)
+    private async Task<string> FetchSourceAsync(
+        ApiTestSession session, string key, IModuleSourceDiscoveryService? sourceDiscovery, CancellationToken ct)
     {
         if (string.IsNullOrEmpty(session.Repository) || string.IsNullOrEmpty(session.Branch))
         {
@@ -1228,10 +1230,28 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
 
             if (paths.Count == 0)
             {
+                var discovered = sourceDiscovery is null ? null : await sourceDiscovery.DiscoverAsync(
+                    session.Repository!, session.Branch!, session.Module,
+                    session.FrontendPath, session.FrontendModule, ct);
+                if (discovered is not null)
+                {
+                    session.DiscoveryJson = JsonSerializer.Serialize(discovered);
+                    session.SourceDirsJson = JsonSerializer.Serialize(discovered.SourceDirectories);
+                    Pub(key, EventKinds.Result, EventPhases.Fetch,
+                        $"Smart discovery: {discovered.Explanation}",
+                        EventLevels.Success, new()
+                        {
+                            ["frontendFiles"] = discovered.FrontendFiles.Count,
+                            ["apiCalls"] = discovered.ApiCalls.Count,
+                            ["backendFiles"] = discovered.BackendFiles.Count,
+                            ["confidence"] = discovered.Confidence,
+                        });
+                    return discovered.SourceBundle;
+                }
                 Pub(key, EventKinds.System, EventPhases.Fetch,
                     $"No source files found for module '{session.Module}' under the configured paths " +
                     (sourceDirs.Count > 0 ? $"({string.Join(", ", sourceDirs)})" : $"('{session.Module}' as a top-level repo folder)") +
-                    " — check Repository/Branch/Source Dirs/Frontend Path in the session's scan config.",
+                    " — automatic branch discovery also found no usable module evidence. Check Source Dirs or Frontend Path.",
                     EventLevels.Warn);
                 return $"Module: {session.Module}";
             }

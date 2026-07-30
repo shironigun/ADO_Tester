@@ -67,6 +67,7 @@ export interface ApiSessionDetail extends SessionDetail {
   testPlanId?: number | null
   testSuiteId?: number | null
   inventoryJson?: string | null
+  discoveryJson?: string | null
   activityEnabled: boolean
   additionalContext?: string | null
   generateContext?: string | null
@@ -106,10 +107,11 @@ export async function startScan(projectId: number, req: ScanStartRequest): Promi
   return data
 }
 
-export async function listFrontendModules(repository?: string, branch?: string): Promise<FrontendModule[]> {
+export async function listFrontendModules(repository?: string, branch?: string, refresh?: boolean): Promise<FrontendModule[]> {
   const params: Record<string, string> = {}
   if (repository) params.repository = repository
   if (branch) params.branch = branch
+  if (refresh) params.refresh = 'true'
   const { data } = await api.get<FrontendModule[]>('/api/qaloop/frontend-modules', { params })
   return data
 }

@@ -5,6 +5,7 @@ export interface EnvStatus {
   adoPatPresent: boolean
   anthropicKeyPresent: boolean
   azureOpenAiConfigured: boolean
+  ollamaConfigured: boolean
   claudeCliAvailable: boolean
   claudeCliVersion: string | null
   copilotCliAvailable: boolean

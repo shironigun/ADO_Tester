@@ -12,7 +12,7 @@ public interface IPlaywrightAgentService
     /// </summary>
     Task<string> GenerateScriptAsync(
         string caseTitle, string stepsJson, string bucket, int tcIdPending,
-        IProgress<string>? progress, CancellationToken ct);
+        IProgress<string>? progress, CancellationToken ct, string? moduleRoute = null);
 
     /// <summary>
     /// Asks the Claude CLI healer agent to fix the spec at <paramref name="specFilePath"/>

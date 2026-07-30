@@ -6,6 +6,38 @@ Newest entries first.
 
 ## 2026-07-30
 
+### feat(qa-loop): discover nested module sources from the selected branch
+QA Loop no longer relies solely on a configured `{FrontendPath}/apis` folder or a top-level module
+directory. When those paths produce no source, it lists the selected repository branch, selects bounded
+frontend candidates, extracts common HTTP calls, ranks backend controller candidates, and feeds the
+evidence into the existing analyzer.
+- Repository/branch selections now drive module dropdown discovery and code search resolution.
+- Sessions persist discovery evidence and expose an optional Source Dirs override in the scan form.
+- The UI Phase selection now persists at scan start; generated Playwright prompts include the selected
+  module route and validate that Playwright MCP is initialized.
+- Verified with 187 backend tests, a clean API build, and a successful frontend production build. See
+  [`docs/features/qa-loop-smart-discovery.md`](../features/qa-loop-smart-discovery.md).
+
+### fix(qa-loop): inherit repository and branch from Azure DevOps Settings
+QA Loop scans that omitted the optional repository/branch form fields previously persisted both values
+as null, even when Azure DevOps Settings had a configured repository and default branch. The pipeline
+then skipped all code-aware source fetches and generated text-only, empty coverage analysis.
+- The scan-start form now uses `ado.repository` / `ado.default_branch` when its more-specific
+  `qaloop.default_repository` / `qaloop.default_branch` values are unset.
+- The backend now applies the same fallback while creating `ApiTestSession`, so direct API callers and
+  stale frontend state cannot create a source-less session.
+- Verified with 187 backend tests, clean isolated API build, and a successful frontend production build.
+
+### feat(llm): add a separate native Ollama provider
+Ollama is now an independent provider rather than an OpenAI-compatible configuration:
+- **Native API:** `OllamaLlmClient` calls native `POST /api/chat` for local Ollama and Ollama Cloud,
+  sending a bearer token only when one is configured.
+- **Settings:** `OLLAMA_BASE_URL`, `OLLAMA_API_KEY`, and `OLLAMA_MODEL` map to the independent
+  `ollama.*` runtime settings and a new Settings-page card. Existing `OPENAI_*` and
+  `OpenAICompatible` behavior is unchanged.
+- **Verification:** 187 backend tests pass; the configured Ollama Cloud endpoint returned `OK` from
+  a native API chat request. See [`docs/features/ollama-provider.md`](../features/ollama-provider.md).
+
 ### fix(qa-loop): surface silent source-fetch degradation in the Agent Console
 A QA Loop scan against a live module (`orders`) completed with **0 routes / 0 surfaces / 0 drafts** and
 no visible error — `FetchSourceAsync` had silently degraded to its bare `"Module: {name}"` placeholder

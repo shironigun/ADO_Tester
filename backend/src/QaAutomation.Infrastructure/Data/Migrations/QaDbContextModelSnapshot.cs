@@ -146,6 +146,10 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("CreatedAt");
 
+                    b.Property<string>("DiscoveryJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("DiscoveryJson");
+
                     b.Property<string>("ErrorMessage")
                         .HasColumnType("TEXT")
                         .HasColumnName("ErrorMessage");

@@ -8,7 +8,7 @@ namespace QaAutomation.Infrastructure.ScriptsBoard;
 
 /// <summary>Ad-hoc Scripts Board execution (Slab 3, QLV2-303): resolves a selection filter against the
 /// live inventory, persists a <see cref="ScriptBoardRun"/>, and executes it via
-/// <see cref="IPlaywrightRunner"/>. <c>RunId = -runId</c> is passed to the runner so its on-disk
+/// <see cref="IScriptsBoardRunner"/>. <c>RunId = -runId</c> is passed to the runner so its on-disk
 /// artifacts under <c>{runsDir}/{runId}</c> never collide with a positive <see cref="TestRun"/> id (see
 /// blueprint.md → SLAB 3 grounding). Scoped — mirrors <c>RunExecutionService</c>'s lifecycle/error
 /// handling exactly.</summary>
@@ -16,11 +16,11 @@ public sealed class ScriptBoardExecutionService : IScriptBoardExecutionService
 {
     private readonly QaDbContext _db;
     private readonly IScriptInventoryService _inventory;
-    private readonly IPlaywrightRunner _runner;
+    private readonly IScriptsBoardRunner _runner;
     private readonly IEventBus _bus;
 
     public ScriptBoardExecutionService(
-        QaDbContext db, IScriptInventoryService inventory, IPlaywrightRunner runner, IEventBus bus)
+        QaDbContext db, IScriptInventoryService inventory, IScriptsBoardRunner runner, IEventBus bus)
     {
         _db = db;
         _inventory = inventory;
@@ -99,7 +99,7 @@ public sealed class ScriptBoardExecutionService : IScriptBoardExecutionService
                 Workers = run.Workers,
                 ActivityEnabled = true,
             };
-            var result = await _runner.RunAsync(spec, eventKey, ct);
+            var result = await _runner.RunWithLiveTermAsync(spec, eventKey, ct);
 
             run.Passed = result.Passed;
             run.Failed = result.Failed;

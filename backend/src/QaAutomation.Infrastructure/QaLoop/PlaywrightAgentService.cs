@@ -31,14 +31,14 @@ public sealed class PlaywrightAgentService : IPlaywrightAgentService
 
     public async Task<string> GenerateScriptAsync(
         string caseTitle, string stepsJson, string bucket, int tcIdPending,
-        IProgress<string>? progress, CancellationToken ct)
+        IProgress<string>? progress, CancellationToken ct, string? moduleRoute = null)
     {
         var root = RequireRoot();
         var outDir = Path.Combine(root, "generated", "ui", bucket);
         Directory.CreateDirectory(outDir);
         var slug = Slug(caseTitle);
         var specPath = Path.Combine(outDir, $"{slug}-{tcIdPending}.ui.spec.ts");
-        var prompt = BuildGeneratePrompt(caseTitle, stepsJson, bucket, specPath, _opts.AppUrl);
+        var prompt = BuildGeneratePrompt(caseTitle, stepsJson, bucket, specPath, _opts.AppUrl, moduleRoute);
         await RunAgentAsync(root, prompt, progress, ct);
         return specPath;
     }
@@ -79,6 +79,9 @@ public sealed class PlaywrightAgentService : IPlaywrightAgentService
         if (string.IsNullOrWhiteSpace(root))
             throw new InvalidOperationException(
                 "PlaywrightRoot is not configured. Set AUTOMATION_PLAYWRIGHT_ROOT in the .env.");
+        if (!File.Exists(Path.Combine(root, ".mcp.json")))
+            throw new InvalidOperationException(
+                $"Playwright MCP is not initialized at '{root}'. Run 'npx playwright init-agents --loop=claude' from the framework root.");
         return root;
     }
 
@@ -172,13 +175,15 @@ public sealed class PlaywrightAgentService : IPlaywrightAgentService
     }
 
     private static string BuildGeneratePrompt(
-        string title, string stepsJson, string bucket, string specPath, string appUrl)
+        string title, string stepsJson, string bucket, string specPath, string appUrl, string? moduleRoute)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"Generate a Playwright TypeScript test spec for the following manual test case.");
         sb.AppendLine($"Write the spec to: {specPath}");
         sb.AppendLine($"Bucket: {bucket}");
         sb.AppendLine($"App URL: {(string.IsNullOrEmpty(appUrl) ? "<configure AUTOMATION_APP_URL>" : appUrl)}");
+        if (!string.IsNullOrWhiteSpace(moduleRoute))
+            sb.AppendLine($"Module route to explore first: {moduleRoute}");
         sb.AppendLine();
         sb.AppendLine($"Test case title: {title}");
         sb.AppendLine();
@@ -199,6 +204,7 @@ public sealed class PlaywrightAgentService : IPlaywrightAgentService
         sb.AppendLine("Requirements:");
         sb.AppendLine("- Use @playwright/test.");
         sb.AppendLine("- Use the storageState from fixtures/storageState.json for authentication (relative to playwright.config.ts).");
+        sb.AppendLine("- Use the Playwright MCP planner to navigate the module route and inspect live controls before choosing locators.");
         sb.AppendLine("- Include allure-playwright labels (@allure.label.story, @allure.label.tag).");
         sb.AppendLine($"- Tag the test: @ui @{bucket}.");
         sb.AppendLine("- The spec file must compile with TypeScript strict mode.");

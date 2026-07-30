@@ -24,35 +24,36 @@ public sealed class QaLoopController : ControllerBase
     private readonly IEventBus _bus;
     private readonly QaDbContext _db;
     private readonly IAzureDevOpsClient _ado;
+    private readonly IFrontendModuleService _frontendModules;
     private readonly IOptions<QaLoopOptions> _opts;
+    private readonly IOptionsMonitor<AzureDevOpsOptions> _adoOptions;
     private readonly ILogger<QaLoopController> _log;
 
     public QaLoopController(
         IQaLoopOrchestrator orchestrator, IEventBus bus, QaDbContext db, IAzureDevOpsClient ado,
-        IOptions<QaLoopOptions> opts, ILogger<QaLoopController> log)
+        IFrontendModuleService frontendModules, IOptions<QaLoopOptions> opts,
+        IOptionsMonitor<AzureDevOpsOptions> adoOptions, ILogger<QaLoopController> log)
     {
         _orchestrator = orchestrator;
         _bus = bus;
         _db = db;
         _ado = ado;
+        _frontendModules = frontendModules;
         _opts = opts;
+        _adoOptions = adoOptions;
         _log = log;
     }
 
-    /// <summary>Product frontend modules parsed from the SPA route file — the strict source for the
-    /// New Scan module dropdown. Reuses GetFileContentAsync + the pure FrontendModuleParser.</summary>
+    /// <summary>Product frontend modules for the New Scan module dropdown. Tries the conventional route
+    /// file (deterministic parser) then falls back to the active LLM to locate + extract the route map;
+    /// the result is cached (one-time) per repo/branch. Pass <c>refresh=true</c> to rediscover.</summary>
     [HttpGet("frontend-modules")]
     public async Task<IActionResult> FrontendModules(
-        [FromQuery] string? repository, [FromQuery] string? branch, CancellationToken ct)
+        [FromQuery] string? repository, [FromQuery] string? branch, [FromQuery] bool refresh = false, CancellationToken ct = default)
     {
-        var opts = _opts.Value;
-        var repo = string.IsNullOrWhiteSpace(repository) ? opts.FrontendRepo : repository;
-        var root = opts.FrontendRoot.Trim('/');
         try
         {
-            var content = await _ado.GetFileContentAsync(
-                $"{root}/routes/Routes.tsx", @ref: branch, repoId: repo, ct: ct);
-            var modules = FrontendModuleParser.Parse(content, root, opts.FrontendBaseUrl);
+            var modules = await _frontendModules.DiscoverAsync(repository, branch, refresh, ct);
             return Ok(modules);
         }
         catch (Exception e)
@@ -81,18 +82,22 @@ public sealed class QaLoopController : ControllerBase
         if (existing is not null)
             existingSessionId = existing.Id;
 
+        var adoDefaults = _adoOptions.CurrentValue;
         var session = new ApiTestSession
         {
             ProjectId = projectId,
             Module = req.Module,
-            Repository = req.Repository,
-            Branch = req.Branch,
+            // A scan-level selection wins, otherwise use the runtime ADO Settings values. This keeps
+            // code-aware scans working when repository/branch are intentionally omitted from the form.
+            Repository = string.IsNullOrWhiteSpace(req.Repository) ? adoDefaults.Repository : req.Repository,
+            Branch = string.IsNullOrWhiteSpace(req.Branch) ? adoDefaults.DefaultBranch : req.Branch,
             WorkItemId = req.WorkItemId,
             TestPlanId = req.TestPlanId,
             TestSuiteId = req.TestSuiteId,
             SourceDirsJson = req.SourceDirs is { Count: > 0 } ? System.Text.Json.JsonSerializer.Serialize(req.SourceDirs) : null,
             FrontendModule = req.FrontendModule,
             FrontendPath = req.FrontendPath,
+            HasUiPhase = req.HasUiPhase,
             AutoHandoff = req.AutoHandoff,
             ActivityEnabled = _opts.Value.ActivityEnabled,
             AdditionalContext = req.AdditionalContext,
