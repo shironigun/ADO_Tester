@@ -17,9 +17,11 @@ public interface IPlaywrightAgentService
     /// <summary>
     /// Asks the Claude CLI healer agent to fix the spec at <paramref name="specFilePath"/>
     /// given the <paramref name="failureMessage"/> from the last Playwright run.
+    /// Optional <paramref name="userContext"/> is appended to the failure message before healing.
     /// The spec is overwritten in place.
     /// </summary>
     Task HealAsync(
         string specFilePath, string failureMessage,
-        IProgress<string>? progress, CancellationToken ct);
+        IProgress<string>? progress, CancellationToken ct,
+        string? userContext = null);
 }

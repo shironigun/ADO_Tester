@@ -20,6 +20,9 @@ const PHASE_LABEL: Record<string, string> = {
   fetch: 'FETCH', retrieve: 'KB', analyst: 'ANALYST', tester: 'TESTER',
   bugwriter: 'BUG WRITER', push: 'PUSH', summarize: 'SUMMARIZE',
   discover: 'DISCOVER', 'code-verify': 'VERIFY', dedup: 'DEDUP',
+  // KBG-108: QA Loop KB-grounded phases
+  'retrieve-kb': 'KB', scan: 'SCAN', analyze: 'ANALYZE',
+  'analyze-ui': 'UI ANALYSIS', 'run-ui': 'RUN', 'failure-explain': 'FAILURE',
 }
 
 function fmtClock(ts: number): string {
@@ -54,12 +57,19 @@ export function useSessionDetail(
     // Poll while in-flight; stop (false) once terminal. Reads the just-fetched data each tick.
     refetchInterval: (q) => {
       const d = q.state.data
-      return d && config.inFlightStatuses.includes(d.status) ? 2500 : false
+      const mainInFlight = d && config.inFlightStatuses.includes(d.status)
+      const uiInFlight = d && config.getUiStatus && config.uiInFlightStatuses
+        ? config.uiInFlightStatuses.includes(config.getUiStatus(d as never) ?? '')
+        : false
+      return (mainInFlight || uiInFlight) ? 2500 : false
     },
   })
 
   const session = query.data ?? null
-  const polling = session != null && config.inFlightStatuses.includes(session.status)
+  const uiStatusValue = session && config.getUiStatus ? config.getUiStatus(session as never) : undefined
+  const polling = session != null
+    && (config.inFlightStatuses.includes(session.status)
+        || (!!uiStatusValue && (config.uiInFlightStatuses?.includes(uiStatusValue) ?? false)))
 
   // Fire onTerminal once when a session transitions out of an in-flight status.
   const wasInFlight = useRef(false)

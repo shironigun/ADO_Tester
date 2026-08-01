@@ -508,9 +508,11 @@ public sealed class JUnitTriageSplitTests
 
     private sealed class NullKb : IKnowledgebaseService
     {
-        public Task<KnowledgebaseDocument> UploadAsync(int projectId, string fileName, string markdown, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<KnowledgebaseDocument> UploadAsync(int projectId, string fileName, string markdown, string? folderPath = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<KnowledgebaseDocument>> ListAsync(int projectId, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<KnowledgebaseDocument>>([]);
         public Task DeleteAsync(int documentId, CancellationToken ct = default) => Task.CompletedTask;
         public Task<IReadOnlyList<KnowledgebaseHit>> SearchAsync(int projectId, string query, int topK = 8, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<KnowledgebaseHit>>([]);
+        public Task<IReadOnlyList<KnowledgebaseDocument>> GetDocumentsByFolderAsync(int projectId, string folderPath, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<KnowledgebaseDocument>>([]);
+        public Task<KnowledgebaseDocument?> GetDocumentByPathAsync(int projectId, string folderPath, string fileName, CancellationToken ct = default) => Task.FromResult<KnowledgebaseDocument?>(null);
     }
 }

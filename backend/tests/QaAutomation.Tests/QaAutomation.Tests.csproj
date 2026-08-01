@@ -24,6 +24,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\QaAutomation.Core\QaAutomation.Core.csproj" />
     <ProjectReference Include="..\..\src\QaAutomation.Infrastructure\QaAutomation.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\QaAutomation.Api\QaAutomation.Api.csproj" />
   </ItemGroup>
 
   <ItemGroup>

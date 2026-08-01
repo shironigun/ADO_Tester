@@ -20,9 +20,12 @@ interface Line {
 
 const PHASE_LABEL: Record<string, string> = {
   fetch: 'FETCH', retrieve: 'KB', analyst: 'ANALYST', tester: 'TESTER',
-  bugwriter: 'BUGWRITER', push: 'PUSH', summarize: 'SUMMARIZE',
+  bugwriter: 'BUG WRITER', push: 'PUSH', summarize: 'SUMMARIZE',
   discover: 'DISCOVER', 'code-verify': 'VERIFY',
   run: 'RUN',
+  // KBG-108: QA Loop KB-grounded phases
+  'retrieve-kb': 'KB', scan: 'SCAN', analyze: 'ANALYZE',
+  'analyze-ui': 'UI ANALYSIS', 'run-ui': 'RUN UI', 'failure-explain': 'FAILURE',
 }
 
 function buildModel(events: ConsoleEvent[]): { lines: Line[]; chars: number; elapsed: number } {

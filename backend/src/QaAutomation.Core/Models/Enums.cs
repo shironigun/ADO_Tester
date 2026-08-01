@@ -49,7 +49,18 @@ public static class BatchEnumExtensions
 // ── QA Loop enums ────────────────────────────────────────────────────────────
 
 // Exact-name enums (HasConversion<string>() — no [EnumMember] needed)
-public enum ApiSessionStatus { Analyzing, AwaitingReview, Drafting, Drafted, Pushing, Done, Failed, Cancelled }
+public enum ApiSessionStatus
+{
+    // KBG-105: new leading states (old sessions starting at Analyzing are unaffected)
+    RetrievingKb,   // Retrieve FRS KB step
+    Scanning,       // Code Scan step
+    // existing states unchanged:
+    Analyzing, AwaitingReview, Drafting, Drafted, Pushing,
+    // KBG-105: API phase complete, UI phase running/pending (NOT in TerminalStatuses)
+    ApiDone,
+    // existing terminal states unchanged:
+    Done, Failed, Cancelled
+}
 
 public enum ApiDraftStatus { Draft, Approved, Pushed, Rejected }
 
@@ -148,10 +159,17 @@ public enum ApiDraftKind
 // Exact-name enum — stored as the C# member name via HasConversion<string>() (no [EnumMember] needed).
 public enum ApiUiStatus
 {
+    // KBG-105: new leading states for KB-grounded UI phase
+    AnalyzingUi,              // UI Analyst agent running
+    AwaitingUiAnalysisReview, // UI Analyst complete, awaiting user approval
+    // existing Slab 2 states unchanged (old sessions starting at Authoring are unaffected):
     Authoring,       // agents generating UI test cases
     AwaitingReview,  // cases ready for human review / bucket assignment
     Drafting,        // Playwright MCP agents generating .ui.spec.ts scripts
     Drafted,         // scripts ready for human review / approve
+    // KBG-105: inline execution running
+    RunningUiScripts,
+    // existing states unchanged:
     Pushing,
     Done,
     Failed,

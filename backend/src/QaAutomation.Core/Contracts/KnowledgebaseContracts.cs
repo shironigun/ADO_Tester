@@ -54,3 +54,18 @@ public sealed record KbDocResult
     public int CharCount { get; init; }
     public int DocumentId { get; init; }       // KnowledgebaseDocument id
 }
+
+// ── Folder-tree upload contracts ──────────────────────────────────────────────
+
+/// <summary>One item in a batch folder upload: relative path + file name + markdown content.</summary>
+public sealed record KbFolderUploadItem(string FolderPath, string FileName, string Content);
+
+/// <summary>Successfully uploaded document in a folder batch.</summary>
+public sealed record KbFolderUploadResult(int Id, string FileName);
+
+/// <summary>Item that failed during a folder batch upload.</summary>
+public sealed record KbFolderUploadError(string FileName, string Error);
+
+/// <summary>Response from POST /api/knowledgebase/{projectId}/folder — continues on per-item failure.</summary>
+public sealed record KbFolderUploadResponse(
+    KbFolderUploadResult[] Uploaded, KbFolderUploadError[] Failed);

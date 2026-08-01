@@ -88,4 +88,48 @@ public sealed class QaMetaHeaderTests
         Assert.Equal(h1, h2);
         Assert.NotEqual(h1, h3);
     }
+
+    [Fact]
+    public void ExtractTags_pulls_feature_and_pack_tokens_from_first_test_line()
+    {
+        var spec = """
+            import { test, expect } from '@playwright/test';
+
+            test('GET /leads @smoke @feature-lead-list @contract', async ({ request }) => {
+              const res = await request.get('/leads');
+              expect(res.status()).toBe(200);
+            });
+            """;
+
+        var tags = QaMetaHeader.ExtractTags(spec);
+
+        Assert.Equal(["@smoke", "@feature-lead-list", "@contract"], tags);
+    }
+
+    [Fact]
+    public void ExtractTags_skips_playwright_import_and_returns_empty_when_no_at_tokens()
+    {
+        Assert.Empty(QaMetaHeader.ExtractTags(LegacySpec));
+    }
+
+    [Fact]
+    public void ExtractTags_dedupes_preserving_order()
+    {
+        var spec = "test('x @smoke @feature-a @smoke', async () => {});";
+        Assert.Equal(["@smoke", "@feature-a"], QaMetaHeader.ExtractTags(spec));
+    }
+
+    [Fact]
+    public void Build_omits_null_tags_keeps_legacy_shape_and_round_trips_with_tags()
+    {
+        var without = QaMetaHeader.Build(SampleMeta);
+        Assert.DoesNotContain("\"tags\"", without);
+
+        var withTags = SampleMeta with { Tags = ["@smoke", "@feature-x"] };
+        var header = QaMetaHeader.Build(withTags);
+        Assert.Contains("\"tags\"", header);
+
+        var parsed = QaMetaHeader.TryParse(header + "import x;\n");
+        Assert.Equal(["@smoke", "@feature-x"], parsed!.Tags);
+    }
 }

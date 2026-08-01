@@ -67,7 +67,7 @@ public sealed class KnowledgebaseController : ControllerBase
 
                 // UTF-8 with replacement (the static Encoding.UTF8 substitutes U+FFFD), matching Python errors='replace'.
                 var markdown = Encoding.UTF8.GetString(raw);
-                results.Add(await _kb.UploadAsync(projectId, name, markdown, cancellationToken));
+                results.Add(await _kb.UploadAsync(projectId, name, markdown, cancellationToken: cancellationToken));
             }
             return Ok(results);
         }
@@ -91,6 +91,51 @@ public sealed class KnowledgebaseController : ControllerBase
             _log.LogError(e, "KB delete failed");
             return StatusCode(500, new { detail = e.Message });
         }
+    }
+
+    /// <summary>Batch folder-tree upload. Accepts a JSON array of {folderPath, fileName, content} items.
+    /// Continues on per-item failure and returns {uploaded, failed} lists.</summary>
+    [HttpPost("{projectId:int}/folder")]
+    public async Task<IActionResult> UploadFolder(
+        int projectId, [FromBody] List<KbFolderUploadItem> items, CancellationToken cancellationToken)
+    {
+        if (items is null || items.Count == 0)
+            return StatusCode(400, new { detail = "No items provided." });
+
+        var uploaded = new List<KbFolderUploadResult>();
+        var failed = new List<KbFolderUploadError>();
+
+        foreach (var item in items)
+        {
+            if (string.IsNullOrWhiteSpace(item.FileName))
+            {
+                failed.Add(new KbFolderUploadError(item.FileName ?? "", "FileName is required."));
+                continue;
+            }
+            if (!item.FileName.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+            {
+                failed.Add(new KbFolderUploadError(item.FileName, $"Only .md files accepted ('{item.FileName}')."));
+                continue;
+            }
+            var contentBytes = Encoding.UTF8.GetByteCount(item.Content ?? "");
+            if (contentBytes > MaxFileBytes)
+            {
+                failed.Add(new KbFolderUploadError(item.FileName, $"File too large ({contentBytes / 1024} KB, max {MaxFileBytes / 1024} KB)."));
+                continue;
+            }
+            try
+            {
+                var doc = await _kb.UploadAsync(projectId, item.FileName, item.Content ?? "", item.FolderPath ?? "", cancellationToken);
+                uploaded.Add(new KbFolderUploadResult(doc.Id, doc.FileName));
+            }
+            catch (Exception e)
+            {
+                _log.LogWarning(e, "Folder upload failed for '{FileName}'", item.FileName);
+                failed.Add(new KbFolderUploadError(item.FileName, e.Message));
+            }
+        }
+
+        return Ok(new KbFolderUploadResponse([.. uploaded], [.. failed]));
     }
 
     [HttpGet("{projectId:int}/search")]

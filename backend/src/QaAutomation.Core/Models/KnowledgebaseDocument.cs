@@ -10,6 +10,9 @@ public sealed class KnowledgebaseDocument
     public int ChunkCount { get; set; }
     public long SizeBytes { get; set; }
     public DateTime UploadedAt { get; set; }
+    /// <summary>Relative path from upload root, e.g. "modules", "atlas", "" for root files.
+    /// Null on legacy documents uploaded before the folder-tree feature.</summary>
+    public string? FolderPath { get; set; }
 }
 
 /// <summary>A retrieved chunk with its relevance score (lower bm25 = better).</summary>

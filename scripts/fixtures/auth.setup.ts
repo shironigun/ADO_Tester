@@ -25,6 +25,16 @@ export default async function globalSetup(): Promise<void> {
   await page.getByRole('button', { name: /sign in|log in/i }).click()
   await page.waitForURL(u => !u.pathname.includes('/login'), { timeout: 15_000 })
 
+  // Post-login modal: "Would you like to set up email login?" — dismiss or the
+  // session stays stuck on the dashboard under the overlay.
+  const notNow = page.getByRole('button', { name: /not now/i })
+  try {
+    await notNow.waitFor({ state: 'visible', timeout: 8_000 })
+    await notNow.click()
+  } catch {
+    // Modal not shown for this account / already dismissed.
+  }
+
   const storageStatePath = path.join(__dirname, 'storageState.json')
   await page.context().storageState({ path: storageStatePath })
   console.log(`[auth.setup] storageState saved to ${storageStatePath}`)

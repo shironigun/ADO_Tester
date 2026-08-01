@@ -87,6 +87,9 @@ export interface SessionModuleConfig {
   moduleChip: { label: string; icon: ReactNode }
   /** Statuses that mean "still working" → poll + show live pulse. */
   inFlightStatuses: string[]
+  /** Optional: additional in-flight check for UI-phase status (e.g. uiStatus field). */
+  getUiStatus?: (d: SessionDetail) => string | undefined
+  uiInFlightStatuses?: string[]
   pipelineSteps: PipelineStep[]
   activeStepIndex: (status: string, activity: string | null) => number
   analyticsColumns: AnalyticsColumn[]

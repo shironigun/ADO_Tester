@@ -21,7 +21,7 @@
       "runtimeExecutable": "C:\\Program Files\\dotnet\\dotnet.exe",
       "runtimeArgs": ["run", "--project", "src\\QaAutomation.Api"],
       "port": 5250,
-      "autoPort": false,
+      "autoPort": true,
       "cwd": "backend"
     }
   ]

@@ -30,6 +30,7 @@ import {
   startScan, listSessionsPage, getSessionDetail, saveAnalysis, generateDrafts, patchDraft,
   approveAllDrafts, pushSession, updateSessionPlan, cancelSession, deleteSession, sessionStreamUrl, listFrontendModules, LEVEL_NAMES,
   rerunAnalyze, refineDrafts, authorUiCases, generateUiScripts, healSpecs,
+  patchUiSuite, rerunUiAnalysis, runUiScripts, explainFailure,
   type ApiSessionDetail, type ApiTestDraftDto, type ScanStartRequest, type SurfaceRow,
   type FrontendModule, type ApiDraftFeedback,
 } from '../../api/qaLoop'
@@ -42,21 +43,25 @@ import { PROJECT_ID } from '../../config/env'
 // ── Pipeline ──────────────────────────────────────────────────────────────────
 
 const PIPELINE_STEPS: PipelineStep[] = [
-  { key: 'scan',   label: 'Scan',   icon: <QrCode2Icon /> },
-  { key: 'review', label: 'Review', icon: <CheckIcon /> },
-  { key: 'drafts', label: 'Drafts', icon: <PushPinIcon /> },
-  { key: 'push',   label: 'Push',   icon: <CheckIcon /> },
+  { key: 'retrieve-kb', label: 'Retrieve KB', icon: <QrCode2Icon /> },
+  { key: 'review',      label: 'Coverage',    icon: <CheckIcon /> },
+  { key: 'drafts',      label: 'Drafts',      icon: <PushPinIcon /> },
+  { key: 'push',        label: 'Push',        icon: <CheckIcon /> },
 ]
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function activeStepIndex(status: string, _activity: string | null): number {
   switch (status) {
-    case 'Scanning':      return 0
+    case 'RetrievingKb':
+    case 'Scanning':       return 0
+    case 'Analyzing':
     case 'AwaitingReview': return 1
-    case 'Drafting':      return 2
+    case 'Drafting':       return 2
     case 'Drafted':
-    case 'Pushing':       return 3
-    default:              return 0
+    case 'Pushing':
+    case 'ApiDone':
+    case 'Done':           return 3
+    default:               return 0
   }
 }
 
@@ -551,7 +556,7 @@ function PushPanel({ session, refetch }: { session: ApiSessionDetail; refetch: (
   const pushed   = drafts.filter(d => d.status === 'Pushed').length
   const approved = drafts.filter(d => d.status === 'Approved').length
   const canPush  = Boolean(session.testPlanId && session.testSuiteId)
-  const isDone   = session.status === 'Done'
+  const isDone   = session.status === 'Done' || session.status === 'ApiDone'
   const isPushing = session.status === 'Pushing'
   const pushedDrafts = drafts.filter(d => d.status === 'Pushed' && d.adoTestCaseId)
   const PUSH_LEVELS = ['Contract', 'Endpoint', 'Workflow'] as const
@@ -697,6 +702,196 @@ const BUCKET_COLORS: Record<string, 'success' | 'warning' | 'error' | 'info'> = 
   smoke: 'success', regression: 'warning', e2e: 'info',
 }
 
+interface UiAnalystOutput {
+  features?: { id?: string; name?: string; description?: string }[]
+  flows?: { name?: string; trigger?: string; steps?: string[]; breaks?: string[] }[]
+  screens?: { name?: string; route?: string; components?: string[] }[]
+  openQuestions?: string[]
+  mustTest?: string[]
+  mustNotTest?: string[]
+  authPermissionsSummary?: string
+  dmsVariantsSummary?: string
+}
+
+function parseUiAnalysis(json: string | null | undefined): UiAnalystOutput | null {
+  if (!json) return null
+  try { return JSON.parse(json) as UiAnalystOutput } catch { return null }
+}
+
+function ExplainFailureCard({
+  sessionId, draft, refetch, onError,
+}: {
+  sessionId: number
+  draft: ApiTestDraftDto
+  refetch: () => void
+  onError: (e: unknown, msg: string) => void
+}) {
+  const [explanation, setExplanation] = useState<string | null>(null)
+  const [explaining, setExplaining] = useState(false)
+  const [healCtx, setHealCtx] = useState('')
+  const [healing, setHealing] = useState(false)
+
+  async function doExplain() {
+    setExplaining(true)
+    try {
+      const res = await explainFailure(sessionId, draft.id)
+      setExplanation(res.explanation)
+    } catch (e) { onError(e, 'Failed to explain failure') }
+    finally { setExplaining(false) }
+  }
+
+  async function doHeal() {
+    setHealing(true)
+    try {
+      await healSpecs(sessionId, [draft.id], healCtx.trim() || undefined)
+      setExplanation(null)
+      refetch()
+    } catch (e) { onError(e, 'Failed to heal spec') }
+    finally { setHealing(false) }
+  }
+
+  return (
+    <Stack spacing={1} sx={{ mt: 1, p: 1.5, bgcolor: 'action.hover', borderRadius: 1 }}>
+      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+        <Typography variant="caption" color="error.main" sx={{ flex: 1 }}>
+          {draft.errorMessage}
+        </Typography>
+        <Button size="small" variant="outlined" onClick={doExplain} disabled={explaining}
+          startIcon={explaining ? <CircularProgress size={12} /> : undefined}>
+          {explaining ? 'Explaining…' : explanation ? 'Re-explain' : 'Explain'}
+        </Button>
+      </Stack>
+      {explanation && (
+        <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{explanation}</Typography>
+      )}
+      <TextField
+        size="small" multiline minRows={2} fullWidth
+        label="Heal context (optional)"
+        value={healCtx} onChange={e => setHealCtx(e.target.value)}
+        helperText="Hints for the healer agent — selectors, data, known UI quirks"
+      />
+      <Stack direction="row" spacing={1}>
+        <Button size="small" variant="contained" color="warning" onClick={doHeal} disabled={healing}
+          startIcon={healing ? <CircularProgress size={12} /> : undefined}>
+          {healing ? 'Healing…' : 'Heal'}
+        </Button>
+        {draft.adoTestCaseId != null && (
+          <Tooltip title={`File a bug linked to TC #${draft.adoTestCaseId} (after push)`}>
+            <Button size="small" variant="outlined" color="error" disabled>
+              Draft Bug
+            </Button>
+          </Tooltip>
+        )}
+      </Stack>
+    </Stack>
+  )
+}
+
+function UiSuitePicker({
+  session, refetch, onError,
+}: {
+  session: ApiSessionDetail
+  refetch: () => void
+  onError: (e: unknown, msg: string) => void
+}) {
+  const [suites, setSuites] = useState<TestSuite[]>([])
+  const [saving, setSaving] = useState(false)
+  const planId = session.testPlanId ?? null
+
+  async function loadSuites() {
+    if (!planId) return
+    try { setSuites(await getSuites(planId)) } catch { setSuites([]) }
+  }
+
+  async function onPick(suiteId: number | null) {
+    setSaving(true)
+    try { await patchUiSuite(session.id, suiteId); refetch() }
+    catch (e) { onError(e, 'Failed to update UI suite') }
+    finally { setSaving(false) }
+  }
+
+  if (!planId) {
+    return <Alert severity="info">Set a Test Plan on the Push tab before choosing a UI suite.</Alert>
+  }
+
+  return (
+    <Autocomplete
+      options={suites}
+      getOptionLabel={s => `${s.id} — ${s.name}`}
+      value={suites.find(s => s.id === session.uiTestSuiteId) ?? null}
+      isOptionEqualToValue={(a, b) => a.id === b.id}
+      onOpen={loadSuites}
+      disabled={saving}
+      onChange={(_, v) => onPick(v?.id ?? null)}
+      renderInput={p => (
+        <TextField {...p} label="UI Test Suite (same plan)" size="small"
+          helperText={session.uiTestSuiteId
+            ? `Suite #${session.uiTestSuiteId}`
+            : `Falls back to API suite #${session.testSuiteId ?? '—'}`} />
+      )}
+    />
+  )
+}
+
+function UiAnalysisCard({ analysis }: { analysis: UiAnalystOutput }) {
+  return (
+    <Card variant="outlined">
+      <CardContent>
+        <Typography variant="subtitle2" gutterBottom>UI Analysis</Typography>
+        {analysis.authPermissionsSummary && (
+          <Typography variant="body2" sx={{ mb: 1 }}><b>Auth:</b> {analysis.authPermissionsSummary}</Typography>
+        )}
+        {analysis.dmsVariantsSummary && (
+          <Typography variant="body2" sx={{ mb: 1 }}><b>DMS:</b> {analysis.dmsVariantsSummary}</Typography>
+        )}
+        {analysis.features && analysis.features.length > 0 && (
+          <Box sx={{ mb: 1 }}>
+            <Typography variant="caption" color="text.secondary">Features</Typography>
+            <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+              {analysis.features.map((f, i) => (
+                <Chip key={f.id ?? i} size="small" label={f.name ?? f.id ?? `feature-${i}`} />
+              ))}
+            </Stack>
+          </Box>
+        )}
+        {analysis.flows && analysis.flows.length > 0 && (
+          <Box sx={{ mb: 1 }}>
+            <Typography variant="caption" color="text.secondary">Flows</Typography>
+            {analysis.flows.map((f, i) => (
+              <Typography key={i} variant="body2">• {f.name}{f.trigger ? ` — ${f.trigger}` : ''}</Typography>
+            ))}
+          </Box>
+        )}
+        {analysis.screens && analysis.screens.length > 0 && (
+          <Box sx={{ mb: 1 }}>
+            <Typography variant="caption" color="text.secondary">Screens</Typography>
+            {analysis.screens.map((s, i) => (
+              <Typography key={i} variant="body2">• {s.name}{s.route ? ` (${s.route})` : ''}</Typography>
+            ))}
+          </Box>
+        )}
+        {analysis.mustTest && analysis.mustTest.length > 0 && (
+          <Box sx={{ mb: 1 }}>
+            <Typography variant="caption" color="text.secondary">Must test</Typography>
+            {analysis.mustTest.map((m, i) => <Typography key={i} variant="body2">• {m}</Typography>)}
+          </Box>
+        )}
+        {analysis.mustNotTest && analysis.mustNotTest.length > 0 && (
+          <Box>
+            <Typography variant="caption" color="text.secondary">Must not test</Typography>
+            {analysis.mustNotTest.map((m, i) => <Typography key={i} variant="body2">• {m}</Typography>)}
+          </Box>
+        )}
+        {analysis.openQuestions && analysis.openQuestions.length > 0 && (
+          <Alert severity="warning" sx={{ mt: 1 }}>
+            {analysis.openQuestions.map((q, i) => <div key={i}>{q}</div>)}
+          </Alert>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 function UiPhasePanel({ session, refetch, onError }: { session: ApiSessionDetail; refetch: () => void; onError: (e: unknown, msg: string) => void }) {
   const drafts = (session.drafts ?? []) as unknown as ApiTestDraftDto[]
   const uiCases   = drafts.filter(d => d.draftKind === 'ui_case')
@@ -704,17 +899,29 @@ function UiPhasePanel({ session, refetch, onError }: { session: ApiSessionDetail
 
   const [authoring, setAuthoring]     = useState(false)
   const [generating, setGenerating]   = useState(false)
-  const [healPending, setHealPending] = useState<Set<number>>(new Set())
-  const [healing, setHealing]         = useState(false)
+  const [running, setRunning]         = useState(false)
+  const [rerunning, setRerunning]     = useState(false)
+  const [uiFeedback, setUiFeedback]   = useState('')
   const [openSpecId, setOpenSpecId]   = useState<number | null>(null)
+  const [explainDraftId, setExplainDraftId] = useState<number | null>(null)
 
   const uiStatus = session.uiStatus ?? null
+  const analysis = parseUiAnalysis(session.uiAnalysisJson)
+  const pushedUiCount = uiScripts.filter(d => d.status === 'Pushed').length
 
   async function doAuthorUiCases() {
     setAuthoring(true)
     try { await authorUiCases(session.id); refetch() }
     catch (e) { onError(e, 'Failed to author UI cases') }
     finally { setAuthoring(false) }
+  }
+
+  async function doRerunUiAnalysis() {
+    if (!uiFeedback.trim()) return
+    setRerunning(true)
+    try { await rerunUiAnalysis(session.id, uiFeedback.trim()); refetch() }
+    catch (e) { onError(e, 'Failed to rerun UI analysis') }
+    finally { setRerunning(false) }
   }
 
   async function doGenerateUiScripts() {
@@ -724,17 +931,19 @@ function UiPhasePanel({ session, refetch, onError }: { session: ApiSessionDetail
     finally { setGenerating(false) }
   }
 
-  async function doHealSelected() {
-    const ids = Array.from(healPending)
-    if (ids.length === 0) return
-    setHealing(true)
-    try { await healSpecs(session.id, ids); setHealPending(new Set()); refetch() }
-    catch (e) { onError(e, 'Failed to heal specs') }
-    finally { setHealing(false) }
+  async function doRunUiScripts() {
+    setRunning(true)
+    try { await runUiScripts(session.id); refetch() }
+    catch (e) { onError(e, 'Failed to run UI scripts') }
+    finally { setRunning(false) }
   }
 
   async function doApproveCase(id: number) {
     try { await patchDraft(id, { status: 'Approved' }); refetch() } catch { /* ignore */ }
+  }
+
+  async function doRejectCase(id: number) {
+    try { await patchDraft(id, { status: 'Rejected' }); refetch() } catch { /* ignore */ }
   }
 
   return (
@@ -742,30 +951,74 @@ function UiPhasePanel({ session, refetch, onError }: { session: ApiSessionDetail
       <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
         <Typography variant="subtitle2">UI Phase</Typography>
         {uiStatus && <Chip size="small" label={uiStatus} variant="outlined" />}
+        {session.frsSlug && <Chip size="small" label={`KB: ${session.frsSlug}`} color="info" variant="outlined" />}
       </Stack>
 
-      {/* Author step */}
-      {(!uiStatus || uiStatus === 'Authoring') && (
+      {/* Suite picker — always visible in UI Phase tab */}
+      <UiSuitePicker session={session} refetch={refetch} onError={onError} />
+
+      {/* AnalyzingUi */}
+      {uiStatus === 'AnalyzingUi' && (
         <Box>
-          {uiStatus === 'Authoring'
-            ? <LinearProgress />
-            : <Button variant="outlined" size="small" onClick={doAuthorUiCases} disabled={authoring}
-                startIcon={authoring ? <CircularProgress size={14} /> : undefined}>
-                Author UI Cases
-              </Button>}
+          <Typography variant="body2" sx={{ mb: 1 }}>Running UI Analysis…</Typography>
+          <LinearProgress />
         </Box>
       )}
 
-      {/* Review UI cases */}
-      {uiStatus === 'AwaitingReview' && uiCases.length > 0 && (
+      {/* AwaitingUiAnalysisReview */}
+      {uiStatus === 'AwaitingUiAnalysisReview' && (
+        <Stack spacing={2}>
+          {analysis
+            ? <UiAnalysisCard analysis={analysis} />
+            : <Alert severity="warning">UI analysis JSON is missing or invalid.</Alert>}
+          <TextField
+            label="Refine UI analysis" size="small" multiline minRows={2} fullWidth
+            value={uiFeedback} onChange={e => setUiFeedback(e.target.value)}
+            helperText="Describe gaps or corrections — the UI Analyst will improve the existing analysis"
+            disabled={rerunning}
+          />
+          <Stack direction="row" spacing={1}>
+            <Button variant="outlined" size="small" onClick={doRerunUiAnalysis}
+              disabled={rerunning || !uiFeedback.trim()}
+              startIcon={rerunning ? <CircularProgress size={14} /> : undefined}>
+              {rerunning ? 'Refining…' : 'Rerun UI Analysis'}
+            </Button>
+            <Button variant="contained" size="small" onClick={doAuthorUiCases} disabled={authoring}
+              startIcon={authoring ? <CircularProgress size={14} /> : undefined}>
+              {authoring ? 'Authoring…' : 'Author Cases'}
+            </Button>
+          </Stack>
+        </Stack>
+      )}
+
+      {/* Authoring */}
+      {uiStatus === 'Authoring' && (
+        <Box>
+          <Typography variant="body2" sx={{ mb: 1 }}>Authoring test cases…</Typography>
+          <LinearProgress />
+        </Box>
+      )}
+
+      {/* Legacy Slab 2: null status with Author button was moved — keep entry for old sessions */}
+      {uiStatus === null && session.hasUiPhase && !session.uiAnalysisJson && (
+        <Button variant="outlined" size="small" onClick={doAuthorUiCases} disabled={authoring}
+          startIcon={authoring ? <CircularProgress size={14} /> : undefined}>
+          Author UI Cases (legacy)
+        </Button>
+      )}
+
+      {/* AwaitingReview — UI cases */}
+      {uiStatus === 'AwaitingReview' && (
         <Stack spacing={1}>
           <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-            <Typography variant="body2">{uiCases.length} UI case{uiCases.length !== 1 ? 's' : ''} to review</Typography>
+            <Typography variant="body2">
+              {uiCases.length} UI case{uiCases.length !== 1 ? 's' : ''} to review
+            </Typography>
             <Box sx={{ flex: 1 }} />
-            <Button size="small" variant="outlined" onClick={doGenerateUiScripts} disabled={generating
-              || !uiCases.some(d => d.status === 'Approved')}
+            <Button size="small" variant="outlined" onClick={doGenerateUiScripts}
+              disabled={generating || !uiCases.some(d => d.status === 'Approved')}
               startIcon={generating ? <CircularProgress size={14} /> : undefined}>
-              {generating ? 'Generating scripts…' : 'Generate UI Scripts'}
+              {generating ? 'Generating scripts…' : 'Generate Scripts'}
             </Button>
           </Stack>
           {uiCases.map(d => (
@@ -786,6 +1039,13 @@ function UiPhasePanel({ session, refetch, onError }: { session: ApiSessionDetail
                       </IconButton>
                     </Tooltip>
                   )}
+                  {d.status !== 'Rejected' && (
+                    <Tooltip title="Reject">
+                      <IconButton size="small" color="error" onClick={() => doRejectCase(d.id)}>
+                        <CloseIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  )}
                 </Stack>
               </CardContent>
             </Card>
@@ -793,57 +1053,111 @@ function UiPhasePanel({ session, refetch, onError }: { session: ApiSessionDetail
         </Stack>
       )}
 
-      {/* UI scripts (Drafting / Drafted) */}
-      {(uiStatus === 'Drafting' || uiStatus === 'Drafted') && (
+      {/* Drafting */}
+      {uiStatus === 'Drafting' && (
+        <Box>
+          <Typography variant="body2" sx={{ mb: 1 }}>Generating Playwright scripts…</Typography>
+          <LinearProgress />
+          {uiCases.filter(d => d.status === 'Approved').map(d => (
+            <Typography key={d.id} variant="caption" sx={{ display: 'block' }}>
+              {d.errorMessage ? `✗ ${d.title}: ${d.errorMessage}` : `… ${d.title}`}
+            </Typography>
+          ))}
+        </Box>
+      )}
+
+      {/* Drafted / RunningUiScripts — scripts + run */}
+      {(uiStatus === 'Drafted' || uiStatus === 'RunningUiScripts') && (
         <Stack spacing={1}>
-          {uiStatus === 'Drafting' && <LinearProgress />}
-          {uiScripts.length > 0 && (
-            <>
-              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                <Typography variant="body2">{uiScripts.length} UI script{uiScripts.length !== 1 ? 's' : ''}</Typography>
-                <Box sx={{ flex: 1 }} />
-                {healPending.size > 0 && (
-                  <Button size="small" variant="outlined" color="warning" disabled={healing}
-                    onClick={doHealSelected}
-                    startIcon={healing ? <CircularProgress size={14} /> : undefined}>
-                    {healing ? 'Healing…' : `Heal selected (${healPending.size})`}
-                  </Button>
-                )}
-              </Stack>
-              {uiScripts.map(d => (
-                <Card key={d.id} variant="outlined">
-                  <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
-                    <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                      <Checkbox size="small"
-                        checked={healPending.has(d.id)}
-                        onChange={e => setHealPending(prev => {
-                          const s = new Set(prev); if (e.target.checked) s.add(d.id); else s.delete(d.id); return s
-                        })} />
-                      <StatusChip value={d.status} kind="draft" />
-                      {d.bucket && <Chip size="small" label={d.bucket} color={BUCKET_COLORS[d.bucket] ?? 'default'} />}
-                      <Typography variant="body2" sx={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {d.title}
-                      </Typography>
-                      {d.specCode && (
-                        <Button size="small" variant="outlined" startIcon={<VisibilityIcon />}
-                          onClick={() => setOpenSpecId(openSpecId === d.id ? null : d.id)}>
-                          Spec
-                        </Button>
-                      )}
-                    </Stack>
-                    {openSpecId === d.id && d.specCode && (
-                      <Box component="pre" sx={{ mt: 1, p: 1, bgcolor: 'background.default',
-                        borderRadius: 1, overflow: 'auto', fontSize: '0.75rem', fontFamily: 'monospace',
-                        maxHeight: 320, border: '1px solid', borderColor: 'divider' }}>
-                        {d.specCode}
-                      </Box>
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
-            </>
+          {uiStatus === 'RunningUiScripts' && (
+            <Box>
+              <Typography variant="body2" sx={{ mb: 1 }}>Running UI scripts…</Typography>
+              <LinearProgress />
+            </Box>
           )}
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+            <Typography variant="body2">
+              {uiScripts.length} UI script{uiScripts.length !== 1 ? 's' : ''}
+            </Typography>
+            <Box sx={{ flex: 1 }} />
+            {uiStatus === 'Drafted' && (
+              <Button size="small" variant="contained" onClick={doRunUiScripts}
+                disabled={running || !uiScripts.some(d => d.status === 'Approved')}
+                startIcon={running ? <CircularProgress size={14} /> : undefined}>
+                {running ? 'Starting…' : 'Run Scripts'}
+              </Button>
+            )}
+          </Stack>
+          {uiScripts.map(d => (
+            <Card key={d.id} variant="outlined">
+              <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
+                <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                  <StatusChip value={d.status} kind="draft" />
+                  {d.bucket && <Chip size="small" label={d.bucket} color={BUCKET_COLORS[d.bucket] ?? 'default'} />}
+                  <Typography variant="body2" sx={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {d.title}
+                  </Typography>
+                  {d.status !== 'Approved' && d.status !== 'Pushed' && (
+                    <Tooltip title="Approve for run / push">
+                      <IconButton size="small" color="success" onClick={() => doApproveCase(d.id)}>
+                        <CheckIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  )}
+                  {d.specCode && (
+                    <Button size="small" variant="outlined" startIcon={<VisibilityIcon />}
+                      onClick={() => setOpenSpecId(openSpecId === d.id ? null : d.id)}>
+                      Spec
+                    </Button>
+                  )}
+                  {d.errorMessage && (
+                    <Button size="small" color="error" variant="outlined"
+                      onClick={() => setExplainDraftId(explainDraftId === d.id ? null : d.id)}>
+                      {explainDraftId === d.id ? 'Hide' : 'Explain'}
+                    </Button>
+                  )}
+                </Stack>
+                {d.specFilePath && (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                    {d.specFilePath}
+                  </Typography>
+                )}
+                {openSpecId === d.id && d.specCode && (
+                  <Box component="pre" sx={{ mt: 1, p: 1, bgcolor: 'background.default',
+                    borderRadius: 1, overflow: 'auto', fontSize: '0.75rem', fontFamily: 'monospace',
+                    maxHeight: 320, border: '1px solid', borderColor: 'divider' }}>
+                    {d.specCode}
+                  </Box>
+                )}
+                {explainDraftId === d.id && d.errorMessage && (
+                  <ExplainFailureCard sessionId={session.id} draft={d} refetch={refetch} onError={onError} />
+                )}
+              </CardContent>
+            </Card>
+          ))}
         </Stack>
+      )}
+
+      {/* Pushing */}
+      {uiStatus === 'Pushing' && (
+        <Box>
+          <Typography variant="body2" sx={{ mb: 1 }}>Pushing UI tests to ADO…</Typography>
+          <LinearProgress />
+        </Box>
+      )}
+
+      {/* Done */}
+      {uiStatus === 'Done' && (
+        <Alert severity="success">
+          All done — {pushedUiCount} UI test{pushedUiCount !== 1 ? 's' : ''} pushed.
+        </Alert>
+      )}
+
+      {/* Failed / Cancelled */}
+      {(uiStatus === 'Failed' || uiStatus === 'Cancelled') && (
+        <Alert severity={uiStatus === 'Failed' ? 'error' : 'warning'}>
+          UI phase {uiStatus.toLowerCase()}{session.errorMessage ? `: ${session.errorMessage}` : ''}
+        </Alert>
       )}
     </Stack>
   )
@@ -943,7 +1257,9 @@ export const qaLoopConfig: SessionModuleConfig = {
   route: '/qa-loop',
   labels: { title: 'QA Loop', subtitle: 'AI-powered test authoring from source', newCta: 'New Scan' },
   moduleChip: { label: 'QA LOOP', icon: <QrCode2Icon /> },
-  inFlightStatuses: ['Scanning', 'AwaitingReview', 'Drafting', 'Pushing'],
+  inFlightStatuses: ['RetrievingKb', 'Scanning', 'Analyzing', 'AwaitingReview', 'Drafting', 'Pushing', 'ApiDone'],
+  getUiStatus: (d) => (d as ApiSessionDetail).uiStatus ?? undefined,
+  uiInFlightStatuses: ['AnalyzingUi', 'RunningUiScripts'],
   pipelineSteps: PIPELINE_STEPS,
   activeStepIndex,
   analyticsColumns: ANALYTICS_COLUMNS,

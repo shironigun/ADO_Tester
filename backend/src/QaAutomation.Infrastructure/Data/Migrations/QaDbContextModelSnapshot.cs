@@ -142,6 +142,10 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("Branch");
 
+                    b.Property<string>("CodeScanJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("CodeScanJson");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT")
                         .HasColumnName("CreatedAt");
@@ -166,6 +170,10 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("FrontendPath");
 
+                    b.Property<string>("FrsSlug")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("FrsSlug");
+
                     b.Property<string>("GenerateContext")
                         .HasColumnType("TEXT");
 
@@ -179,8 +187,16 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("InventoryJson");
 
+                    b.Property<string>("KbContextJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("KbContextJson");
+
                     b.Property<string>("LastFeedback")
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("LastUiRunId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("LastUiRunId");
 
                     b.Property<string>("Module")
                         .IsRequired()
@@ -212,9 +228,17 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                         .HasColumnType("INTEGER")
                         .HasColumnName("TestSuiteId");
 
+                    b.Property<string>("UiAnalysisJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("UiAnalysisJson");
+
                     b.Property<string>("UiStatus")
                         .HasColumnType("TEXT")
                         .HasColumnName("UiStatus");
+
+                    b.Property<int?>("UiTestSuiteId")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("UiTestSuiteId");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT")
@@ -547,6 +571,10 @@ namespace QaAutomation.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT")
                         .HasColumnName("FileName");
+
+                    b.Property<string>("FolderPath")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("FolderPath");
 
                     b.Property<int>("ProjectId")
                         .HasColumnType("INTEGER")

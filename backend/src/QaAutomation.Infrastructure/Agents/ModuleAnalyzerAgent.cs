@@ -63,10 +63,11 @@ public sealed class ModuleAnalyzerAgent
     public async Task<ModuleAnalysis> AnalyzeInventoryAsync(
         string module, string sourceBundle, IReadOnlyList<LinkedTestCase> existingCases,
         string? additionalContext = null,
+        Core.Models.FrsModuleContext? frsContext = null,
         Func<string, CancellationToken, Task<string?>>? fetchFile = null,
         StreamProgress? progress = null, Action<LlmEmit>? emit = null, CancellationToken ct = default)
     {
-        var prompt = BuildInventoryPrompt(module, sourceBundle, existingCases, additionalContext);
+        var prompt = BuildInventoryPrompt(module, sourceBundle, existingCases, additionalContext, frsContext);
         var data = await JsonUtils.CompleteJsonAsync(
             _llm, AgentPrompts.ModuleAnalyzerSystem, prompt, '{', progress, emit,
             label: "ModuleAnalyzer", cancellationToken: ct);
@@ -252,7 +253,10 @@ public sealed class ModuleAnalyzerAgent
 
     // ── Prompt builders ───────────────────────────────────────────────────────
 
-    internal static string BuildInventoryPrompt(string module, string sourceBundle, IReadOnlyList<LinkedTestCase> existingCases, string? additionalContext = null)
+    internal static string BuildInventoryPrompt(
+        string module, string sourceBundle, IReadOnlyList<LinkedTestCase> existingCases,
+        string? additionalContext = null,
+        Core.Models.FrsModuleContext? frsContext = null)
     {
         var lines = new List<string>
         {
@@ -271,6 +275,46 @@ public sealed class ModuleAnalyzerAgent
             lines.Add("## Additional Context (from tester)");
             lines.Add(additionalContext.Trim());
             lines.Add("");
+        }
+        // KBG-108: inject KB Context block before source code when FRS module context is available
+        if (frsContext != null)
+        {
+            lines.Add($"## Knowledge Base Context (FRS: {frsContext.Slug})");
+            lines.Add("");
+            if (!string.IsNullOrWhiteSpace(frsContext.ModuleMarkdown))
+            {
+                lines.Add("### Module brief (Analyst seeds + Features)");
+                var brief = frsContext.ModuleMarkdown.Length > 6000
+                    ? frsContext.ModuleMarkdown[..6000] + "\n…(truncated)"
+                    : frsContext.ModuleMarkdown;
+                lines.Add(brief);
+                lines.Add("");
+            }
+            if (!string.IsNullOrWhiteSpace(frsContext.FeBackLinksMarkdown))
+            {
+                lines.Add("### Frontend ↔ Backend links");
+                lines.Add(frsContext.FeBackLinksMarkdown);
+                lines.Add("");
+            }
+            if (!string.IsNullOrWhiteSpace(frsContext.RulesMarkdown))
+            {
+                lines.Add("### Domain rules");
+                lines.Add(frsContext.RulesMarkdown);
+                lines.Add("");
+            }
+            if (!string.IsNullOrWhiteSpace(frsContext.AtlasMarkdown))
+            {
+                var trapsHeader = "## Disambiguation traps";
+                var trapsIdx = frsContext.AtlasMarkdown.IndexOf(trapsHeader, StringComparison.Ordinal);
+                if (trapsIdx >= 0)
+                {
+                    var trapsRaw = frsContext.AtlasMarkdown[trapsIdx..];
+                    var traps = trapsRaw.Length > 3000 ? trapsRaw[..3000] + "\n…(truncated)" : trapsRaw;
+                    lines.Add("### Disambiguation traps");
+                    lines.Add(traps);
+                    lines.Add("");
+                }
+            }
         }
         lines.Add("## Module source code");
         lines.Add(sourceBundle);

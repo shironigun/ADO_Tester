@@ -42,6 +42,12 @@ public interface IQaLoopOrchestrator
     Task RefineDraftsAsync(int sessionId, string? overallFeedback, IReadOnlyList<Core.Contracts.ApiDraftFeedback> perDraft, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Re-runs the QA Loop UI Analyst on the existing <c>UiAnalysisJson</c> with reviewer feedback.
+    /// Guard: <c>UiStatus == AwaitingUiAnalysisReview</c>. Replaces output in place.
+    /// </summary>
+    Task RerunUiAnalysisAsync(int sessionId, string feedback, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Runs the UI test-case authoring agent for the session. Transitions UiStatus:
     /// Authoring → AwaitingReview; persists ApiTestDraft rows with DraftKind=UiCase.
     /// </summary>
@@ -54,11 +60,19 @@ public interface IQaLoopOrchestrator
     Task GenerateUiScriptsAsync(int sessionId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Runs Approved UiScript drafts via Playwright (step 10b). Transitions UiStatus:
+    /// RunningUiScripts → Drafted; persists per-draft <c>ErrorMessage</c> from JUnit results.
+    /// </summary>
+    Task RunUiScriptsAsync(int sessionId, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Heals the selected UiScript drafts by running the Playwright healer agent on each spec.
     /// The spec file is overwritten in place; SpecCode is updated; Status is reset to Draft.
     /// Individual heal failures are logged and skipped (batch continues).
+    /// Optional <paramref name="userContext"/> is appended to each draft's failure message.
     /// </summary>
-    Task HealSpecsAsync(int sessionId, int[] draftIds, CancellationToken cancellationToken = default);
+    Task HealSpecsAsync(int sessionId, int[] draftIds, string? userContext = null,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Signals the background pipeline for the given session to stop.</summary>
     bool Cancel(int sessionId);

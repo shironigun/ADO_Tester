@@ -15,11 +15,31 @@ internal static class PlaywrightConfigWriter
         string reportProvider,
         Action<Exception> onLinkFailure)
     {
-        var testDir = spec.LevelFilter is { Length: > 0 } lf &&
+        // When explicit SpecFilePaths are provided (API scripts under scripts/{module}/… OR UI
+        // scripts under {PlaywrightRoot}/generated/ui/…), derive testDir from those files so
+        // Playwright's testMatch (resolved relative to testDir) can actually find them.
+        // Falling back to scripts/{module} alone left UI runs with "No tests found".
+        string testDir;
+        string testMatchLine;
+        if (spec.SpecFilePaths.Count > 0)
+        {
+            var absPaths = spec.SpecFilePaths
+                .Select(p => Path.GetFullPath(p))
+                .ToList();
+            var root = CommonDirectory(absPaths);
+            testDir = EscPath(root);
+            testMatchLine =
+                $"\n  testMatch: [{string.Join(", ", absPaths.Select(p => $"'{EscPath(Path.GetRelativePath(root, p))}'"))}],";
+        }
+        else
+        {
+            testDir = spec.LevelFilter is { Length: > 0 } lf &&
                       Enum.TryParse<TestLevel>(lf, ignoreCase: true, out var level)
-            ? Path.Combine(scriptsDir, spec.Module, level.ToDirName())
-            : Path.Combine(scriptsDir, spec.Module);
-        testDir = testDir.Replace('\\', '/');
+                ? Path.Combine(scriptsDir, spec.Module, level.ToDirName())
+                : Path.Combine(scriptsDir, spec.Module);
+            testDir = EscPath(testDir);
+            testMatchLine = "";
+        }
 
         var pkgJson = $$"""
             {
@@ -31,9 +51,6 @@ internal static class PlaywrightConfigWriter
         File.WriteAllText(Path.Combine(runDir, "package.json"), pkgJson);
 
         var htmlReporter = reportProvider is "playwright" or "both" ? ", ['html']" : "";
-        var testMatchLine = spec.SpecFilePaths.Count > 0
-            ? $"\n  testMatch: [{string.Join(", ", spec.SpecFilePaths.Select(p => $"'{EscPath(p)}'"))}],"
-            : "";
         var captureOpts = spec.EnableCapture ? ", screenshot: 'only-on-failure', trace: 'on-first-retry'" : "";
         var headedOpts = spec.Headed ? ", headless: false" : "";
         var workersExpr = spec.Workers is int w ? w.ToString() : "Number(process.env.AUTOMATION_WORKERS ?? '6')";
@@ -63,6 +80,32 @@ internal static class PlaywrightConfigWriter
             try { LinkDirectory(nmLink, nmTarget); }
             catch (Exception ex) { onLinkFailure(ex); }
         }
+    }
+
+    /// <summary>Longest common ancestor directory of the given absolute file paths.</summary>
+    internal static string CommonDirectory(IReadOnlyList<string> absoluteFilePaths)
+    {
+        if (absoluteFilePaths.Count == 0)
+            throw new ArgumentException("Need at least one path.", nameof(absoluteFilePaths));
+        if (absoluteFilePaths.Count == 1)
+            return Path.GetDirectoryName(absoluteFilePaths[0])!;
+
+        var split = absoluteFilePaths
+            .Select(p => Path.GetFullPath(p).Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+            .ToList();
+        var first = split[0];
+        var depth = first.Length - 1; // exclude filename
+        for (var i = 1; i < split.Count; i++)
+        {
+            var other = split[i];
+            var shared = 0;
+            var max = Math.Min(depth, other.Length - 1);
+            while (shared < max &&
+                   string.Equals(first[shared], other[shared], StringComparison.OrdinalIgnoreCase))
+                shared++;
+            depth = shared;
+        }
+        return depth <= 0 ? Path.GetPathRoot(absoluteFilePaths[0])! : string.Join(Path.DirectorySeparatorChar, first.Take(depth));
     }
 
     internal static void LinkDirectory(string link, string target)

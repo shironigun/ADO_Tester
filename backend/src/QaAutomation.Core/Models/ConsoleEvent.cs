@@ -83,6 +83,15 @@ public static class EventPhases
     public const string Generate = "generate";
     /// <summary>Author Tests — post-generation duplicate check against the reference plan index.</summary>
     public const string Dedup = "dedup";
+    // ── KBG-105: new QA Loop KB-grounded phases ─────────────────────────────
+    /// <summary>QA Loop — FRS KB retrieval step.</summary>
+    public const string RetrieveKb  = "retrieve-kb";
+    /// <summary>QA Loop — code scan step (atlas-seeded ADO repo fetch).</summary>
+    public const string Scan        = "scan";
+    /// <summary>QA Loop — UI analyst agent step (module-scoped flows/screens analysis).</summary>
+    public const string AnalyzeUi   = "analyze-ui";
+    /// <summary>QA Loop — inline UI script execution step.</summary>
+    public const string RunUi       = "run-ui";
 }
 
 /// <summary>Frozen <c>level</c> wire values.</summary>

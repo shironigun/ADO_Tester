@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace QaAutomation.Core.Models;
 
@@ -9,7 +10,8 @@ namespace QaAutomation.Core.Models;
 /// spec file (Scripts Board, Slab 3 QLV2-301), so the board can reconcile disk↔DB without relying solely
 /// on the DB row surviving. <see cref="Type"/> is <c>"api"</c> or <c>"ui"</c>; <see cref="Level"/> is the
 /// wire-string test level (<c>contract|endpoint|workflow|ui</c>); <see cref="Bucket"/> is UI-only
-/// (<c>smoke|regression|e2e</c>).</summary>
+/// (<c>smoke|regression|e2e</c>). <see cref="Tags"/> holds pack/feature tokens extracted from the first
+/// <c>test(</c> title (optional — omitted from JSON when null so legacy headers stay byte-stable).</summary>
 public sealed record QaMeta(
     [property: JsonPropertyName("module")] string Module,
     [property: JsonPropertyName("type")] string Type,
@@ -18,7 +20,10 @@ public sealed record QaMeta(
     [property: JsonPropertyName("tcId")] int? TcId,
     [property: JsonPropertyName("sourceDraftId")] int? SourceDraftId,
     [property: JsonPropertyName("generatedAt")] DateTime GeneratedAt,
-    [property: JsonPropertyName("specHash")] string SpecHash);
+    [property: JsonPropertyName("specHash")] string SpecHash,
+    [property: JsonPropertyName("tags")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? Tags = null);
 
 /// <summary>Build/parse/upsert helpers for the <c>@qa-meta</c> header line. The header is always line 1
 /// of the file (before any <c>import</c>) — <c>SpecNormalizer</c> only rewrites env/route strings and
@@ -26,6 +31,9 @@ public sealed record QaMeta(
 public static class QaMetaHeader
 {
     private const string Prefix = "// @qa-meta ";
+
+    private static readonly Regex TagToken =
+        new(@"@[a-z][a-z0-9\-]+", RegexOptions.Compiled);
 
     public static string Build(QaMeta meta) => Prefix + JsonSerializer.Serialize(meta) + "\n";
 
@@ -55,6 +63,27 @@ public static class QaMetaHeader
 
     public static string ComputeHash(string specCodeBody) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(specCodeBody)))[..12];
+
+    /// <summary>Extracts <c>@[a-z][a-z0-9\-]+</c> tokens from the first line containing <c>test(</c>
+    /// (typically the Playwright test title). Skips import lines so <c>@playwright/test</c> is never
+    /// captured. Deduplicates while preserving order. Never throws.</summary>
+    public static IReadOnlyList<string> ExtractTags(string specCode)
+    {
+        if (string.IsNullOrEmpty(specCode)) return [];
+        foreach (var raw in specCode.Split('\n'))
+        {
+            var line = raw.TrimEnd('\r');
+            if (line.IndexOf("test(", StringComparison.Ordinal) < 0) continue;
+            var matches = TagToken.Matches(line);
+            if (matches.Count == 0) return [];
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var tags = new List<string>(matches.Count);
+            foreach (Match m in matches)
+                if (seen.Add(m.Value)) tags.Add(m.Value);
+            return tags;
+        }
+        return [];
+    }
 
     private static string? FirstLine(string s)
     {

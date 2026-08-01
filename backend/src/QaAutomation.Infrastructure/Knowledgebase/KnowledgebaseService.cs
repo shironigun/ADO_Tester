@@ -71,7 +71,8 @@ public sealed class KnowledgebaseService : IKnowledgebaseService
     // ── ops ───────────────────────────────────────────────────────────────────
 
     public async Task<KnowledgebaseDocument> UploadAsync(
-        int projectId, string fileName, string markdown, CancellationToken cancellationToken = default)
+        int projectId, string fileName, string markdown,
+        string? folderPath = null, CancellationToken cancellationToken = default)
     {
         var projectDir = Path.Combine(_kbRoot, projectId.ToString());
         Directory.CreateDirectory(projectDir);
@@ -96,6 +97,7 @@ public sealed class KnowledgebaseService : IKnowledgebaseService
                 ChunkCount = chunks.Count,
                 SizeBytes = Encoding.UTF8.GetByteCount(markdown),
                 UploadedAt = DateTime.UtcNow,
+                FolderPath = folderPath,
             };
 
             await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
@@ -164,6 +166,37 @@ public sealed class KnowledgebaseService : IKnowledgebaseService
         return hits
             .Select(h => new KnowledgebaseHit(h.DocId, fileNames.GetValueOrDefault(h.DocId, "(unknown)"), h.Content, h.Score))
             .ToList();
+    }
+
+    public async Task<IReadOnlyList<KnowledgebaseDocument>> GetDocumentsByFolderAsync(
+        int projectId, string folderPath, CancellationToken cancellationToken = default)
+    {
+        IQueryable<KnowledgebaseDocument> query;
+        if (folderPath == "")
+        {
+            // Root documents: FolderPath is null (legacy) or empty string.
+            query = _db.Documents.Where(d => d.ProjectId == projectId
+                && (d.FolderPath == null || d.FolderPath == ""));
+        }
+        else
+        {
+            // Exact folder OR any descendent path (folderPath/...).
+            query = _db.Documents.Where(d => d.ProjectId == projectId
+                && (d.FolderPath == folderPath || (d.FolderPath != null && d.FolderPath.StartsWith(folderPath + "/"))));
+        }
+        return await query.OrderByDescending(d => d.UploadedAt).ToListAsync(cancellationToken);
+    }
+
+    public async Task<KnowledgebaseDocument?> GetDocumentByPathAsync(
+        int projectId, string folderPath, string fileName, CancellationToken cancellationToken = default)
+    {
+        var fp = folderPath == "" ? null : folderPath;   // legacy root docs may have null FolderPath
+        return await _db.Documents
+            .Where(d => d.ProjectId == projectId
+                && d.FileName == fileName
+                && (d.FolderPath == folderPath || (fp == null && d.FolderPath == null)))
+            .OrderByDescending(d => d.UploadedAt)
+            .FirstOrDefaultAsync(cancellationToken);
     }
 
 }

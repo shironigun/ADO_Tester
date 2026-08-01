@@ -105,6 +105,7 @@ public sealed class QaDbContext : DbContext
             e.Property(x => x.ChunkCount).HasColumnName("ChunkCount").IsRequired();
             e.Property(x => x.SizeBytes).HasColumnName("SizeBytes").IsRequired();
             e.Property(x => x.UploadedAt).HasColumnName("UploadedAt").IsRequired();
+            e.Property(x => x.FolderPath).HasColumnName("FolderPath");
             e.HasIndex(x => x.ProjectId).HasDatabaseName("ix_Documents_ProjectId");
             // Documents.ProjectId → Projects.Id (CASCADE) is the one real FK on a *Id column.
             e.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
@@ -305,6 +306,13 @@ public sealed class QaDbContext : DbContext
             e.Property(x => x.ActivityEnabled).HasColumnName("ActivityEnabled").IsRequired().HasDefaultValue(true);
             e.Property(x => x.HasUiPhase).HasColumnName("HasUiPhase").IsRequired().HasDefaultValue(false);
             e.Property(x => x.UiStatus).HasColumnName("UiStatus").HasConversion(uiStatusConverter);
+            // KBG-105: KB-grounded columns (additive, all nullable)
+            e.Property(x => x.FrsSlug).HasColumnName("FrsSlug");
+            e.Property(x => x.KbContextJson).HasColumnName("KbContextJson");
+            e.Property(x => x.CodeScanJson).HasColumnName("CodeScanJson");
+            e.Property(x => x.UiAnalysisJson).HasColumnName("UiAnalysisJson");
+            e.Property(x => x.UiTestSuiteId).HasColumnName("UiTestSuiteId");
+            e.Property(x => x.LastUiRunId).HasColumnName("LastUiRunId");
             e.Property(x => x.CreatedAt).HasColumnName("CreatedAt").IsRequired();
             e.Property(x => x.UpdatedAt).HasColumnName("UpdatedAt").IsRequired();
             e.HasIndex(x => new { x.ProjectId, x.CreatedAt }).HasDatabaseName("ix_ApiTestSessions_ProjectId_CreatedAt");

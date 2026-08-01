@@ -36,12 +36,16 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
     private readonly CancellationRegistry _cancellations;
     private readonly IAzureDevOpsClient _ado;
     private readonly ILlmClientFactory _llmFactory;
+    private readonly IPlaywrightRunner _playwrightRunner;
     private readonly string _scriptsDir;
+    private readonly string _playwrightRoot;
+    private readonly int _uiScriptGenTimeoutSeconds;
     private readonly ILogger<QaLoopOrchestrator> _log;
 
     public QaLoopOrchestrator(
         IServiceScopeFactory scopeFactory, IEventBus bus, PipelineConcurrency concurrency,
         CancellationRegistry cancellations, IAzureDevOpsClient ado, ILlmClientFactory llmFactory,
+        IPlaywrightRunner playwrightRunner,
         IOptions<StorageOptions> storage, IOptions<QaLoopOptions> qaLoop,
         ILogger<QaLoopOrchestrator> log)
     {
@@ -51,8 +55,11 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
         _cancellations = cancellations;
         _ado = ado;
         _llmFactory = llmFactory;
+        _playwrightRunner = playwrightRunner;
         _scriptsDir = Path.GetFullPath(Path.Combine(
             storage.Value.DataDirectory, qaLoop.Value.ScriptsFolderName));
+        _playwrightRoot = qaLoop.Value.PlaywrightRoot ?? "";
+        _uiScriptGenTimeoutSeconds = Math.Max(1, qaLoop.Value.UiScriptGenerationTimeoutSeconds);
         _log = log;
     }
 
@@ -170,19 +177,33 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
         try
         {
             var llm = await _llmFactory.CreateAsync(ct);
-            var inventory = session.InventoryJson is { Length: > 0 }
-                ? JsonSerializer.Deserialize<InventoryDoc>(session.InventoryJson)
-                  ?? throw new InvalidOperationException("InventoryJson deserialization returned null.")
-                : throw new InvalidOperationException("InventoryJson missing — run Analyze first.");
 
             session.UiStatus = ApiUiStatus.Authoring;
             session.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
             Pub(key, EventKinds.Phase, "ui-author", "UI test-case authoring started");
 
-            var cases = await new UiCaseAuthorAgent(llm).AuthorCasesAsync(
-                session.Module, inventory, session.AdditionalContext,
-                emit: EmitClosure(key, "ui-author", session.ActivityEnabled), ct: ct);
+            // KBG-111: prefer FRS-grounded UI analysis; fall back to deprecated inventory path
+            // for old Slab 2 sessions that never ran the UI Analyst.
+            List<UiCaseDraft> cases;
+            if (!string.IsNullOrEmpty(session.UiAnalysisJson))
+            {
+                var analysis = JsonSerializer.Deserialize<QaLoopUiAnalystOutput>(session.UiAnalysisJson)
+                    ?? throw new InvalidOperationException("UiAnalysisJson deserialization returned null.");
+                cases = await new QaLoopUiCaseAuthorAgent(llm).AuthorCasesAsync(
+                    session.Module, analysis, session.AdditionalContext,
+                    emit: EmitClosure(key, "ui-author", session.ActivityEnabled), ct: ct);
+            }
+            else
+            {
+                var inventory = session.InventoryJson is { Length: > 0 }
+                    ? JsonSerializer.Deserialize<InventoryDoc>(session.InventoryJson)
+                      ?? throw new InvalidOperationException("InventoryJson deserialization returned null.")
+                    : throw new InvalidOperationException("InventoryJson missing — run Analyze first.");
+                cases = await new UiCaseAuthorAgent(llm).AuthorCasesAsync(
+                    session.Module, inventory, session.AdditionalContext,
+                    emit: EmitClosure(key, "ui-author", session.ActivityEnabled), ct: ct);
+            }
 
             var now = DateTime.UtcNow;
             for (var i = 0; i < cases.Count; i++)
@@ -250,6 +271,17 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
         var session = await db.ApiTestSessions.FindAsync([sessionId], ct);
         if (session is null) return;
 
+        // KBG-112: only start from AwaitingReview (controller also returns 409).
+        if (session.UiStatus != ApiUiStatus.AwaitingReview)
+        {
+            Pub(key, EventKinds.Error, "ui-script",
+                $"generate-ui-scripts requires UiStatus=AwaitingReview (was {session.UiStatus})",
+                EventLevels.Warn, Terminal());
+            PersistLog(session, key);
+            await db.SaveChangesAsync(ct);
+            return;
+        }
+
         try
         {
             session.UiStatus = ApiUiStatus.Drafting;
@@ -276,61 +308,116 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
                 return;
             }
 
-            var now = DateTime.UtcNow;
-            var sortBase = cases.Max(d => d.SortOrder) + 1;
-            var generated = 0;
-
-            for (var i = 0; i < cases.Count; i++)
+            string? moduleRoute = null;
+            if (session.KbContextJson is { Length: > 0 })
             {
-                var uiCase = cases[i];
-                Pub(key, EventKinds.Result, "ui-script",
-                    $"{i + 1}/{cases.Count}: generating script — {uiCase.Title}");
-
                 try
                 {
-                    var progress = new Progress<string>(msg =>
-                        Pub(key, "stream", "ui-script", msg));
-
-                    var specPath = await playwright.GenerateScriptAsync(
-                        uiCase.Title, uiCase.StepsJson, uiCase.Bucket ?? "regression",
-                        uiCase.Id, progress, ct, session.FrontendModule);
-
-                    var rawCode = File.Exists(specPath) ? await File.ReadAllTextAsync(specPath, ct) : "";
-                    // QLV2-301: stamp @qa-meta (SourceDraftId null — the UiScript draft row doesn't
-                    // exist yet; reconcile matches by SpecFilePath, same tradeoff as the API path).
-                    var specCode = QaMetaHeader.Upsert(rawCode, new QaMeta(
-                        session.Module, "ui", "ui", uiCase.Bucket, TcId: null, SourceDraftId: null,
-                        DateTime.UtcNow, QaMetaHeader.ComputeHash(rawCode)));
-                    if (!string.IsNullOrEmpty(specPath) && specCode != rawCode)
-                        try { await File.WriteAllTextAsync(specPath, specCode, ct); } catch { /* best-effort */ }
-
-                    db.ApiTestDrafts.Add(new ApiTestDraft
-                    {
-                        SessionId = sessionId,
-                        Level = TestLevel.Ui,
-                        DraftKind = ApiDraftKind.UiScript,
-                        Bucket = uiCase.Bucket,
-                        Title = uiCase.Title,
-                        Preconditions = uiCase.Preconditions,
-                        StepsJson = uiCase.StepsJson,
-                        SpecCode = specCode,
-                        SpecFilePath = specPath,
-                        Status = ApiDraftStatus.Draft,
-                        SortOrder = sortBase + i,
-                        CreatedAt = now,
-                        UpdatedAt = now,
-                    });
-                    generated++;
-                    await db.SaveChangesAsync(ct);
+                    var frs = JsonSerializer.Deserialize<FrsModuleContext>(session.KbContextJson);
+                    moduleRoute = ExtractFirstAtlasRoute(frs?.AtlasMarkdown);
                 }
-                catch (OperationCanceledException) { throw; }
                 catch (Exception ex)
                 {
-                    _log.LogWarning(ex, "Script gen failed for case '{Title}' — skipping", uiCase.Title);
-                    Pub(key, EventKinds.Error, "ui-script",
-                        $"Script gen failed for '{uiCase.Title}': {ex.Message}", EventLevels.Warn);
+                    _log.LogWarning(ex, "KbContextJson deserialize failed for session {Id} during UI script gen", sessionId);
                 }
             }
+            // Fallback: FrontendModule (legacy Slab 2 field) when atlas has no routes.
+            moduleRoute ??= string.IsNullOrWhiteSpace(session.FrontendModule) ? null : session.FrontendModule;
+
+            var metaModule = session.FrsSlug ?? session.Module;
+            var now = DateTime.UtcNow;
+            var sortBase = cases.Max(d => d.SortOrder) + 1;
+            var timeout = TimeSpan.FromSeconds(_uiScriptGenTimeoutSeconds);
+            using var gate = new SemaphoreSlim(2);
+
+            // Generate in parallel (cap 2); persist sequentially afterward (DbContext is not thread-safe).
+            var genResults = new (int Index, ApiTestDraft Case, string? SpecPath, string? SpecCode, string? Error)[cases.Count];
+            await Task.WhenAll(cases.Select(async (uiCase, i) =>
+            {
+                await gate.WaitAsync(ct);
+                try
+                {
+                    Pub(key, EventKinds.Result, "ui-script",
+                        $"{i + 1}/{cases.Count}: generating script — {uiCase.Title}");
+
+                    using var caseCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    caseCts.CancelAfter(timeout);
+                    try
+                    {
+                        var progress = new Progress<string>(msg =>
+                            Pub(key, "stream", "ui-script", msg));
+
+                        var specPath = await playwright.GenerateScriptAsync(
+                            uiCase.Title, uiCase.StepsJson, uiCase.Bucket ?? "regression",
+                            uiCase.Id, progress, caseCts.Token, moduleRoute);
+
+                        var rawCode = File.Exists(specPath) ? await File.ReadAllTextAsync(specPath, caseCts.Token) : "";
+                        var tags = QaMetaHeader.ExtractTags(rawCode);
+                        var specCode = QaMetaHeader.Upsert(rawCode, new QaMeta(
+                            metaModule, "ui", "ui", uiCase.Bucket, TcId: null, SourceDraftId: null,
+                            DateTime.UtcNow, QaMetaHeader.ComputeHash(rawCode),
+                            Tags: tags.Count > 0 ? tags : null));
+                        if (!string.IsNullOrEmpty(specPath) && specCode != rawCode)
+                            try { await File.WriteAllTextAsync(specPath, specCode, caseCts.Token); } catch { /* best-effort */ }
+
+                        genResults[i] = (i, uiCase, specPath, specCode, null);
+                    }
+                    catch (OperationCanceledException) when (caseCts.IsCancellationRequested && !ct.IsCancellationRequested)
+                    {
+                        _log.LogWarning("Script gen timed out for case '{Title}'", uiCase.Title);
+                        Pub(key, EventKinds.Error, "ui-script",
+                            $"Script gen timed out for '{uiCase.Title}'", EventLevels.Warn);
+                        genResults[i] = (i, uiCase, null, null, "Generation timed out");
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex)
+                    {
+                        _log.LogWarning(ex, "Script gen failed for case '{Title}' — skipping", uiCase.Title);
+                        Pub(key, EventKinds.Error, "ui-script",
+                            $"Script gen failed for '{uiCase.Title}': {ex.Message}", EventLevels.Warn);
+                        genResults[i] = (i, uiCase, null, null, ex.Message);
+                    }
+                }
+                finally
+                {
+                    gate.Release();
+                }
+            }));
+
+            var generated = 0;
+            foreach (var result in genResults.OrderBy(r => r.Index))
+            {
+                if (result.Error is not null)
+                {
+                    result.Case.ErrorMessage = result.Error;
+                    result.Case.UpdatedAt = now;
+                    continue;
+                }
+                if (result.SpecPath is null) continue;
+
+                result.Case.ErrorMessage = null;
+                result.Case.UpdatedAt = now;
+                var uiTags = QaMetaHeader.ExtractTags(result.SpecCode ?? "");
+                db.ApiTestDrafts.Add(new ApiTestDraft
+                {
+                    SessionId = sessionId,
+                    Level = TestLevel.Ui,
+                    DraftKind = ApiDraftKind.UiScript,
+                    Bucket = result.Case.Bucket,
+                    Title = result.Case.Title,
+                    Preconditions = result.Case.Preconditions,
+                    StepsJson = result.Case.StepsJson,
+                    SpecCode = result.SpecCode ?? "",
+                    SpecFilePath = result.SpecPath,
+                    Tags = uiTags.Count > 0 ? JsonSerializer.Serialize(uiTags) : null,
+                    Status = ApiDraftStatus.Draft,
+                    SortOrder = sortBase + result.Index,
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                });
+                generated++;
+            }
+            await db.SaveChangesAsync(ct);
 
             session.UiStatus = ApiUiStatus.Drafted;
             Pub(key, EventKinds.System, "ui-script",
@@ -360,15 +447,206 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
         }
     }
 
-    // ── QLV2-206: HealSpecs ──────────────────────────────────────────────────
-
-    public Task HealSpecsAsync(int sessionId, int[] draftIds, CancellationToken cancellationToken = default)
+    /// <summary>Pulls the first entry from an atlas YAML <c>routes:</c> array in frontmatter, if present.</summary>
+    private static string? ExtractFirstAtlasRoute(string? atlasMarkdown)
     {
-        Launch(sessionId, ct => HealSpecsInnerAsync(sessionId, draftIds, ct));
+        if (string.IsNullOrWhiteSpace(atlasMarkdown)) return null;
+        var lines = atlasMarkdown.Replace("\r\n", "\n").Split('\n');
+        int start = -1, end = -1;
+        for (var i = 0; i < lines.Length; i++)
+        {
+            if (lines[i].Trim() != "---") continue;
+            if (start == -1) start = i;
+            else { end = i; break; }
+        }
+        if (start < 0 || end < 0) return null;
+
+        var inRoutes = false;
+        for (var i = start + 1; i < end; i++)
+        {
+            var line = lines[i];
+            if (string.IsNullOrWhiteSpace(line)) continue;
+
+            var top = System.Text.RegularExpressions.Regex.Match(line, @"^(\w[\w_-]*):\s*(.*)$");
+            if (top.Success && !line.StartsWith(' ') && !line.StartsWith('\t') && !line.StartsWith('-'))
+            {
+                inRoutes = string.Equals(top.Groups[1].Value, "routes", StringComparison.OrdinalIgnoreCase);
+                var scalar = top.Groups[2].Value.Trim().Trim('"', '\'');
+                if (inRoutes && scalar.Length > 0 && scalar is not ("|" or ">"))
+                    return scalar;
+                continue;
+            }
+
+            if (!inRoutes) continue;
+            var item = System.Text.RegularExpressions.Regex.Match(line, @"^[\s]*-\s+(.+)$");
+            if (!item.Success) continue;
+            var val = item.Groups[1].Value.Trim().Trim('"', '\'');
+            if (val.Length > 0) return val;
+        }
+        return null;
+    }
+
+    // ── KBG-113: RunUiScripts (step 10b) ─────────────────────────────────────
+
+    public Task RunUiScriptsAsync(int sessionId, CancellationToken cancellationToken = default)
+    {
+        // CancellationRegistry via Launch; PipelineConcurrency is acquired inside PlaywrightRunner.RunAsync
+        // (do NOT gate here — same singleton SemaphoreSlim would deadlock).
+        Launch(sessionId, ct => RunUiScriptsInnerAsync(sessionId, ct));
         return Task.CompletedTask;
     }
 
-    private async Task HealSpecsInnerAsync(int sessionId, int[] draftIds, CancellationToken ct)
+    private async Task RunUiScriptsInnerAsync(int sessionId, CancellationToken ct)
+    {
+        var key = SessionKey(sessionId);
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+        var session = await db.ApiTestSessions.FindAsync([sessionId], ct);
+        if (session is null) return;
+
+        // Prevent double-start (controller also returns 409).
+        if (session.UiStatus == ApiUiStatus.RunningUiScripts)
+        {
+            Pub(key, EventKinds.Error, EventPhases.RunUi,
+                "UI scripts already running", EventLevels.Warn, Terminal());
+            PersistLog(session, key);
+            await db.SaveChangesAsync(ct);
+            return;
+        }
+
+        try
+        {
+            session.UiStatus = ApiUiStatus.RunningUiScripts;
+            session.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+            Pub(key, EventKinds.Phase, EventPhases.RunUi, "UI script execution started");
+
+            var drafts = await db.ApiTestDrafts
+                .Where(d => d.SessionId == sessionId
+                    && d.DraftKind == ApiDraftKind.UiScript
+                    && d.Status == ApiDraftStatus.Approved
+                    && d.SpecFilePath != null && d.SpecFilePath != "")
+                .OrderBy(d => d.SortOrder)
+                .ToListAsync(ct);
+
+            var runnable = drafts.Where(d => File.Exists(d.SpecFilePath!)).ToList();
+            if (runnable.Count == 0)
+            {
+                Pub(key, EventKinds.Error, EventPhases.RunUi,
+                    "No approved UiScript drafts with valid SpecFilePath to run",
+                    EventLevels.Warn, Terminal());
+                session.UiStatus = ApiUiStatus.Drafted;
+                PersistLog(session, key);
+                session.UpdatedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync(ct);
+                return;
+            }
+
+            var runId = session.Id * 10_000
+                + (session.LastUiRunId is null ? 1 : session.LastUiRunId.Value % 10_000 + 1);
+            session.LastUiRunId = runId;
+            session.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+
+            var spec = new PlaywrightRunSpec
+            {
+                RunId = runId,
+                SpecFilePaths = runnable.Select(d => d.SpecFilePath!).ToList(),
+                EnableCapture = true,
+                Headed = false,
+                Workers = null,
+                Module = session.FrsSlug ?? session.Module,
+                ActivityEnabled = session.ActivityEnabled,
+            };
+
+            // PlaywrightRunner acquires PipelineConcurrency.Gate internally.
+            var result = await _playwrightRunner.RunAsync(spec, key, ct);
+
+            var failedByKey = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var failure in result.FailedTests)
+            {
+                var resolved = ResolveJUnitSpecPath(failure.SpecFilePath);
+                if (resolved is null) continue;
+                var sk = SpecFileKey(resolved);
+                failedByKey[sk] = failure.ErrorMessage ?? "Test failed";
+            }
+
+            var now = DateTime.UtcNow;
+            foreach (var draft in runnable)
+            {
+                var sk = SpecFileKey(draft.SpecFilePath!);
+                var fileName = Path.GetFileName(draft.SpecFilePath!);
+                if (failedByKey.TryGetValue(sk, out var err))
+                {
+                    draft.ErrorMessage = err;
+                    draft.UpdatedAt = now;
+                    Pub(key, EventKinds.Result, EventPhases.RunUi,
+                        $"Spec {fileName}: failed", EventLevels.Warn);
+                }
+                else
+                {
+                    draft.ErrorMessage = null;
+                    draft.UpdatedAt = now;
+                    Pub(key, EventKinds.Result, EventPhases.RunUi,
+                        $"Spec {fileName}: passed", EventLevels.Success);
+                }
+            }
+
+            session.UiStatus = ApiUiStatus.Drafted;
+            Pub(key, EventKinds.System, EventPhases.RunUi,
+                $"UI script run {runId} complete — {result.Passed} passed · {result.Failed} failed · {result.Skipped} skipped",
+                result.Failed > 0 ? EventLevels.Warn : EventLevels.Success, Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            session.UiStatus = ApiUiStatus.Cancelled;
+            Pub(key, EventKinds.System, EventPhases.RunUi,
+                "UI script run cancelled by user", EventLevels.Warn, Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await SafeCommitAsync(db);
+            throw;
+        }
+        catch (Exception e)
+        {
+            _log.LogError(e, "QA Loop UI script run failed for session {SessionId}", sessionId);
+            session.UiStatus = ApiUiStatus.Failed;
+            session.ErrorMessage = e.Message;
+            Pub(key, EventKinds.Error, EventPhases.RunUi,
+                $"UI script run failed: {e.Message}", EventLevels.Error, Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await SafeCommitAsync(db);
+        }
+    }
+
+    /// <summary>Resolve a JUnit-reported spec path (often relative to PlaywrightRoot) to absolute.</summary>
+    private string? ResolveJUnitSpecPath(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        if (Path.IsPathRooted(raw)) return Path.GetFullPath(raw);
+        if (!string.IsNullOrWhiteSpace(_playwrightRoot))
+            return Path.GetFullPath(Path.Combine(_playwrightRoot, raw));
+        return Path.GetFullPath(raw);
+    }
+
+    /// <summary>Basename match key — draft stores absolute path; JUnit often emits relative.</summary>
+    private static string SpecFileKey(string path) =>
+        Path.GetFileName(path.Replace('\\', '/')).ToLowerInvariant();
+
+    // ── QLV2-206: HealSpecs ──────────────────────────────────────────────────
+
+    public Task HealSpecsAsync(int sessionId, int[] draftIds, string? userContext = null,
+        CancellationToken cancellationToken = default)
+    {
+        Launch(sessionId, ct => HealSpecsInnerAsync(sessionId, draftIds, userContext, ct));
+        return Task.CompletedTask;
+    }
+
+    private async Task HealSpecsInnerAsync(int sessionId, int[] draftIds, string? userContext, CancellationToken ct)
     {
         var key = SessionKey(sessionId);
         using var scope = _scopeFactory.CreateScope();
@@ -404,7 +682,8 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
                         Pub(key, "stream", "ui-heal", msg));
 
                     await playwright.HealAsync(
-                        draft.SpecFilePath, draft.ErrorMessage ?? "", progress, ct);
+                        draft.SpecFilePath, draft.ErrorMessage ?? "", progress, ct,
+                        userContext: userContext);
 
                     if (File.Exists(draft.SpecFilePath))
                     {
@@ -414,10 +693,18 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
                         // now that draft.Id is known.
                         var priorMeta = QaMetaHeader.TryParse(draft.SpecCode) ?? QaMetaHeader.TryParse(rawCode);
                         var body = QaMetaHeader.StripHeader(rawCode);
+                        var tags = QaMetaHeader.ExtractTags(body);
+                        draft.Tags = tags.Count > 0 ? JsonSerializer.Serialize(tags) : null;
                         var meta = priorMeta is not null
-                            ? priorMeta with { GeneratedAt = DateTime.UtcNow, SpecHash = QaMetaHeader.ComputeHash(body) }
-                            : new QaMeta(session.Module, "ui", "ui", draft.Bucket, draft.AdoTestCaseId,
-                                draft.Id, DateTime.UtcNow, QaMetaHeader.ComputeHash(body));
+                            ? priorMeta with
+                            {
+                                GeneratedAt = DateTime.UtcNow,
+                                SpecHash = QaMetaHeader.ComputeHash(body),
+                                Tags = tags.Count > 0 ? tags : null,
+                            }
+                            : new QaMeta(session.FrsSlug ?? session.Module, "ui", "ui", draft.Bucket,
+                                draft.AdoTestCaseId, draft.Id, DateTime.UtcNow,
+                                QaMetaHeader.ComputeHash(body), Tags: tags.Count > 0 ? tags : null);
                         var stamped = QaMetaHeader.Upsert(body, meta);
                         if (stamped != rawCode)
                             try { await File.WriteAllTextAsync(draft.SpecFilePath, stamped, ct); } catch { /* best-effort */ }
@@ -516,6 +803,8 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
                 .ToHashSet();
 
             var now = DateTime.UtcNow;
+            var genExtra = BuildGeneratorExtraContext(session);
+            var metaModule = session.FrsSlug ?? session.Module;
             foreach (var draft in session.Drafts.Where(d => targetedIds.Contains(d.Id)))
             {
                 var draftFeedback = feedbackById[draft.Id];
@@ -532,20 +821,20 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
                             () => MatchRouteForDraft(draft, inventory),
                             route => new ContractGeneratorAgent(llm).RefineAsync(
                                 session.Module, route, draft.SpecCode, priorSteps, combined,
-                                extraContext: session.GenerateContext,
+                                extraContext: genExtra,
                                 emit: EmitClosure(key, EventPhases.Generate, session.ActivityEnabled), ct: ct)),
                         TestLevel.Endpoint => await RefineSingleMulti(
                             () => MatchRouteForDraft(draft, inventory),
                             route => new EndpointGeneratorAgent(llm).RefineAsync(
                                 session.Module, route, draft.SpecCode, priorSteps, combined,
-                                extraContext: session.GenerateContext,
+                                extraContext: genExtra,
                                 emit: EmitClosure(key, EventPhases.Generate, session.ActivityEnabled), ct: ct),
                             draft.CaseIndex ?? 0),
                         TestLevel.Workflow => await RefineSingle(
                             () => MatchWorkflowForDraft(draft, inventory),
                             wf => new WorkflowGeneratorAgent(llm).RefineAsync(
                                 session.Module, wf, inventory, draft.SpecCode, priorSteps, combined,
-                                extraContext: session.GenerateContext,
+                                extraContext: genExtra,
                                 emit: EmitClosure(key, EventPhases.Generate, session.ActivityEnabled), ct: ct)),
                         _ => null,
                     };
@@ -569,11 +858,19 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
                 {
                     // QLV2-301: re-stamp @qa-meta — draft.Id is known here, so SourceDraftId is filled
                     // in (unlike the initial-generate path). Preserve TcId if the draft was already pushed.
+                    var tags = QaMetaHeader.ExtractTags(refined.SpecCode);
+                    draft.Tags = tags.Count > 0 ? JsonSerializer.Serialize(tags) : null;
                     var stamped = QaMetaHeader.Upsert(refined.SpecCode, new QaMeta(
-                        session.Module, "api", draft.Level.ToWire(), Bucket: null, draft.AdoTestCaseId,
-                        draft.Id, DateTime.UtcNow, QaMetaHeader.ComputeHash(refined.SpecCode)));
+                        metaModule, "api", draft.Level.ToWire(), Bucket: null, draft.AdoTestCaseId,
+                        draft.Id, DateTime.UtcNow, QaMetaHeader.ComputeHash(refined.SpecCode),
+                        Tags: tags.Count > 0 ? tags : null));
                     draft.SpecCode = stamped;
                     try { File.WriteAllText(draft.SpecFilePath, stamped); } catch (Exception ex) { _log.LogWarning(ex, "Spec rewrite failed for draft {DraftId}", draft.Id); }
+                }
+                else
+                {
+                    var tags = QaMetaHeader.ExtractTags(refined.SpecCode);
+                    draft.Tags = tags.Count > 0 ? JsonSerializer.Serialize(tags) : null;
                 }
                 draft.UpdatedAt = now;
                 Pub(key, EventKinds.Result, EventPhases.Generate, $"Refined: {draft.Title}");
@@ -757,20 +1054,67 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
                 }
             }
 
-            // Fetch source from ADO repo
-            Pub(key, EventKinds.Phase, EventPhases.Fetch, $"Fetching source for module '{session.Module}'");
-            var sourceDiscovery = scope.ServiceProvider.GetService<IModuleSourceDiscoveryService>();
-            var source = await FetchSourceAsync(session, key, sourceDiscovery, ct);
-            // QAL-xxx: a source fetch that degrades to the bare "Module: {name}" placeholder (no code
-            // context at all) used to log as a plain Success here, indistinguishable from a real fetch —
-            // the analyzer would then silently find 0 routes with no visible explanation. FetchSourceAsync
-            // now publishes the WHY as its own Warn event(s); this just makes the final line honest.
-            var isDegenerate = source == $"Module: {session.Module}";
-            Pub(key, EventKinds.Result, EventPhases.Fetch,
-                isDegenerate
-                    ? $"Fetched source ({source.Length:N0} chars) — NO CODE CONTEXT; analysis will be text-only"
-                    : $"Fetched source ({source.Length:N0} chars)",
-                isDegenerate ? EventLevels.Warn : EventLevels.Success);
+            // ── Step 1: Retrieve KB (KBG-107) ────────────────────────────────────
+            FrsModuleContext? frsContext = null;
+            {
+                session.Status = ApiSessionStatus.RetrievingKb;
+                session.UpdatedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync(ct);
+                Pub(key, EventKinds.Phase, EventPhases.RetrieveKb, $"Retrieving FRS KB for module '{session.Module}'");
+                try
+                {
+                    var frsKb = scope.ServiceProvider.GetRequiredService<IFrsKbService>();
+                    frsContext = await frsKb.ResolveModuleAsync(session.Module, session.ProjectId, ct);
+                    if (frsContext != null)
+                    {
+                        session.FrsSlug    = frsContext.Slug;
+                        session.KbContextJson = JsonSerializer.Serialize(frsContext);
+                        await db.SaveChangesAsync(ct);
+                        Pub(key, EventKinds.Result, EventPhases.RetrieveKb,
+                            $"KB: {frsContext.Slug}", EventLevels.Success);
+                    }
+                    else
+                    {
+                        Pub(key, EventKinds.Result, EventPhases.RetrieveKb,
+                            "No FRS KB found — continuing without KB context", EventLevels.Warn);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _log.LogWarning(ex, "FRS KB retrieval failed for module '{Module}'", session.Module);
+                    Pub(key, EventKinds.Result, EventPhases.RetrieveKb,
+                        $"KB retrieval failed: {ex.Message} — continuing", EventLevels.Warn);
+                }
+            }
+
+            // ── Step 2: Code Scan (KBG-107) ───────────────────────────────────────
+            CodeScanBundle? codeScanBundle = null;
+            string source;
+            {
+                session.Status = ApiSessionStatus.Scanning;
+                session.UpdatedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync(ct);
+                Pub(key, EventKinds.Phase, EventPhases.Scan, $"Code scan for module '{session.Module}'");
+                var codeScanSvc = scope.ServiceProvider.GetRequiredService<IQaLoopCodeScanService>();
+                codeScanBundle = await codeScanSvc.ScanAsync(
+                    session.Module, session.Repository ?? "", session.Branch ?? "",
+                    frsContext, key, ct);
+                session.CodeScanJson = JsonSerializer.Serialize(codeScanBundle);
+                await db.SaveChangesAsync(ct);
+                // Build source string for the analyzer from the scan bundle.
+                var sb = new System.Text.StringBuilder();
+                foreach (var f in codeScanBundle.FrontendFiles)
+                    sb.AppendLine($"// --- {f.Path}\n{f.Content}\n");
+                foreach (var f in codeScanBundle.BackendFiles)
+                    sb.AppendLine($"// --- {f.Path}\n{f.Content}\n");
+                source = sb.Length > 0 ? sb.ToString() : $"Module: {session.Module}";
+                var isDegenerate = source == $"Module: {session.Module}";
+                Pub(key, EventKinds.Result, EventPhases.Scan,
+                    isDegenerate
+                        ? $"Scanned: no code found — analysis will be KB-only"
+                        : $"Scanned: {codeScanBundle.FrontendFiles.Length} frontend, {codeScanBundle.BackendFiles.Length} backend ({codeScanBundle.DiscoverySource})",
+                    isDegenerate ? EventLevels.Warn : EventLevels.Success);
+            }
 
             // Existing test cases for reconciliation against the chosen suite
             IReadOnlyList<LinkedTestCase> existingCases = [];
@@ -831,6 +1175,7 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
             var analysis = await new ModuleAnalyzerAgent(llm).AnalyzeInventoryAsync(
                 session.Module, source, existingCases,
                 additionalContext: session.AdditionalContext,
+                frsContext: frsContext,
                 fetchFile: fetchFile, emit: EmitClosure(key, EventPhases.Analyze, session.ActivityEnabled), ct: ct);
 
             // Pre-select: gap rows = selected; covered rows = not selected
@@ -978,6 +1323,7 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
             }, key);
 
         var allTasks = new List<Task<List<GeneratedSpec>?>>();
+        var genExtra = BuildGeneratorExtraContext(session);
 
         foreach (var r in contractRoutes)
         {
@@ -985,7 +1331,7 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
             allTasks.Add(Gated(async () =>
             {
                 var spec = await new ContractGeneratorAgent(llm).GenerateAsync(
-                    session.Module, route, extraContext: session.GenerateContext,
+                    session.Module, route, extraContext: genExtra,
                     emit: EmitClosure(key, EventPhases.Generate, session.ActivityEnabled), ct: ct);
                 return new List<GeneratedSpec> { spec };
             }));
@@ -996,7 +1342,7 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
             var route = r;
             allTasks.Add(Gated(async () =>
                 (List<GeneratedSpec>?) await new EndpointGeneratorAgent(llm).GenerateAsync(
-                    session.Module, route, extraContext: session.GenerateContext,
+                    session.Module, route, extraContext: genExtra,
                     emit: EmitClosure(key, EventPhases.Generate, session.ActivityEnabled), ct: ct)));
         }
 
@@ -1006,7 +1352,7 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
             allTasks.Add(Gated(async () =>
             {
                 var spec = await new WorkflowGeneratorAgent(llm).GenerateAsync(
-                    session.Module, workflow, analysis.Inventory, extraContext: session.GenerateContext,
+                    session.Module, workflow, analysis.Inventory, extraContext: genExtra,
                     emit: EmitClosure(key, EventPhases.Generate, session.ActivityEnabled), ct: ct);
                 return new List<GeneratedSpec> { spec };
             }));
@@ -1121,13 +1467,28 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
                     EventLevels.Success, new() { ["testCaseId"] = tcId });
             }
 
-            session.Status = ApiSessionStatus.Done;
+            session.Status = session.HasUiPhase ? ApiSessionStatus.ApiDone : ApiSessionStatus.Done;
             Pub(key, EventKinds.System, EventPhases.Push,
                 $"Pushed {pushed} test case(s) to ADO",
-                EventLevels.Success, new() { ["terminal"] = true, ["count"] = pushed });
+                EventLevels.Success, new() { ["terminal"] = !session.HasUiPhase, ["count"] = pushed });
             PersistLog(session, key);
             session.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
+
+            // KBG-110: when UI phase is enabled, kick off the UI Analyst in the same background
+            // task (do NOT Launch again — cancellation token already owns this session).
+            if (session.HasUiPhase)
+            {
+                try
+                {
+                    await RunUiPhaseAsync(sessionId, ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    // RunUiPhaseAsync already persisted UiStatus=Cancelled; do not re-enter the
+                    // push cancel path (which would incorrectly set Status=Drafted).
+                }
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -1148,6 +1509,156 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
             session.ErrorMessage = e.Message;
             Pub(key, EventKinds.Error, EventPhases.Push,
                 $"Push failed: {e.Message}", EventLevels.Error, Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await SafeCommitAsync(db);
+        }
+    }
+
+    // ── KBG-110: UI Analyst (step 7) ─────────────────────────────────────────
+
+    /// <summary>
+    /// Runs the UI Analyst after API push when <c>HasUiPhase</c>. Called inline from push
+    /// (same background token) — not via <see cref="Launch"/>.
+    /// </summary>
+    private async Task RunUiPhaseAsync(int sessionId, CancellationToken ct)
+    {
+        var key = SessionKey(sessionId);
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+        var session = await db.ApiTestSessions.FindAsync([sessionId], ct);
+        if (session is null) return;
+
+        try
+        {
+            var llm = await _llmFactory.CreateAsync(ct);
+
+            session.UiStatus = ApiUiStatus.AnalyzingUi;
+            session.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+            Pub(key, EventKinds.Phase, EventPhases.AnalyzeUi, "UI Analyst started");
+
+            FrsModuleContext? frsContext = null;
+            if (session.KbContextJson is { Length: > 0 })
+            {
+                try { frsContext = JsonSerializer.Deserialize<FrsModuleContext>(session.KbContextJson); }
+                catch (Exception ex)
+                {
+                    _log.LogWarning(ex, "KbContextJson deserialize failed for session {Id} — UI Analyst proceeds without KB", sessionId);
+                }
+            }
+
+            CodeScanBundle? codeScanBundle = null;
+            if (session.CodeScanJson is { Length: > 0 })
+            {
+                try { codeScanBundle = JsonSerializer.Deserialize<CodeScanBundle>(session.CodeScanJson); }
+                catch (Exception ex)
+                {
+                    _log.LogWarning(ex, "CodeScanJson deserialize failed for session {Id} — UI Analyst proceeds with empty FE files", sessionId);
+                }
+            }
+
+            var analysis = await new QaLoopUiAnalystAgent(llm).AnalyzeAsync(
+                session.Module,
+                frsContext?.ModuleMarkdown ?? "",
+                codeScanBundle?.FrontendFiles ?? [],
+                emit: EmitClosure(key, EventPhases.AnalyzeUi, session.ActivityEnabled),
+                ct: ct);
+
+            session.UiAnalysisJson = JsonSerializer.Serialize(analysis);
+            session.UiStatus = ApiUiStatus.AwaitingUiAnalysisReview;
+            Pub(key, EventKinds.System, EventPhases.AnalyzeUi,
+                "UI Analyst done — awaiting UI analysis review", data: Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            session.UiStatus = ApiUiStatus.Cancelled;
+            Pub(key, EventKinds.System, EventPhases.AnalyzeUi,
+                "UI Analyst cancelled by user", EventLevels.Warn, Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await SafeCommitAsync(db);
+            throw;
+        }
+        catch (Exception e)
+        {
+            _log.LogError(e, "QA Loop UI Analyst failed for session {SessionId}", sessionId);
+            session.UiStatus = ApiUiStatus.Failed;
+            session.ErrorMessage = e.Message;
+            Pub(key, EventKinds.Error, EventPhases.AnalyzeUi,
+                $"UI Analyst failed: {e.Message}", EventLevels.Error, Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await SafeCommitAsync(db);
+        }
+    }
+
+    public Task RerunUiAnalysisAsync(int sessionId, string feedback, CancellationToken cancellationToken = default)
+    {
+        Launch(sessionId, ct => RerunUiAnalysisInnerAsync(sessionId, feedback, ct));
+        return Task.CompletedTask;
+    }
+
+    private async Task RerunUiAnalysisInnerAsync(int sessionId, string feedback, CancellationToken ct)
+    {
+        var key = SessionKey(sessionId);
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+        var session = await db.ApiTestSessions.FindAsync([sessionId], ct);
+        if (session is null) return;
+
+        try
+        {
+            if (session.UiStatus != ApiUiStatus.AwaitingUiAnalysisReview)
+                throw new InvalidOperationException(
+                    $"UiStatus must be AwaitingUiAnalysisReview to rerun UI analysis (was {session.UiStatus}).");
+
+            var prior = session.UiAnalysisJson is { Length: > 0 }
+                ? JsonSerializer.Deserialize<QaLoopUiAnalystOutput>(session.UiAnalysisJson)
+                  ?? throw new InvalidOperationException("UiAnalysisJson deserialization returned null.")
+                : throw new InvalidOperationException("UiAnalysisJson missing — run UI Analyst first.");
+
+            var llm = await _llmFactory.CreateAsync(ct);
+
+            session.UiStatus = ApiUiStatus.AnalyzingUi;
+            session.LastFeedback = feedback;
+            session.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+            Pub(key, EventKinds.Phase, EventPhases.AnalyzeUi, "UI Analyst refine started");
+
+            var analysis = await new QaLoopUiAnalystAgent(llm).RefineAsync(
+                session.Module, prior, feedback,
+                emit: EmitClosure(key, EventPhases.AnalyzeUi, session.ActivityEnabled),
+                ct: ct);
+
+            session.UiAnalysisJson = JsonSerializer.Serialize(analysis);
+            session.UiStatus = ApiUiStatus.AwaitingUiAnalysisReview;
+            Pub(key, EventKinds.System, EventPhases.AnalyzeUi,
+                "UI Analyst refine done — awaiting UI analysis review", data: Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            session.UiStatus = ApiUiStatus.Cancelled;
+            Pub(key, EventKinds.System, EventPhases.AnalyzeUi,
+                "UI Analyst refine cancelled by user", EventLevels.Warn, Terminal());
+            PersistLog(session, key);
+            session.UpdatedAt = DateTime.UtcNow;
+            await SafeCommitAsync(db);
+            throw;
+        }
+        catch (Exception e)
+        {
+            _log.LogError(e, "QA Loop rerun-ui-analysis failed for session {SessionId}", sessionId);
+            session.UiStatus = ApiUiStatus.Failed;
+            session.ErrorMessage = e.Message;
+            Pub(key, EventKinds.Error, EventPhases.AnalyzeUi,
+                $"UI Analyst refine failed: {e.Message}", EventLevels.Error, Terminal());
             PersistLog(session, key);
             session.UpdatedAt = DateTime.UtcNow;
             await SafeCommitAsync(db);
@@ -1345,6 +1856,36 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
             .Where(w => w is not null).Select(w => w!)
             .Distinct().ToList();
 
+    /// <summary>KBG-108: merge session.GenerateContext with FRS RULES / FE↔BE / FeaturesJson + tag
+    /// instructions when KbContextJson deserializes. System prompts stay frozen — enrichment is user-prompt only.</summary>
+    internal static string? BuildGeneratorExtraContext(ApiTestSession session)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(session.GenerateContext))
+            parts.Add(session.GenerateContext.Trim());
+
+        FrsModuleContext? frs = null;
+        if (session.KbContextJson is { Length: > 0 })
+        {
+            try { frs = JsonSerializer.Deserialize<FrsModuleContext>(session.KbContextJson); }
+            catch { /* leave frs null — generate without KB enrichment */ }
+        }
+
+        if (frs is not null)
+        {
+            parts.Add(
+                $"## Domain Rules (FRS: {frs.Slug})\n" +
+                $"{frs.RulesMarkdown}\n\n" +
+                $"## FE-BE Contracts\n" +
+                $"{frs.FeBackLinksMarkdown}\n\n" +
+                $"## Features and suggested packs\n" +
+                $"{frs.FeaturesJson}\n" +
+                "For each generated test: include @feature-<id> in the test title, and @smoke/@regression/@e2e per the feature's suggested pack.");
+        }
+
+        return parts.Count == 0 ? null : string.Join("\n\n", parts);
+    }
+
     private void PersistDraft(QaDbContext db, ApiTestSession session, GeneratedSpec spec,
         int sortOrder, DateTime now, string key)
     {
@@ -1394,9 +1935,13 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
                 // QLV2-301: stamp @qa-meta identity (Scripts Board disk↔DB reconcile). SourceDraftId is
                 // null here — draft.Id isn't assigned until SaveChangesAsync — reconcile matches by
                 // SpecFilePath, not SourceDraftId, so this is a non-issue.
+                // KBG-108: module = frsSlug ?? module; tags from first test( title.
+                var tags = QaMetaHeader.ExtractTags(specCode);
+                draft.Tags = tags.Count > 0 ? JsonSerializer.Serialize(tags) : null;
                 specCode = QaMetaHeader.Upsert(specCode, new QaMeta(
-                    session.Module, "api", level.ToWire(), Bucket: null, TcId: null, SourceDraftId: null,
-                    DateTime.UtcNow, QaMetaHeader.ComputeHash(specCode)));
+                    session.FrsSlug ?? session.Module, "api", level.ToWire(), Bucket: null,
+                    TcId: null, SourceDraftId: null, DateTime.UtcNow, QaMetaHeader.ComputeHash(specCode),
+                    Tags: tags.Count > 0 ? tags : null));
                 draft.SpecCode = specCode;
 
                 // Only case 0 actually needs to write the (identical) shared file to disk; cases 1..N

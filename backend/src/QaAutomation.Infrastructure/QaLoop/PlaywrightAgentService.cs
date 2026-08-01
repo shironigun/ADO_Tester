@@ -38,32 +38,58 @@ public sealed class PlaywrightAgentService : IPlaywrightAgentService
         Directory.CreateDirectory(outDir);
         var slug = Slug(caseTitle);
         var specPath = Path.Combine(outDir, $"{slug}-{tcIdPending}.ui.spec.ts");
+        // Clear any prior stub so a failed agent run can't leave a stale empty file behind.
+        if (File.Exists(specPath)) File.Delete(specPath);
         var prompt = BuildGeneratePrompt(caseTitle, stepsJson, bucket, specPath, _opts.AppUrl, moduleRoute);
-        await RunAgentAsync(root, prompt, progress, ct);
+        await RunAgentAsync(root, prompt, progress, ct, agent: "playwright-test-generator");
+        if (!File.Exists(specPath) || new FileInfo(specPath).Length < 32)
+            throw new InvalidOperationException(
+                $"Playwright generator did not write a spec at '{specPath}'. " +
+                "Confirm Claude CLI can edit files in PlaywrightRoot (--permission-mode acceptEdits) and MCP is healthy.");
         return specPath;
     }
 
     public async Task HealAsync(
         string specFilePath, string failureMessage,
-        IProgress<string>? progress, CancellationToken ct)
+        IProgress<string>? progress, CancellationToken ct,
+        string? userContext = null)
     {
         var root = RequireRoot();
-        var prompt = BuildHealPrompt(specFilePath, failureMessage);
-        await RunAgentAsync(root, prompt, progress, ct);
+        var prompt = BuildHealPrompt(specFilePath, ComposeHealFailureMessage(failureMessage, userContext));
+        await RunAgentAsync(root, prompt, progress, ct, agent: "playwright-test-healer");
     }
 
     // ── Internal helpers (exposed for unit testing) ──────────────────────────
 
+    /// <summary>Appends optional tester context to the Playwright failure message before healing.</summary>
+    internal static string ComposeHealFailureMessage(string failureMessage, string? userContext)
+        => string.IsNullOrWhiteSpace(userContext)
+            ? failureMessage
+            : failureMessage + "\n\nUser context: " + userContext;
+
     /// <summary>Returns the CLI argument list used for every agent invocation.
     /// Exposed as <c>internal</c> so the unit test can verify the args without spawning a process.</summary>
-    internal IReadOnlyList<string> BuildAgentArgs()
+    internal IReadOnlyList<string> BuildAgentArgs(string? agent = null)
     {
-        var args = new List<string> { "-p", "--output-format", "stream-json" };
+        // --verbose required for stream-json. File writes + MCP tools need an elevated permission
+        // mode in -p (non-interactive) — acceptEdits alone is insufficient for generator_write_test /
+        // Write tool calls from Playwright agents.
+        var args = new List<string>
+        {
+            "-p", "--output-format", "stream-json", "--verbose",
+            "--allow-dangerously-skip-permissions",
+            "--permission-mode", "bypassPermissions",
+        };
         var mcpConfig = Path.Combine(_opts.PlaywrightRoot, ".mcp.json");
         if (File.Exists(mcpConfig))
         {
             args.Add("--mcp-config");
             args.Add(mcpConfig);
+        }
+        if (!string.IsNullOrWhiteSpace(agent))
+        {
+            args.Add("--agent");
+            args.Add(agent);
         }
         if (!string.IsNullOrEmpty(_cli.Model))
         {
@@ -72,6 +98,10 @@ public sealed class PlaywrightAgentService : IPlaywrightAgentService
         }
         return args;
     }
+
+    /// <summary>Exposed for unit tests verifying userContext is reflected in the heal prompt.</summary>
+    internal static string BuildHealPromptForTest(string specFilePath, string failureMessage, string? userContext = null)
+        => BuildHealPrompt(specFilePath, ComposeHealFailureMessage(failureMessage, userContext));
 
     private string RequireRoot()
     {
@@ -85,16 +115,17 @@ public sealed class PlaywrightAgentService : IPlaywrightAgentService
         return root;
     }
 
-    private async Task RunAgentAsync(string cwd, string prompt, IProgress<string>? progress, CancellationToken ct)
+    private async Task RunAgentAsync(
+        string cwd, string prompt, IProgress<string>? progress, CancellationToken ct, string? agent = null)
     {
         var cli = ClaudeCli.ResolvePath(_cli.Path)
             ?? throw new InvalidOperationException(
                 $"Claude CLI not found (configured path: '{_cli.Path}'). " +
                 "Install Claude Code and ensure the claude executable is on PATH or set CLAUDE_CLI_PATH.");
 
-        var args = BuildAgentArgs();
-        _log.LogInformation("Spawning Playwright agent — cli={Cli} cwd={Cwd} model={Model}",
-            cli, cwd, _cli.Model);
+        var args = BuildAgentArgs(agent);
+        _log.LogInformation("Spawning Playwright agent — cli={Cli} cwd={Cwd} model={Model} agent={Agent}",
+            cli, cwd, _cli.Model, agent ?? "(default)");
 
         var psi = new ProcessStartInfo(cli)
         {
@@ -204,6 +235,7 @@ public sealed class PlaywrightAgentService : IPlaywrightAgentService
         sb.AppendLine("Requirements:");
         sb.AppendLine("- Use @playwright/test.");
         sb.AppendLine("- Use the storageState from fixtures/storageState.json for authentication (relative to playwright.config.ts).");
+        sb.AppendLine("- After landing in the app, if a 'Would you like to set up email login?' modal appears, click 'Not Now' before continuing.");
         sb.AppendLine("- Use the Playwright MCP planner to navigate the module route and inspect live controls before choosing locators.");
         sb.AppendLine("- Include allure-playwright labels (@allure.label.story, @allure.label.tag).");
         sb.AppendLine($"- Tag the test: @ui @{bucket}.");

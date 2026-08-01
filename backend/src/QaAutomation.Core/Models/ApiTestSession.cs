@@ -44,6 +44,19 @@ public sealed class ApiTestSession
     public bool HasUiPhase { get; set; }
     /// <summary>Tracks the UI phase pipeline status. Null when HasUiPhase is false or UI phase not yet started.</summary>
     public ApiUiStatus? UiStatus { get; set; }
+    // ── KBG-105: KB-grounded columns ──────────────────────────────────────────
+    /// <summary>Resolved FRS atlas slug (e.g. "messaging"). Null when FRS KB is not configured.</summary>
+    public string? FrsSlug { get; set; }
+    /// <summary>Serialized FrsModuleContext. Internal use only — not surfaced in ApiSessionDetail.</summary>
+    public string? KbContextJson { get; set; }
+    /// <summary>Serialized CodeScanBundle. Internal use only — not surfaced in ApiSessionDetail.</summary>
+    public string? CodeScanJson { get; set; }
+    /// <summary>Serialized QaLoopUiAnalystOutput. Surfaced in ApiSessionDetail as uiAnalysisJson.</summary>
+    public string? UiAnalysisJson { get; set; }
+    /// <summary>ADO Test Suite id for UI test push. Falls back to TestSuiteId when null.</summary>
+    public int? UiTestSuiteId { get; set; }
+    /// <summary>Run id used for the last step-10b inline Playwright execution (screenshot path key).</summary>
+    public int? LastUiRunId { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 

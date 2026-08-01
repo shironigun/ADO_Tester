@@ -23,9 +23,11 @@ features end-to-end (QA Loop, Author Tests, Find Bugs, etc.). It is safe to writ
   generic manual ADO checks — that is a different, older reference. For anything under the
   `qa-loop-v2` Ralph loop (and going forward, ADO_Tester feature verification generally), prefer
   **177540** per direct user instruction.
-- For UI-phase (Slab 2+) runs specifically, pair story 177540 with the Anthropic provider and model
-  `claude-haiku-4-5-20251001` (cheap/fast, already the established convention — see
-  `docs/progress/RalphLoop/qa-loop-v2/progress.md`).
+- **LLM for all verification / test runs:** always use the **ClaudeCli** provider with model
+  **`haiku`** (cheap/fast; resolves to the current Haiku via Claude CLI subscription). Never run
+  live agent pipelines on Sonnet/Opus for verification — set provider + `claude_cli.model` before
+  starting a scan / Author Tests / Find Bugs / QA Loop UI-phase run. (Do not use Anthropic API
+  unless the user explicitly asks — prefer Claude CLI + haiku.)
 - After implementing each Ralph-loop task that has a runtime-verifiable surface (an endpoint, an
   orchestrator step, a UI flow), exercise it against story 177540 as part of that task's
   verification — in addition to `dotnet build`/`dotnet test`/`npm run build`/`npm run lint` — before
@@ -35,8 +37,7 @@ features end-to-end (QA Loop, Author Tests, Find Bugs, etc.). It is safe to writ
   target story 177540 specifically for anything that touches ADO (push a Test Case, link Tested-By, a
   Scripts Board inventory item's ADO deep link) — pick any convenient local module for the
   execution/generation part itself. Author Tests / Find Bugs (work-item-driven) always use 177540 directly.
-- **Known blocker (as of 2026-07-29):** `ADOACCESS_PAT` in the repo-root `.env` is expired/invalid — every
-  live ADO call returns 401 (confirmed via `GET /api/diagnostics/workitem/177540`). Live ADO-touching
-  verification is blocked until the PAT is refreshed; until then, rely on `dotnet test`/`npm run
-  build`+`lint` and flag ADO-touching verification as pending in `progress.md` rather than skipping the
-  task or faking the check.
+- **ADO PAT:** live ADO verification requires a valid `ADOACCESS_PAT` in the repo-root `.env` (and a
+  matching `ado.pat` runtime setting if DB overlay is present — Settings wins over `.env`). Confirm
+  with `GET /api/diagnostics/workitem/177540` before ADO-touching runs; if it returns 401/502, record
+  pending in `progress.md` rather than skipping the task or faking the check.

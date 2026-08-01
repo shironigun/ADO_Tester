@@ -43,6 +43,9 @@ public sealed class QaLoopOptions
     /// per-project agent definitions. Set via AUTOMATION_PLAYWRIGHT_ROOT.</summary>
     public string PlaywrightRoot { get; set; } = "";
 
+    /// <summary>Per-case Playwright UI script generation timeout in seconds (KBG-112). Default 600 (10 min).</summary>
+    public int UiScriptGenerationTimeoutSeconds { get; set; } = 600;
+
     // ── UI phase app auth (Slab 2, QLV2-202) ────────────────────────────────
     /// <summary>Base URL of the app under test for Playwright UI phase (e.g. "https://ideal.targetcrm.local").
     /// Set via AUTOMATION_APP_URL / qaloop.app_url.</summary>

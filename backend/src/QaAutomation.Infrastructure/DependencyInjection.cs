@@ -353,6 +353,10 @@ public static class DependencyInjection
         services.AddSingleton<ITeamsNotifier, TeamsNotifier>();
         services.AddScoped<IFrontendModuleService, QaLoop.FrontendModuleService>();
         services.AddScoped<IModuleSourceDiscoveryService, QaLoop.ModuleSourceDiscoveryService>();
+        // KBG-104: FRS KB service (scoped — resolved from background DI scopes in QaLoopOrchestrator)
+        services.AddScoped<IFrsKbService, QaLoop.FrsKbService>();
+        // KBG-106: QA Loop code scan service
+        services.AddScoped<IQaLoopCodeScanService, QaLoop.QaLoopCodeScanService>();
         services.AddScoped<IScriptInventoryService, ScriptsBoard.ScriptInventoryService>();
         services.AddScoped<IScriptBoardExecutionService, ScriptsBoard.ScriptBoardExecutionService>();
         // Registered as its own concrete type (not just AddHostedService<T>, which only exposes T as

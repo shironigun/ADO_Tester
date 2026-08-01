@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using System.Text.Json;
 using QaAutomation.Core.Abstractions;
 using QaAutomation.Core.Configuration;
 using QaAutomation.Core.Models;
@@ -446,6 +447,106 @@ public sealed class QaLoopOrchestratorTests
         Assert.Contains(drafts, d => d.DraftKind == ApiDraftKind.UiCase && d.Bucket == "smoke");
     }
 
+    private const string UiAnalystOutputJson = """
+        {"features":[{"id":"inbox","name":"Inbox","description":"Message list"}],"flows":[],"screens":[],"openQuestions":[],"mustTest":["Open inbox"],"mustNotTest":["API contracts"],"authPermissionsSummary":"Admin","dmsVariantsSummary":"none observed"}
+        """;
+
+    private const string RefinedUiAnalystOutputJson = """
+        {"features":[{"id":"inbox","name":"Inbox refined","description":"Improved"}],"flows":[{"name":"Send","trigger":"Compose","steps":["Click compose"],"breaks":[]}],"screens":[],"openQuestions":[],"mustTest":["Send message"],"mustNotTest":[],"authPermissionsSummary":"Admin","dmsVariantsSummary":"none observed"}
+        """;
+
+    [Fact]
+    public async Task AuthorUiCases_uses_QaLoopUiCaseAuthor_when_UiAnalysisJson_set()
+    {
+        // New FRS-grounded path: UiAnalysisJson present → QaLoopUiCaseAuthorAgent (array response).
+        using var h = Harness.Create(new StubLlmClient(UiCaseAuthorJson));
+        var sid = await h.SeedSessionAsync("messaging");
+
+        using (var scope = h.Provider.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+            var sess = await db.ApiTestSessions.FindAsync(sid);
+            sess!.UiStatus = ApiUiStatus.AwaitingUiAnalysisReview;
+            sess.UiAnalysisJson = UiAnalystOutputJson;
+            await db.SaveChangesAsync();
+        }
+
+        await h.Orchestrator.AuthorUiCasesAsync(sid);
+        await WaitUiStatusAsync(h, sid, ApiUiStatus.AwaitingReview, TimeSpan.FromSeconds(10));
+
+        using var check = h.Provider.CreateScope();
+        var drafts = await check.ServiceProvider.GetRequiredService<QaDbContext>()
+            .ApiTestDrafts.Where(d => d.SessionId == sid && d.DraftKind == ApiDraftKind.UiCase).ToListAsync();
+        Assert.Contains(drafts, d => d.Bucket == "smoke" && d.Title.Contains("dashboard", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task AuthorUiCases_falls_back_to_inventory_agent_when_UiAnalysisJson_null()
+    {
+        // Backward-compat: no UiAnalysisJson → deprecated UiCaseAuthorAgent(inventory).
+        using var h = Harness.Create(new StubLlmClient(UiCaseAuthorJson));
+        var sid = await h.SeedSessionAsync("Deals");
+        await h.SetInventoryAsync(sid, EmptyAnalyzerJson);
+
+        using (var scope = h.Provider.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+            var sess = await db.ApiTestSessions.FindAsync(sid);
+            sess!.UiStatus = null;
+            sess.UiAnalysisJson = null;
+            await db.SaveChangesAsync();
+        }
+
+        await h.Orchestrator.AuthorUiCasesAsync(sid);
+        await WaitUiStatusAsync(h, sid, ApiUiStatus.AwaitingReview, TimeSpan.FromSeconds(10));
+
+        using var check = h.Provider.CreateScope();
+        var drafts = await check.ServiceProvider.GetRequiredService<QaDbContext>()
+            .ApiTestDrafts.Where(d => d.SessionId == sid && d.DraftKind == ApiDraftKind.UiCase).ToListAsync();
+        Assert.NotEmpty(drafts);
+    }
+
+    [Fact]
+    public async Task RerunUiAnalysis_replaces_UiAnalysisJson()
+    {
+        using var h = Harness.Create(new StubLlmClient(RefinedUiAnalystOutputJson));
+        var sid = await h.SeedSessionAsync("messaging");
+
+        using (var scope = h.Provider.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+            var sess = await db.ApiTestSessions.FindAsync(sid);
+            sess!.UiStatus = ApiUiStatus.AwaitingUiAnalysisReview;
+            sess.UiAnalysisJson = UiAnalystOutputJson;
+            await db.SaveChangesAsync();
+        }
+
+        await h.Orchestrator.RerunUiAnalysisAsync(sid, "Add the send flow");
+
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        string? json = null;
+        ApiUiStatus? status = null;
+        while (DateTime.UtcNow < deadline)
+        {
+            using var scope = h.Provider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+            var sess = await db.ApiTestSessions.AsNoTracking().FirstAsync(s => s.Id == sid);
+            if (sess.UiStatus == ApiUiStatus.AwaitingUiAnalysisReview
+                && sess.UiAnalysisJson is { Length: > 0 }
+                && sess.UiAnalysisJson.Contains("Inbox refined", StringComparison.Ordinal))
+            {
+                json = sess.UiAnalysisJson;
+                status = sess.UiStatus;
+                break;
+            }
+            await Task.Delay(40);
+        }
+
+        Assert.Equal(ApiUiStatus.AwaitingUiAnalysisReview, status);
+        Assert.Contains("Inbox refined", json!);
+        Assert.DoesNotContain("\"name\":\"Inbox\",\"description\":\"Message list\"", json!);
+    }
+
     [Fact]
     public async Task GenerateUiScripts_creates_UiScript_drafts()
     {
@@ -458,6 +559,8 @@ public sealed class QaLoopOrchestratorTests
             var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
             var d = await db.ApiTestDrafts.FindAsync(caseId);
             d!.Status = ApiDraftStatus.Approved;
+            var sess = await db.ApiTestSessions.FindAsync(sid);
+            sess!.UiStatus = ApiUiStatus.AwaitingReview;
             await db.SaveChangesAsync();
         }
 
@@ -484,6 +587,299 @@ public sealed class QaLoopOrchestratorTests
     }
 
     [Fact]
+    public async Task GenerateUiScripts_caps_concurrency_at_2()
+    {
+        var stub = new StubPlaywrightAgentService(Path.GetTempPath(), delayMs: 150);
+        using var h = Harness.Create(new StubLlmClient(), playwright: stub);
+        var sid = await h.SeedSessionAsync("Deals");
+
+        using (var scope = h.Provider.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+            var sess = await db.ApiTestSessions.FindAsync(sid);
+            sess!.UiStatus = ApiUiStatus.AwaitingReview;
+            for (var i = 0; i < 4; i++)
+            {
+                db.ApiTestDrafts.Add(new ApiTestDraft
+                {
+                    SessionId = sid,
+                    Title = $"Case {i}",
+                    Preconditions = "",
+                    StepsJson = "[]",
+                    Status = ApiDraftStatus.Approved,
+                    Level = TestLevel.Ui,
+                    DraftKind = ApiDraftKind.UiCase,
+                    Bucket = "smoke",
+                    SortOrder = i,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                });
+            }
+            await db.SaveChangesAsync();
+        }
+
+        await h.Orchestrator.GenerateUiScriptsAsync(sid);
+        await WaitUiStatusAsync(h, sid, ApiUiStatus.Drafted, TimeSpan.FromSeconds(15));
+
+        Assert.True(stub.MaxConcurrent <= 2, $"MaxConcurrent was {stub.MaxConcurrent}");
+        Assert.Equal(4, stub.CallCount);
+    }
+
+    [Fact]
+    public async Task GenerateUiScripts_timeout_sets_ErrorMessage_and_continues()
+    {
+        var stub = new StubPlaywrightAgentService(Path.GetTempPath(), delayMs: 5_000);
+        using var h = Harness.Create(
+            new StubLlmClient(),
+            playwright: stub,
+            qaLoop: new QaLoopOptions { ScriptsFolderName = "scripts", RunsFolderName = "runs", UiScriptGenerationTimeoutSeconds = 1 });
+        var sid = await h.SeedSessionAsync("Deals");
+
+        int fastId, slowId;
+        using (var scope = h.Provider.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+            var sess = await db.ApiTestSessions.FindAsync(sid);
+            sess!.UiStatus = ApiUiStatus.AwaitingReview;
+            // First call hangs past timeout; second is also slow but we only need one timeout + continue.
+            // Use HangTitles so only "Slow case" hangs; "Fast case" completes immediately.
+            stub.HangTitles.Add("Slow case");
+            var slow = new ApiTestDraft
+            {
+                SessionId = sid, Title = "Slow case", Preconditions = "", StepsJson = "[]",
+                Status = ApiDraftStatus.Approved, Level = TestLevel.Ui, DraftKind = ApiDraftKind.UiCase,
+                Bucket = "smoke", SortOrder = 0, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+            };
+            var fast = new ApiTestDraft
+            {
+                SessionId = sid, Title = "Fast case", Preconditions = "", StepsJson = "[]",
+                Status = ApiDraftStatus.Approved, Level = TestLevel.Ui, DraftKind = ApiDraftKind.UiCase,
+                Bucket = "smoke", SortOrder = 1, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+            };
+            db.ApiTestDrafts.AddRange(slow, fast);
+            await db.SaveChangesAsync();
+            slowId = slow.Id;
+            fastId = fast.Id;
+        }
+
+        await h.Orchestrator.GenerateUiScriptsAsync(sid);
+        await WaitUiStatusAsync(h, sid, ApiUiStatus.Drafted, TimeSpan.FromSeconds(15));
+
+        using var checkScope = h.Provider.CreateScope();
+        var checkDb = checkScope.ServiceProvider.GetRequiredService<QaDbContext>();
+        var slowDraft = await checkDb.ApiTestDrafts.AsNoTracking().FirstAsync(d => d.Id == slowId);
+        var scripts = await checkDb.ApiTestDrafts
+            .Where(d => d.SessionId == sid && d.DraftKind == ApiDraftKind.UiScript)
+            .ToListAsync();
+
+        Assert.Equal("Generation timed out", slowDraft.ErrorMessage);
+        Assert.Contains(scripts, d => d.Title == "Fast case");
+        Assert.DoesNotContain(scripts, d => d.Title == "Slow case");
+        _ = fastId;
+    }
+
+    [Fact]
+    public async Task GenerateUiScripts_passes_moduleRoute_from_atlas()
+    {
+        var stub = new StubPlaywrightAgentService(Path.GetTempPath());
+        using var h = Harness.Create(new StubLlmClient(), playwright: stub);
+        var sid = await h.SeedSessionAsync("messaging");
+        var caseId = await h.SeedUiCaseDraftAsync(sid, "Open inbox", bucket: "smoke");
+
+        using (var scope = h.Provider.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+            var sess = await db.ApiTestSessions.FindAsync(sid);
+            sess!.UiStatus = ApiUiStatus.AwaitingReview;
+            sess.FrsSlug = "messaging";
+            sess.KbContextJson = JsonSerializer.Serialize(new FrsModuleContext(
+                Slug: "messaging",
+                ModuleMarkdown: "# Messaging",
+                AtlasMarkdown: "---\nslug: messaging\nroutes:\n  - /crm/messaging\n  - /crm/messaging/:id\n---\n# Atlas\n",
+                FrontendPathIncludes: [],
+                BackendPathIncludes: [],
+                KeywordsExclusive: [],
+                RulesMarkdown: "",
+                FeBackLinksMarkdown: "",
+                FeaturesJson: "[]"));
+            var d = await db.ApiTestDrafts.FindAsync(caseId);
+            d!.Status = ApiDraftStatus.Approved;
+            await db.SaveChangesAsync();
+        }
+
+        await h.Orchestrator.GenerateUiScriptsAsync(sid);
+        await WaitUiStatusAsync(h, sid, ApiUiStatus.Drafted, TimeSpan.FromSeconds(10));
+
+        Assert.Equal("/crm/messaging", stub.LastModuleRoute);
+    }
+
+    [Fact]
+    public async Task GenerateUiScripts_noop_when_UiStatus_not_AwaitingReview()
+    {
+        using var h = Harness.Create(new StubLlmClient());
+        var sid = await h.SeedSessionAsync("Deals");
+        await h.SeedUiCaseDraftAsync(sid, "Verify login", bucket: "smoke");
+        // UiStatus left null / not AwaitingReview
+
+        await h.Orchestrator.GenerateUiScriptsAsync(sid);
+        await Task.Delay(200);
+
+        using var checkScope = h.Provider.CreateScope();
+        var checkDb = checkScope.ServiceProvider.GetRequiredService<QaDbContext>();
+        var sess = await checkDb.ApiTestSessions.AsNoTracking().FirstAsync(s => s.Id == sid);
+        var scripts = await checkDb.ApiTestDrafts
+            .Where(d => d.SessionId == sid && d.DraftKind == ApiDraftKind.UiScript)
+            .ToListAsync();
+
+        Assert.Null(sess.UiStatus);
+        Assert.Empty(scripts);
+    }
+
+    private static async Task WaitUiStatusAsync(Harness h, int sid, ApiUiStatus expected, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            using var scope = h.Provider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+            var sess = await db.ApiTestSessions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == sid);
+            if (sess?.UiStatus == expected) return;
+            await Task.Delay(40);
+        }
+    }
+
+    [Fact]
+    public async Task RunUiScripts_maps_JUnit_failures_to_draft_ErrorMessage_and_clears_passes()
+    {
+        var pwRoot = Path.Combine(Path.GetTempPath(), $"pw_root_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(pwRoot);
+        var failRel = Path.Combine("generated", "ui", "smoke", "fail-case.ui.spec.ts");
+        var passRel = Path.Combine("generated", "ui", "smoke", "pass-case.ui.spec.ts");
+        var failAbs = Path.Combine(pwRoot, failRel);
+        var passAbs = Path.Combine(pwRoot, passRel);
+        Directory.CreateDirectory(Path.GetDirectoryName(failAbs)!);
+        await File.WriteAllTextAsync(failAbs, "// fail");
+        await File.WriteAllTextAsync(passAbs, "// pass");
+
+        var runner = new StubPlaywrightRunner
+        {
+            Result = new PlaywrightRunResult
+            {
+                ExitCode = 1,
+                Passed = 1,
+                Failed = 1,
+                FailedTests =
+                [
+                    new FailedTestResult
+                    {
+                        TestTitle = "fail case",
+                        ErrorMessage = "Error: expect(locator).toBeVisible()",
+                        SpecFilePath = failRel.Replace('\\', '/'),
+                    },
+                ],
+            },
+        };
+
+        using var h = Harness.Create(
+            new StubLlmClient(),
+            qaLoop: new QaLoopOptions
+            {
+                ScriptsFolderName = "scripts",
+                RunsFolderName = "runs",
+                PlaywrightRoot = pwRoot,
+            },
+            playwrightRunner: runner);
+        var sid = await h.SeedSessionAsync("Deals");
+
+        int failId, passId;
+        using (var scope = h.Provider.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+            var sess = await db.ApiTestSessions.FindAsync(sid);
+            sess!.UiStatus = ApiUiStatus.Drafted;
+            sess.FrsSlug = "deals";
+            var fail = new ApiTestDraft
+            {
+                SessionId = sid, Title = "Fail case", Preconditions = "", StepsJson = "[]",
+                SpecCode = "//", SpecFilePath = failAbs, Status = ApiDraftStatus.Approved,
+                Level = TestLevel.Ui, DraftKind = ApiDraftKind.UiScript, Bucket = "smoke",
+                ErrorMessage = null, SortOrder = 0, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+            };
+            var pass = new ApiTestDraft
+            {
+                SessionId = sid, Title = "Pass case", Preconditions = "", StepsJson = "[]",
+                SpecCode = "//", SpecFilePath = passAbs, Status = ApiDraftStatus.Approved,
+                Level = TestLevel.Ui, DraftKind = ApiDraftKind.UiScript, Bucket = "smoke",
+                ErrorMessage = "stale failure", SortOrder = 1, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+            };
+            db.ApiTestDrafts.AddRange(fail, pass);
+            await db.SaveChangesAsync();
+            failId = fail.Id;
+            passId = pass.Id;
+        }
+
+        await h.Orchestrator.RunUiScriptsAsync(sid);
+
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (DateTime.UtcNow < deadline)
+        {
+            using var scope = h.Provider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+            var sess = await db.ApiTestSessions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == sid);
+            var fail = await db.ApiTestDrafts.AsNoTracking().FirstOrDefaultAsync(d => d.Id == failId);
+            if (sess?.LastUiRunId is not null
+                && sess.UiStatus == ApiUiStatus.Drafted
+                && fail?.ErrorMessage is not null)
+                break;
+            await Task.Delay(40);
+        }
+
+        using var check = h.Provider.CreateScope();
+        var cdb = check.ServiceProvider.GetRequiredService<QaDbContext>();
+        var failDraft = await cdb.ApiTestDrafts.AsNoTracking().FirstAsync(d => d.Id == failId);
+        var passDraft = await cdb.ApiTestDrafts.AsNoTracking().FirstAsync(d => d.Id == passId);
+        var sessOut = await cdb.ApiTestSessions.AsNoTracking().FirstAsync(s => s.Id == sid);
+
+        Assert.Equal("Error: expect(locator).toBeVisible()", failDraft.ErrorMessage);
+        Assert.Null(passDraft.ErrorMessage);
+        Assert.Equal(ApiUiStatus.Drafted, sessOut.UiStatus);
+        Assert.NotNull(sessOut.LastUiRunId);
+        Assert.Equal(sid * 10_000 + 1, sessOut.LastUiRunId);
+        Assert.NotNull(runner.LastSpec);
+        Assert.Equal("deals", runner.LastSpec!.Module);
+        Assert.True(runner.LastSpec.EnableCapture);
+        Assert.False(runner.LastSpec.Headed);
+    }
+
+    [Fact]
+    public async Task RunUiScripts_noop_when_already_RunningUiScripts()
+    {
+        var runner = new StubPlaywrightRunner();
+        using var h = Harness.Create(new StubLlmClient(), playwrightRunner: runner);
+        var sid = await h.SeedSessionAsync("Deals");
+
+        using (var scope = h.Provider.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+            var sess = await db.ApiTestSessions.FindAsync(sid);
+            sess!.UiStatus = ApiUiStatus.RunningUiScripts;
+            sess.LastUiRunId = 42;
+            await db.SaveChangesAsync();
+        }
+
+        await h.Orchestrator.RunUiScriptsAsync(sid);
+        await Task.Delay(300);
+
+        using var check = h.Provider.CreateScope();
+        var cdb = check.ServiceProvider.GetRequiredService<QaDbContext>();
+        var sessOut = await cdb.ApiTestSessions.AsNoTracking().FirstAsync(s => s.Id == sid);
+
+        Assert.Equal(ApiUiStatus.RunningUiScripts, sessOut.UiStatus);
+        Assert.Equal(42, sessOut.LastUiRunId);
+        Assert.Null(runner.LastSpec);
+    }
+
+    [Fact]
     public async Task HealSpecs_resets_status_to_Draft()
     {
         using var h = Harness.Create(new StubLlmClient());
@@ -499,7 +895,7 @@ public sealed class QaLoopOrchestratorTests
             await db.SaveChangesAsync();
         }
 
-        await h.Orchestrator.HealSpecsAsync(sid, [draftId]);
+        await h.Orchestrator.HealSpecsAsync(sid, [draftId], userContext: "Prefer role=button name=Save");
 
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
         while (DateTime.UtcNow < deadline)
@@ -529,7 +925,11 @@ public sealed class QaLoopOrchestratorTests
         private string DbPath { get; init; } = "";
         public string DataDir { get; init; } = "";
 
-        public static Harness Create(StubLlmClient llm)
+        public static Harness Create(
+            StubLlmClient llm,
+            IPlaywrightAgentService? playwright = null,
+            QaLoopOptions? qaLoop = null,
+            IPlaywrightRunner? playwrightRunner = null)
         {
             var dbPath  = Path.Combine(Path.GetTempPath(), $"qa_loop_{Guid.NewGuid():N}.db");
             var dataDir = Path.Combine(Path.GetTempPath(), $"qa_loop_data_{Guid.NewGuid():N}");
@@ -541,13 +941,22 @@ public sealed class QaLoopOrchestratorTests
                 .AddInterceptors(SqliteBusyTimeoutInterceptor.Instance));
             services.AddScoped<DatabaseInitializer>();
             services.AddSingleton<ITextSearchProvider, SqliteFts5Search>();
-            services.AddSingleton<IPlaywrightAgentService>(new StubPlaywrightAgentService(dataDir));
+            services.AddSingleton<IPlaywrightAgentService>(
+                playwright ?? new StubPlaywrightAgentService(dataDir));
+            // KBG-107: null stubs so the orchestrator degrades gracefully in tests (no FRS KB)
+            services.AddScoped<IFrsKbService, NullFrsKbService>();
+            services.AddScoped<IQaLoopCodeScanService, NullCodeScanService>();
             var provider = services.BuildServiceProvider();
 
             using (var scope = provider.CreateScope())
                 scope.ServiceProvider.GetRequiredService<DatabaseInitializer>().Initialize();
 
             var ado = new QaLoopAdoStub();
+            var opts = qaLoop ?? new QaLoopOptions { ScriptsFolderName = "scripts", RunsFolderName = "runs" };
+            // Ensure scripts land under this harness dataDir when caller only overrides timeout.
+            if (string.IsNullOrEmpty(opts.ScriptsFolderName)) opts.ScriptsFolderName = "scripts";
+            if (string.IsNullOrEmpty(opts.RunsFolderName)) opts.RunsFolderName = "runs";
+
             var orchestrator = new QaLoopOrchestrator(
                 provider.GetRequiredService<IServiceScopeFactory>(),
                 new EventBus(),
@@ -555,8 +964,9 @@ public sealed class QaLoopOrchestratorTests
                 new CancellationRegistry(),
                 ado,
                 new StubLlmClientFactory(llm),
+                playwrightRunner ?? new StubPlaywrightRunner(),
                 Options.Create(new StorageOptions { DataDirectory = dataDir, KnowledgebaseFolderName = "kb" }),
-                Options.Create(new QaLoopOptions { ScriptsFolderName = "scripts", RunsFolderName = "runs" }),
+                Options.Create(opts),
                 NullLogger<QaLoopOrchestrator>.Instance);
 
             return new Harness { Provider = provider, Orchestrator = orchestrator, Ado = ado, DbPath = dbPath, DataDir = dataDir };
@@ -736,33 +1146,85 @@ public sealed class QaLoopOrchestratorTests
         public Task<ILlmClient> CreateAsync(CancellationToken ct = default) => Task.FromResult(_client);
     }
 
+    private sealed class StubPlaywrightRunner : IPlaywrightRunner
+    {
+        public PlaywrightRunResult Result { get; set; } = new() { ExitCode = 0, Passed = 1 };
+        public PlaywrightRunSpec? LastSpec { get; private set; }
+
+        public Task<PlaywrightRunResult> RunAsync(PlaywrightRunSpec spec, string eventKey, CancellationToken ct = default)
+        {
+            LastSpec = spec;
+            return Task.FromResult(Result);
+        }
+
+        public Task<string?> RebuildReportAsync(PlaywrightRunSpec spec, string eventKey, CancellationToken ct = default)
+            => Task.FromResult<string?>(null);
+
+        public void DeleteRunArtifacts(int runId) { }
+    }
+
     private sealed class StubPlaywrightAgentService : IPlaywrightAgentService
     {
         private readonly string _dataDir;
-        public StubPlaywrightAgentService(string dataDir) => _dataDir = dataDir;
+        private readonly int _delayMs;
+        private int _concurrent;
+        public int MaxConcurrent { get; private set; }
+        public int CallCount { get; private set; }
+        public string? LastModuleRoute { get; private set; }
+        public HashSet<string> HangTitles { get; } = new(StringComparer.Ordinal);
+
+        public StubPlaywrightAgentService(string dataDir, int delayMs = 0)
+        {
+            _dataDir = dataDir;
+            _delayMs = delayMs;
+        }
 
         public async Task<string> GenerateScriptAsync(
             string caseTitle, string stepsJson, string bucket, int tcIdPending,
             IProgress<string>? progress, CancellationToken ct, string? moduleRoute = null)
         {
-            var dir = Path.Combine(_dataDir, "generated", "ui", bucket);
-            Directory.CreateDirectory(dir);
-            var slug = new string(caseTitle.ToLowerInvariant()
-                .Select(c => char.IsLetterOrDigit(c) ? c : '-').ToArray()).Trim('-');
-            var path = Path.Combine(dir, $"{slug}-{tcIdPending}.ui.spec.ts");
-            await File.WriteAllTextAsync(path, $"// stub spec for {caseTitle}", ct);
-            return path;
+            LastModuleRoute = moduleRoute;
+            CallCount++;
+            var current = Interlocked.Increment(ref _concurrent);
+            MaxConcurrent = Math.Max(MaxConcurrent, current);
+            try
+            {
+                if (HangTitles.Contains(caseTitle) || (_delayMs > 0 && HangTitles.Count == 0))
+                {
+                    // Hang until cancelled (timeout test) or delay (concurrency test).
+                    if (HangTitles.Contains(caseTitle))
+                        await Task.Delay(Timeout.Infinite, ct);
+                    else
+                        await Task.Delay(_delayMs, ct);
+                }
+
+                var dir = Path.Combine(_dataDir, "generated", "ui", bucket);
+                Directory.CreateDirectory(dir);
+                var slug = new string(caseTitle.ToLowerInvariant()
+                    .Select(c => char.IsLetterOrDigit(c) ? c : '-').ToArray()).Trim('-');
+                var path = Path.Combine(dir, $"{slug}-{tcIdPending}.ui.spec.ts");
+                await File.WriteAllTextAsync(path, $"// stub spec for {caseTitle}", ct);
+                return path;
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _concurrent);
+            }
         }
 
         public async Task HealAsync(
             string specFilePath, string failureMessage,
-            IProgress<string>? progress, CancellationToken ct)
+            IProgress<string>? progress, CancellationToken ct,
+            string? userContext = null)
         {
+            LastUserContext = userContext;
             var existing = File.Exists(specFilePath)
                 ? await File.ReadAllTextAsync(specFilePath, ct)
                 : "";
             await File.WriteAllTextAsync(specFilePath, existing + "\n// healed", ct);
         }
+
+        public string? LastUserContext { get; private set; }
     }
 
     /// <summary>Stub ADO client for QA Loop push tests: records write calls; reads throw unless
@@ -852,5 +1314,22 @@ public sealed class QaLoopOrchestratorTests
         public Task<IReadOnlyDictionary<int, int>> GetTestPointsAsync(int planId, int suiteId, IReadOnlyList<int> testCaseIds, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<AdoBuild>> GetPipelineBuildsAsync(int pipelineId, int? minBuildId = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<AdoBuildChange>> GetBuildChangesAsync(int buildId, CancellationToken ct = default) => throw new NotImplementedException();
+    }
+
+    // ── KBG-107: null stubs for new services (tests degrade gracefully without FRS) ─────────────
+    private sealed class NullFrsKbService : IFrsKbService
+    {
+        public Task<FrsModuleContext?> ResolveModuleAsync(string moduleName, int projectId, CancellationToken ct = default)
+            => Task.FromResult<FrsModuleContext?>(null);
+        public Task<IReadOnlyList<string>> ListSlugsAsync(int projectId, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<string>>([]);
+    }
+
+    private sealed class NullCodeScanService : IQaLoopCodeScanService
+    {
+        public Task<CodeScanBundle> ScanAsync(
+            string module, string repository, string branch,
+            FrsModuleContext? frsContext, string sessionKey, CancellationToken ct = default)
+            => Task.FromResult(new CodeScanBundle([], [], [], "none"));
     }
 }

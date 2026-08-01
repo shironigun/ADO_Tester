@@ -95,7 +95,7 @@ public sealed class KbExtractionService : IKbExtractionService
         var existing = await _kb.ListAsync(projectId, ct);
         foreach (var d in existing.Where(d => string.Equals(d.FileName, fileName, StringComparison.OrdinalIgnoreCase)))
             await _kb.DeleteAsync(d.Id, ct);
-        return await _kb.UploadAsync(projectId, fileName, markdown, ct);
+        return await _kb.UploadAsync(projectId, fileName, markdown, cancellationToken: ct);
     }
 
     // ── source gathering ───────────────────────────────────────────────────────

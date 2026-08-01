@@ -9,7 +9,8 @@ namespace QaAutomation.Core.Abstractions;
 public interface IKnowledgebaseService
 {
     Task<KnowledgebaseDocument> UploadAsync(
-        int projectId, string fileName, string markdown, CancellationToken cancellationToken = default);
+        int projectId, string fileName, string markdown,
+        string? folderPath = null, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<KnowledgebaseDocument>> ListAsync(
         int projectId, CancellationToken cancellationToken = default);
@@ -19,6 +20,16 @@ public interface IKnowledgebaseService
     /// <summary>Lexical (FTS5/BM25) retrieval of the most relevant chunks for a query.</summary>
     Task<IReadOnlyList<KnowledgebaseHit>> SearchAsync(
         int projectId, string query, int topK = 8, CancellationToken cancellationToken = default);
+
+    /// <summary>All documents whose FolderPath equals <paramref name="folderPath"/> or starts with
+    /// "folderPath/". Special case: empty string returns only root documents (FolderPath="" or NULL).</summary>
+    Task<IReadOnlyList<KnowledgebaseDocument>> GetDocumentsByFolderAsync(
+        int projectId, string folderPath, CancellationToken cancellationToken = default);
+
+    /// <summary>Exact match on FolderPath + FileName. Returns the latest by UploadedAt when duplicates exist.
+    /// Returns null when not found.</summary>
+    Task<KnowledgebaseDocument?> GetDocumentByPathAsync(
+        int projectId, string folderPath, string fileName, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Stubbed for an optional future semantic-retrieval upgrade. Not implemented in v1.</summary>

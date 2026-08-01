@@ -8,6 +8,7 @@ using QaAutomation.Core.Agents;
 using QaAutomation.Core.Configuration;
 using QaAutomation.Core.Contracts;
 using QaAutomation.Core.Models;
+using QaAutomation.Infrastructure.Agents;
 using QaAutomation.Infrastructure.Data;
 
 namespace QaAutomation.Api.Controllers;
@@ -17,6 +18,7 @@ namespace QaAutomation.Api.Controllers;
 public sealed class QaLoopController : ControllerBase
 {
     // Terminal statuses — sessions in these states do not block a new scan start.
+    // Note: ApiDone is NOT terminal (UI phase still running); Done/Failed/Cancelled are.
     private static readonly ApiSessionStatus[] TerminalStatuses =
         [ApiSessionStatus.Done, ApiSessionStatus.Failed, ApiSessionStatus.Cancelled];
 
@@ -25,13 +27,16 @@ public sealed class QaLoopController : ControllerBase
     private readonly QaDbContext _db;
     private readonly IAzureDevOpsClient _ado;
     private readonly IFrontendModuleService _frontendModules;
+    private readonly ILlmClientFactory _llmFactory;
     private readonly IOptions<QaLoopOptions> _opts;
+    private readonly IOptions<StorageOptions> _storage;
     private readonly IOptionsMonitor<AzureDevOpsOptions> _adoOptions;
     private readonly ILogger<QaLoopController> _log;
 
     public QaLoopController(
         IQaLoopOrchestrator orchestrator, IEventBus bus, QaDbContext db, IAzureDevOpsClient ado,
-        IFrontendModuleService frontendModules, IOptions<QaLoopOptions> opts,
+        IFrontendModuleService frontendModules, ILlmClientFactory llmFactory,
+        IOptions<QaLoopOptions> opts, IOptions<StorageOptions> storage,
         IOptionsMonitor<AzureDevOpsOptions> adoOptions, ILogger<QaLoopController> log)
     {
         _orchestrator = orchestrator;
@@ -39,7 +44,9 @@ public sealed class QaLoopController : ControllerBase
         _db = db;
         _ado = ado;
         _frontendModules = frontendModules;
+        _llmFactory = llmFactory;
         _opts = opts;
+        _storage = storage;
         _adoOptions = adoOptions;
         _log = log;
     }
@@ -282,11 +289,33 @@ public sealed class QaLoopController : ControllerBase
         catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
     }
 
+    [HttpPost("sessions/{sessionId:int}/rerun-ui-analysis")]
+    public async Task<IActionResult> RerunUiAnalysis(
+        int sessionId, [FromBody] RerunUiAnalysisRequest req, CancellationToken ct)
+    {
+        try
+        {
+            var session = await _db.ApiTestSessions.FindAsync([sessionId], ct);
+            if (session is null) return StatusCode(404, new { detail = "Session not found." });
+            if (session.UiStatus != ApiUiStatus.AwaitingUiAnalysisReview)
+                return StatusCode(409, new { detail = $"UiStatus must be AwaitingUiAnalysisReview (was {session.UiStatus})." });
+            await _orchestrator.RerunUiAnalysisAsync(sessionId, req.Feedback ?? "", ct);
+            return StatusCode(202, new AcceptedResponse { Started = true });
+        }
+        catch (InvalidOperationException e) { return StatusCode(404, new { detail = e.Message }); }
+        catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
+    }
+
     [HttpPost("sessions/{sessionId:int}/author-ui-cases")]
     public async Task<IActionResult> AuthorUiCases(int sessionId, CancellationToken ct)
     {
         try
         {
+            var session = await _db.ApiTestSessions.FindAsync([sessionId], ct);
+            if (session is null) return StatusCode(404, new { detail = "Session not found." });
+            // KBG-111: null = old Slab 2 session (backward-compat); AwaitingUiAnalysisReview = new flow.
+            if (session.UiStatus is not null && session.UiStatus != ApiUiStatus.AwaitingUiAnalysisReview)
+                return StatusCode(409, new { detail = $"UiStatus must be null or AwaitingUiAnalysisReview (was {session.UiStatus})." });
             await _orchestrator.AuthorUiCasesAsync(sessionId, ct);
             return StatusCode(202, new AcceptedResponse { Started = true });
         }
@@ -299,7 +328,36 @@ public sealed class QaLoopController : ControllerBase
     {
         try
         {
+            var session = await _db.ApiTestSessions.FindAsync([sessionId], ct);
+            if (session is null) return StatusCode(404, new { detail = "Session not found." });
+            if (session.UiStatus != ApiUiStatus.AwaitingReview)
+                return StatusCode(409, new { detail = $"UiStatus must be AwaitingReview (was {session.UiStatus})." });
             await _orchestrator.GenerateUiScriptsAsync(sessionId, ct);
+            return StatusCode(202, new AcceptedResponse { Started = true });
+        }
+        catch (InvalidOperationException e) { return StatusCode(404, new { detail = e.Message }); }
+        catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
+    }
+
+    [HttpPost("sessions/{sessionId:int}/run-ui-scripts")]
+    public async Task<IActionResult> RunUiScripts(int sessionId, CancellationToken ct)
+    {
+        try
+        {
+            var session = await _db.ApiTestSessions.FindAsync([sessionId], ct);
+            if (session is null) return StatusCode(404, new { detail = "Session not found." });
+            if (string.IsNullOrWhiteSpace(_opts.Value.PlaywrightRoot))
+                return StatusCode(400, new { detail = "PlaywrightRoot is not configured. Set AUTOMATION_PLAYWRIGHT_ROOT before running UI scripts." });
+            if (session.UiStatus == ApiUiStatus.RunningUiScripts)
+                return StatusCode(409, new { detail = "UI scripts are already running." });
+            var approvedCount = await _db.ApiTestDrafts.CountAsync(d =>
+                d.SessionId == sessionId
+                && d.DraftKind == ApiDraftKind.UiScript
+                && d.Status == ApiDraftStatus.Approved
+                && d.SpecFilePath != null && d.SpecFilePath != "", ct);
+            if (approvedCount == 0)
+                return StatusCode(400, new { detail = "No approved UiScript drafts with SpecFilePath to run." });
+            await _orchestrator.RunUiScriptsAsync(sessionId, ct);
             return StatusCode(202, new AcceptedResponse { Started = true });
         }
         catch (InvalidOperationException e) { return StatusCode(404, new { detail = e.Message }); }
@@ -314,8 +372,54 @@ public sealed class QaLoopController : ControllerBase
             return StatusCode(400, new { detail = "draftIds must be a non-empty array." });
         try
         {
-            await _orchestrator.HealSpecsAsync(sessionId, req.DraftIds, ct);
+            await _orchestrator.HealSpecsAsync(sessionId, req.DraftIds, req.UserContext, ct);
             return StatusCode(202, new AcceptedResponse { Started = true });
+        }
+        catch (InvalidOperationException e) { return StatusCode(404, new { detail = e.Message }); }
+        catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
+    }
+
+    [HttpPost("sessions/{sessionId:int}/explain-failure")]
+    public async Task<IActionResult> ExplainFailure(
+        int sessionId, [FromBody] ExplainFailureRequest req, CancellationToken ct)
+    {
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(30));
+            var linked = timeoutCts.Token;
+
+            var draft = await _db.ApiTestDrafts.FindAsync([req.DraftId], linked);
+            if (draft is null || draft.SessionId != sessionId)
+                return StatusCode(404, new { detail = "Draft not found." });
+            if (draft.DraftKind != ApiDraftKind.UiScript)
+                return StatusCode(400, new { detail = "Draft must be a UiScript." });
+            if (string.IsNullOrWhiteSpace(draft.ErrorMessage))
+                return StatusCode(400, new { detail = "Draft has no ErrorMessage to explain." });
+
+            var session = await _db.ApiTestSessions.FindAsync([sessionId], linked);
+            if (session is null) return StatusCode(404, new { detail = "Session not found." });
+
+            string? screenshotDir = null;
+            if (session.LastUiRunId is int runId)
+            {
+                var candidate = Path.Combine(
+                    _storage.Value.DataDirectory,
+                    _opts.Value.RunsFolderName,
+                    runId.ToString());
+                if (Directory.Exists(candidate))
+                    screenshotDir = candidate;
+            }
+
+            var llm = await _llmFactory.CreateAsync(linked);
+            var explanation = await new QaLoopFailureAnalystAgent(llm)
+                .ExplainAsync(draft.ErrorMessage!, draft.Title, draft.StepsJson, screenshotDir, linked);
+
+            return Ok(new ExplainFailureResponse(draft.Id, explanation));
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return StatusCode(504, new { detail = "Explain-failure timed out after 30s." });
         }
         catch (InvalidOperationException e) { return StatusCode(404, new { detail = e.Message }); }
         catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
@@ -366,6 +470,32 @@ public sealed class QaLoopController : ControllerBase
                 Total = total,
                 Items = sessions.Select(s => ApiSessionSummary.From(s, draftCounts.GetValueOrDefault(s.Id))).ToList(),
             });
+        }
+        catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
+    }
+
+    // ── KBG-108: frs-modules + ui-suite ─────────────────────────────────────────
+
+    [HttpGet("{projectId:int}/frs-modules")]
+    public async Task<IActionResult> GetFrsModules(
+        int projectId, [FromServices] IFrsKbService frsKb, CancellationToken ct)
+    {
+        try { return Ok(await frsKb.ListSlugsAsync(projectId, ct)); }
+        catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
+    }
+
+    [HttpPatch("sessions/{sessionId:int}/ui-suite")]
+    public async Task<IActionResult> PatchUiSuite(
+        int sessionId, [FromBody] PatchUiSuiteRequest req, CancellationToken ct)
+    {
+        try
+        {
+            var session = await _db.ApiTestSessions.FindAsync([sessionId], ct);
+            if (session is null) return StatusCode(404, new { detail = "Session not found." });
+            session.UiTestSuiteId = req.SuiteId;
+            session.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(ct);
+            return Ok();
         }
         catch (Exception e) { return StatusCode(500, new { detail = e.Message }); }
     }

@@ -154,6 +154,8 @@ public sealed class HealSpecsRequest
 {
     /// <summary>IDs of the UiScript drafts to heal. Each draft's ErrorMessage is used as the failure input.</summary>
     public int[] DraftIds { get; set; } = [];
+    /// <summary>Optional user context appended to the failure message before healing (KBG-108).</summary>
+    public string? UserContext { get; set; }
 }
 
 public sealed class ApiSessionDetail
@@ -183,6 +185,11 @@ public sealed class ApiSessionDetail
     public string? ErrorMessage { get; set; }
     public bool AutoHandoff { get; set; }
     public bool ActivityEnabled { get; set; }
+    // KBG-108: KB-grounded fields (KbContextJson + CodeScanJson excluded — too large)
+    public string? FrsSlug { get; set; }
+    public string? UiAnalysisJson { get; set; }
+    public int? UiTestSuiteId { get; set; }
+    public int? LastUiRunId { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public IReadOnlyList<ApiTestDraftDto> Drafts { get; set; } = [];
@@ -199,7 +206,24 @@ public sealed class ApiSessionDetail
         AdditionalContext = s.AdditionalContext, GenerateContext = s.GenerateContext, LastFeedback = s.LastFeedback,
         HasUiPhase = s.HasUiPhase, UiStatus = s.UiStatus?.ToString(),
         ErrorMessage = s.ErrorMessage, AutoHandoff = s.AutoHandoff, ActivityEnabled = s.ActivityEnabled,
+        // KBG-108: KB-grounded fields
+        FrsSlug = s.FrsSlug, UiAnalysisJson = s.UiAnalysisJson,
+        UiTestSuiteId = s.UiTestSuiteId, LastUiRunId = s.LastUiRunId,
         CreatedAt = s.CreatedAt, UpdatedAt = s.UpdatedAt,
         Drafts = drafts.OrderBy(d => d.SortOrder).Select(ApiTestDraftDto.From).ToList(),
     };
 }
+
+// ── KBG-108: new request/response contracts ───────────────────────────────────
+
+/// <summary>Body for POST sessions/{id}/rerun-ui-analysis.</summary>
+public sealed record RerunUiAnalysisRequest(string Feedback);
+
+/// <summary>Body for POST sessions/{id}/explain-failure.</summary>
+public sealed record ExplainFailureRequest(int DraftId);
+
+/// <summary>Response from POST sessions/{id}/explain-failure.</summary>
+public sealed record ExplainFailureResponse(int DraftId, string Explanation);
+
+/// <summary>Body for PATCH sessions/{id}/ui-suite.</summary>
+public sealed record PatchUiSuiteRequest(int? SuiteId);

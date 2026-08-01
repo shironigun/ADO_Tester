@@ -74,6 +74,11 @@ export interface ApiSessionDetail extends SessionDetail {
   lastFeedback?: string | null
   hasUiPhase: boolean
   uiStatus?: string | null
+  // KBG-108: KB-grounded fields
+  frsSlug?: string | null
+  uiAnalysisJson?: string | null
+  uiTestSuiteId?: number | null
+  lastUiRunId?: number | null
 }
 
 export interface ApiTestDraftDto {
@@ -85,7 +90,9 @@ export interface ApiTestDraftDto {
   preconditions: string
   stepsJson: string | null
   specCode: string | null
+  specFilePath?: string | null
   adoTestCaseId: number | null
+  errorMessage?: string | null
   tags: string[]
   sourceRoutes: string[]
   draftKind?: string | null
@@ -201,8 +208,33 @@ export async function generateUiScripts(id: number): Promise<void> {
   await api.post(`/api/qaloop/sessions/${id}/generate-ui-scripts`, {})
 }
 
-export async function healSpecs(id: number, draftIds: number[]): Promise<void> {
-  await api.post(`/api/qaloop/sessions/${id}/heal-specs`, { draftIds })
+export async function healSpecs(id: number, draftIds: number[], userContext?: string): Promise<void> {
+  await api.post(`/api/qaloop/sessions/${id}/heal-specs`, { draftIds, userContext })
+}
+
+// ── KBG-108: new endpoints ─────────────────────────────────────────────────────
+
+export async function getFrsModules(projectId: number): Promise<string[]> {
+  const { data } = await api.get<string[]>(`/api/qaloop/${projectId}/frs-modules`)
+  return data
+}
+
+export async function patchUiSuite(id: number, suiteId: number | null): Promise<void> {
+  await api.patch(`/api/qaloop/sessions/${id}/ui-suite`, { suiteId })
+}
+
+export async function rerunUiAnalysis(id: number, feedback: string): Promise<void> {
+  await api.post(`/api/qaloop/sessions/${id}/rerun-ui-analysis`, { feedback })
+}
+
+export async function runUiScripts(id: number): Promise<void> {
+  await api.post(`/api/qaloop/sessions/${id}/run-ui-scripts`, {})
+}
+
+export async function explainFailure(id: number, draftId: number): Promise<{ draftId: number; explanation: string }> {
+  const { data } = await api.post<{ draftId: number; explanation: string }>(
+    `/api/qaloop/sessions/${id}/explain-failure`, { draftId })
+  return data
 }
 
 export const sessionStreamUrl = (id: number) => apiUrl(`/api/qaloop/sessions/${id}/stream`)

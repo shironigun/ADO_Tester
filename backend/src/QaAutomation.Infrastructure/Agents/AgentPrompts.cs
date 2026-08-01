@@ -62,6 +62,17 @@ internal static class AgentPrompts
     /// <summary>UI case author: module inventory → manual browser test cases with bucket assignments (JSON array).</summary>
     public static string UiCaseAuthorSystem { get; } = Load("ui_case_author_system.txt");
 
+    // ── QA Loop FRS-grounded UI phase prompts (authored from scratch — NOT Python ports) ──
+
+    /// <summary>UI Analyst: FRS module brief + frontend files → QaLoopUiAnalystOutput (JSON).</summary>
+    public static string QaLoopUiAnalystSystem { get; } = Load("qa_loop_ui_analyst_system.txt");
+
+    /// <summary>UI Case Author: QaLoopUiAnalystOutput → bucket-tagged manual UI cases (JSON array).</summary>
+    public static string QaLoopUiCaseAuthorSystem { get; } = Load("qa_loop_ui_case_author_system.txt");
+
+    /// <summary>Failure Analyst: Playwright error + case steps → plain-English explanation.</summary>
+    public static string QaLoopFailureAnalystSystem { get; } = Load("qa_loop_failure_analyst_system.txt");
+
     private static string Load(string fileName)
     {
         var asm = typeof(AgentPrompts).Assembly;

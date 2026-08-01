@@ -4,6 +4,26 @@ Newest entries first.
 
 ---
 
+## 2026-08-01
+
+### feat(qa-loop): FRS Knowledge Base–grounded redesign + UI Phase v2
+QA Loop now retrieves an uploaded FRS KB (folder-preserving upload), runs a shared atlas-seeded
+code scan, and grounds the API analyst in module/RULES context. After API push (`ApiDone`), an
+optional UI Phase runs a dedicated UI Analyst → case author → Playwright scripts → inline
+execution → explain/heal path (agents separate from Author Tests).
+- New session columns: `FrsSlug`, `KbContextJson`, `CodeScanJson`, `UiAnalysisJson`, `UiTestSuiteId`,
+  `LastUiRunId`; statuses `RetrievingKb` / `Scanning` / `ApiDone` and UI `AnalyzingUi` /
+  `AwaitingUiAnalysisReview` / `RunningUiScripts`.
+- Endpoints: `frs-modules`, `ui-suite`, `rerun-ui-analysis`, `run-ui-scripts`, `explain-failure`;
+  heal accepts `userContext`; author/generate guards tightened.
+- Frontend: KB folder tree upload; UiPhasePanel state machine (analysis review, Run Scripts,
+  ExplainFailureCard).
+- Verified with full backend test suite and a clean frontend production build. Live ADO verification
+  pending (expired PAT). See
+  [`docs/features/qa-loop-frs-grounded.md`](../features/qa-loop-frs-grounded.md).
+
+---
+
 ## 2026-07-30
 
 ### feat(qa-loop): discover nested module sources from the selected branch
