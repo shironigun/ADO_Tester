@@ -424,8 +424,8 @@ public sealed class LeadsScanSeeder
 
         var sb = new StringBuilder();
         sb.Append("import { test, expect } from '@playwright/test';\n\n");
-        sb.Append("const BASE = process.env.LEAD_API_BASE_URL ?? 'https://localhost:7071';\n");
-        sb.Append("const TOKEN = process.env.LEAD_API_TOKEN ?? '';\n\n");
+        sb.Append("const BASE = process.env.AUTOMATION_BASE_URL ?? '';\n");
+        sb.Append("const TOKEN = process.env.AUTOMATION_BEARER_TOKEN ?? '';\n\n");
         sb.Append("test.describe('Endpoint: " + e.Method + " " + e.Route + "', () => {\n");
         for (var i = 0; i < cases.Count; i++)
         {
@@ -455,8 +455,8 @@ public sealed class LeadsScanSeeder
     {
         var sb = new StringBuilder();
         sb.Append("import { test, expect } from '@playwright/test';\n\n");
-        sb.Append("const BASE = process.env.LEAD_API_BASE_URL ?? 'https://localhost:7071';\n");
-        sb.Append("const TOKEN = process.env.LEAD_API_TOKEN ?? '';\n\n");
+        sb.Append("const BASE = process.env.AUTOMATION_BASE_URL ?? '';\n");
+        sb.Append("const TOKEN = process.env.AUTOMATION_BEARER_TOKEN ?? '';\n\n");
         sb.Append("test('[<tcId-pending>] Workflow: " + w.Name + "', async ({ request }) => {\n");
         for (var i = 0; i < w.Steps.Length; i++)
         {

@@ -6,6 +6,15 @@ Newest entries first.
 
 ## 2026-08-01
 
+### fix(qa-loop): shared API auth + UI storageState + auto-heal on run
+- Renamed `LEAD_API_BASE_URL` → `AUTOMATION_API_BASE_URL` (legacy fallback kept).
+- API Playwright runs always use the shared host + minted bearer (no DMS profile host/static token);
+  child env also sets `BASE_URL`.
+- UI runs (`IsUiRun`): app `baseURL`, `scripts/fixtures/auth.setup.ts` globalSetup/`storageState`
+  (Not Now dismiss, 30m reuse), 90s timeout.
+- Run Scripts auto-heals failed UI specs (keep `Approved`, max 3 re-runs); Heal button removed from UI.
+- See [`docs/features/qa-loop-ui-phase.md`](../features/qa-loop-ui-phase.md).
+
 ### feat(qa-loop): FRS Knowledge Base–grounded redesign + UI Phase v2
 QA Loop now retrieves an uploaded FRS KB (folder-preserving upload), runs a shared atlas-seeded
 code scan, and grounds the API analyst in module/RULES context. After API push (`ApiDone`), an

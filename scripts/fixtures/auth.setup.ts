@@ -1,12 +1,14 @@
 // Playwright global-setup: logs in to the app under test and saves storageState for reuse by
-// UI specs (execution) and the Playwright agents (script generation). Run once before a UI phase;
-// re-run when auth expires. Exits gracefully if env vars are not set (non-UI runs stay unaffected).
+// UI specs (execution) and the Playwright agents (script generation). Skips re-login when a
+// fresh storageState.json already exists (< 30 minutes). Exits gracefully if env vars are not set.
 import { chromium } from '@playwright/test'
+import fs from 'fs'
 import path from 'path'
 
 const appUrl      = process.env.AUTOMATION_APP_URL      ?? ''
 const appUsername = process.env.AUTOMATION_APP_USERNAME ?? ''
 const appPassword = process.env.AUTOMATION_APP_PASSWORD ?? ''
+const MAX_AGE_MS  = 30 * 60 * 1000
 
 export default async function globalSetup(): Promise<void> {
   if (!appUrl || !appUsername || !appPassword) {
@@ -14,6 +16,17 @@ export default async function globalSetup(): Promise<void> {
       '[auth.setup] AUTOMATION_APP_URL / _USERNAME / _PASSWORD not set — skipping login.',
     )
     return
+  }
+
+  const storageStatePath = path.join(__dirname, 'storageState.json')
+  try {
+    const st = fs.statSync(storageStatePath)
+    if (Date.now() - st.mtimeMs < MAX_AGE_MS) {
+      console.log(`[auth.setup] reusing fresh storageState (${storageStatePath})`)
+      return
+    }
+  } catch {
+    // missing / unreadable — mint a new one
   }
 
   const browser = await chromium.launch()
@@ -35,7 +48,6 @@ export default async function globalSetup(): Promise<void> {
     // Modal not shown for this account / already dismissed.
   }
 
-  const storageStatePath = path.join(__dirname, 'storageState.json')
   await page.context().storageState({ path: storageStatePath })
   console.log(`[auth.setup] storageState saved to ${storageStatePath}`)
 

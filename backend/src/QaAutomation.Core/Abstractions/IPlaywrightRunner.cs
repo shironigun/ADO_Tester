@@ -36,6 +36,10 @@ public sealed class PlaywrightRunSpec
     /// <summary>Scripts Board (QLV2-303): overrides the AUTOMATION_WORKERS env default when set. Null
     /// (the QA Runs default) preserves today's env-driven worker count exactly.</summary>
     public int? Workers { get; init; }
+    /// <summary>When true, Playwright config targets the app under test (AUTOMATION_APP_URL) with
+    /// storageState from scripts/fixtures — not the API host. Set for QA Loop UI script runs and
+    /// Scripts Board executions of <c>.ui.spec.ts</c> files.</summary>
+    public bool IsUiRun { get; init; }
 }
 
 /// <summary>Outcome of a Playwright run.</summary>

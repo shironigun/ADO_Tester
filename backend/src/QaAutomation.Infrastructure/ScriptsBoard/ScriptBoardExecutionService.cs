@@ -90,6 +90,9 @@ public sealed class ScriptBoardExecutionService : IScriptBoardExecutionService
         try
         {
             var paths = JsonSerializer.Deserialize<List<string>>(run.SpecFilePathsJson) ?? [];
+            var isUi = paths.Any(p => p.EndsWith(".ui.spec.ts", StringComparison.OrdinalIgnoreCase)
+                || p.Contains($"{Path.DirectorySeparatorChar}ui{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
+                || p.Contains("/ui/", StringComparison.OrdinalIgnoreCase));
             var spec = new PlaywrightRunSpec
             {
                 RunId = -runId,
@@ -98,6 +101,8 @@ public sealed class ScriptBoardExecutionService : IScriptBoardExecutionService
                 Headed = run.Headed,
                 Workers = run.Workers,
                 ActivityEnabled = true,
+                IsUiRun = isUi,
+                EnableCapture = isUi,
             };
             var result = await _runner.RunWithLiveTermAsync(spec, eventKey, ct);
 

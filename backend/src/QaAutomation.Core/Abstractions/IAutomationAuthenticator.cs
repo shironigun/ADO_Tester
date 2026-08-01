@@ -10,6 +10,9 @@ public interface IAutomationAuthenticator
     /// <summary>The API base URL to target (AUTOMATION_BASE_URL) — same for every DMS. Null if unset.</summary>
     string? ApiBaseUrl { get; }
 
+    /// <summary>True when Web API mint host + AUTH_* credentials are configured.</summary>
+    bool IsConfigured { get; }
+
     /// <summary>Mint (or return a cached) bearer token. Returns null if auth is not configured or fails.</summary>
     Task<string?> GetBearerTokenAsync(bool forceRefresh = false, CancellationToken ct = default);
 }

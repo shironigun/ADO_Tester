@@ -29,7 +29,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility'
 import {
   startScan, listSessionsPage, getSessionDetail, saveAnalysis, generateDrafts, patchDraft,
   approveAllDrafts, pushSession, updateSessionPlan, cancelSession, deleteSession, sessionStreamUrl, listFrontendModules, LEVEL_NAMES,
-  rerunAnalyze, refineDrafts, authorUiCases, generateUiScripts, healSpecs,
+  rerunAnalyze, refineDrafts, authorUiCases, generateUiScripts,
   patchUiSuite, rerunUiAnalysis, runUiScripts, explainFailure,
   type ApiSessionDetail, type ApiTestDraftDto, type ScanStartRequest, type SurfaceRow,
   type FrontendModule, type ApiDraftFeedback,
@@ -719,7 +719,7 @@ function parseUiAnalysis(json: string | null | undefined): UiAnalystOutput | nul
 }
 
 function ExplainFailureCard({
-  sessionId, draft, refetch, onError,
+  sessionId, draft, onError,
 }: {
   sessionId: number
   draft: ApiTestDraftDto
@@ -728,8 +728,6 @@ function ExplainFailureCard({
 }) {
   const [explanation, setExplanation] = useState<string | null>(null)
   const [explaining, setExplaining] = useState(false)
-  const [healCtx, setHealCtx] = useState('')
-  const [healing, setHealing] = useState(false)
 
   async function doExplain() {
     setExplaining(true)
@@ -738,16 +736,6 @@ function ExplainFailureCard({
       setExplanation(res.explanation)
     } catch (e) { onError(e, 'Failed to explain failure') }
     finally { setExplaining(false) }
-  }
-
-  async function doHeal() {
-    setHealing(true)
-    try {
-      await healSpecs(sessionId, [draft.id], healCtx.trim() || undefined)
-      setExplanation(null)
-      refetch()
-    } catch (e) { onError(e, 'Failed to heal spec') }
-    finally { setHealing(false) }
   }
 
   return (
@@ -764,25 +752,18 @@ function ExplainFailureCard({
       {explanation && (
         <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{explanation}</Typography>
       )}
-      <TextField
-        size="small" multiline minRows={2} fullWidth
-        label="Heal context (optional)"
-        value={healCtx} onChange={e => setHealCtx(e.target.value)}
-        helperText="Hints for the healer agent — selectors, data, known UI quirks"
-      />
-      <Stack direction="row" spacing={1}>
-        <Button size="small" variant="contained" color="warning" onClick={doHeal} disabled={healing}
-          startIcon={healing ? <CircularProgress size={12} /> : undefined}>
-          {healing ? 'Healing…' : 'Heal'}
-        </Button>
-        {draft.adoTestCaseId != null && (
-          <Tooltip title={`File a bug linked to TC #${draft.adoTestCaseId} (after push)`}>
+      <Typography variant="caption" color="text.secondary">
+        Failed UI specs are auto-healed and re-run (up to 3 attempts) when you click Run Scripts.
+      </Typography>
+      {draft.adoTestCaseId != null && (
+        <Tooltip title={`File a bug linked to TC #${draft.adoTestCaseId} (after push)`}>
+          <span>
             <Button size="small" variant="outlined" color="error" disabled>
               Draft Bug
             </Button>
-          </Tooltip>
-        )}
-      </Stack>
+          </span>
+        </Tooltip>
+      )}
     </Stack>
   )
 }

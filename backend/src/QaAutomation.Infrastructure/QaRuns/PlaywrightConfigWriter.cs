@@ -13,7 +13,8 @@ internal static class PlaywrightConfigWriter
         string scriptsDir,
         string runtimeDir,
         string reportProvider,
-        Action<Exception> onLinkFailure)
+        Action<Exception> onLinkFailure,
+        string? fixturesDir = null)
     {
         // When explicit SpecFilePaths are provided (API scripts under scripts/{module}/… OR UI
         // scripts under {PlaywrightRoot}/generated/ui/…), derive testDir from those files so
@@ -54,20 +55,31 @@ internal static class PlaywrightConfigWriter
         var captureOpts = spec.EnableCapture ? ", screenshot: 'only-on-failure', trace: 'on-first-retry'" : "";
         var headedOpts = spec.Headed ? ", headless: false" : "";
         var workersExpr = spec.Workers is int w ? w.ToString() : "Number(process.env.AUTOMATION_WORKERS ?? '6')";
+        var timeoutMs = spec.IsUiRun ? "90_000" : "30_000";
+
+        string globalSetupLine = "";
+        string storageStateOpt = "";
+        if (spec.IsUiRun && !string.IsNullOrWhiteSpace(fixturesDir))
+        {
+            var setupPath = EscPath(Path.Combine(fixturesDir, "auth.setup.ts"));
+            var statePath = EscPath(Path.Combine(fixturesDir, "storageState.json"));
+            globalSetupLine = $"\n  globalSetup: '{setupPath}',";
+            storageStateOpt = $", storageState: '{statePath}'";
+        }
 
         var config = $$"""
             import { defineConfig } from '@playwright/test';
             import path from 'path';
             export default defineConfig({
-              testDir: '{{testDir}}',{{testMatchLine}}
-              timeout: 30_000,
+              testDir: '{{testDir}}',{{testMatchLine}}{{globalSetupLine}}
+              timeout: {{timeoutMs}},
               globalTimeout: Number(process.env.AUTOMATION_GLOBAL_TIMEOUT_MS ?? '900000'),
               expect: { timeout: 10_000 },
               fullyParallel: false,
               workers: {{workersExpr}},
               retries: 0,
               reporter: [['junit', { outputFile: 'junit.xml' }], ['json', { outputFile: 'results.json' }], ['allure-playwright', { resultsDir: 'allure-results' }]{{htmlReporter}}],
-              use: { baseURL: process.env.BASE_URL ?? 'http://localhost'{{captureOpts}}{{headedOpts}} },
+              use: { baseURL: process.env.BASE_URL ?? 'http://localhost'{{storageStateOpt}}{{captureOpts}}{{headedOpts}} },
               projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
             });
             """;

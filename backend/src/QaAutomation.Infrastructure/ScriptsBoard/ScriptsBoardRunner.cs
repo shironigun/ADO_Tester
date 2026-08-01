@@ -34,7 +34,18 @@ public sealed class ScriptsBoardRunner : IScriptsBoardRunner
     public async Task<PlaywrightRunResult> RunWithLiveTermAsync(
         PlaywrightRunSpec spec, string eventKey, CancellationToken ct = default)
     {
-        var (baseUrl, bearerToken) = await _playwrightRunner.PrepareExternalRunAsync(spec, eventKey, ct);
+        string? baseUrl;
+        string? bearerToken;
+        try
+        {
+            (baseUrl, bearerToken) = await _playwrightRunner.PrepareExternalRunAsync(spec, eventKey, ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Publish(eventKey, EventKinds.Error, "run", ex.Message, EventLevels.Error);
+            return new PlaywrightRunResult { ExitCode = 1 };
+        }
+
         if (spec.SpecFilePaths.Count == 0 && spec.GrepTags.Count == 0)
             return new PlaywrightRunResult { ExitCode = 1 };
 
@@ -45,7 +56,8 @@ public sealed class ScriptsBoardRunner : IScriptsBoardRunner
         PlaywrightConfigWriter.WriteRunConfig(
             runDir, spec, _playwrightRunner.ScriptsDirectory, _playwrightRunner.RuntimeDirectory,
             _playwrightRunner.ReportProvider,
-            ex => _log.LogWarning(ex, "Could not link node_modules; Playwright may re-install"));
+            ex => _log.LogWarning(ex, "Could not link node_modules; Playwright may re-install"),
+            fixturesDir: spec.IsUiRun ? _playwrightRunner.FixturesDirectory : null);
 
         var testOutputDir = Path.Combine(runDir, "test-output");
         var args = spec.SpecFilePaths.Count > 0
@@ -60,7 +72,7 @@ public sealed class ScriptsBoardRunner : IScriptsBoardRunner
         int exitCode;
         try
         {
-            exitCode = await SpawnWithRawTerminalAsync("npx", args, runDir, spec.Profile, baseUrl, bearerToken, eventKey, ct);
+            exitCode = await SpawnWithRawTerminalAsync("npx", args, runDir, spec, baseUrl, bearerToken, eventKey, ct);
         }
         finally
         {
@@ -94,7 +106,7 @@ public sealed class ScriptsBoardRunner : IScriptsBoardRunner
         string exe,
         string args,
         string workDir,
-        string? profile,
+        PlaywrightRunSpec spec,
         string? baseUrl,
         string? bearerToken,
         string eventKey,
@@ -109,7 +121,11 @@ public sealed class ScriptsBoardRunner : IScriptsBoardRunner
             UseShellExecute = false,
             CreateNoWindow = true,
         };
-        PlaywrightRunner.ApplyAutomationEnv(psi.Environment, profile, baseUrl, bearerToken);
+        var qa = _playwrightRunner.QaLoopOptions.CurrentValue;
+        PlaywrightRunner.ApplyAutomationEnv(psi.Environment, spec.Profile, baseUrl, bearerToken,
+            appUrl: spec.IsUiRun ? qa.AppUrl : null,
+            appUsername: spec.IsUiRun ? qa.AppUsername : null,
+            appPassword: spec.IsUiRun ? qa.AppPassword : null);
         psi.Environment["FORCE_COLOR"] = "1";
 
         using var process = new Process { StartInfo = psi };

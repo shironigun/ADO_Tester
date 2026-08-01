@@ -542,60 +542,121 @@ public sealed class QaLoopOrchestrator : IQaLoopOrchestrator
                 return;
             }
 
-            var runId = session.Id * 10_000
-                + (session.LastUiRunId is null ? 1 : session.LastUiRunId.Value % 10_000 + 1);
-            session.LastUiRunId = runId;
-            session.UpdatedAt = DateTime.UtcNow;
-            await db.SaveChangesAsync(ct);
+            var playwright = scope.ServiceProvider.GetRequiredService<IPlaywrightAgentService>();
+            const int maxAttempts = 3;
+            var pending = runnable.ToList();
+            PlaywrightRunResult? lastResult = null;
+            var cumulativePassed = 0;
+            var cumulativeFailed = 0;
+            var cumulativeSkipped = 0;
 
-            var spec = new PlaywrightRunSpec
+            for (var attempt = 1; attempt <= maxAttempts && pending.Count > 0; attempt++)
             {
-                RunId = runId,
-                SpecFilePaths = runnable.Select(d => d.SpecFilePath!).ToList(),
-                EnableCapture = true,
-                Headed = false,
-                Workers = null,
-                Module = session.FrsSlug ?? session.Module,
-                ActivityEnabled = session.ActivityEnabled,
-            };
+                var runId = session.Id * 10_000
+                    + (session.LastUiRunId is null ? 1 : session.LastUiRunId.Value % 10_000 + 1);
+                session.LastUiRunId = runId;
+                session.UpdatedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync(ct);
 
-            // PlaywrightRunner acquires PipelineConcurrency.Gate internally.
-            var result = await _playwrightRunner.RunAsync(spec, key, ct);
-
-            var failedByKey = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var failure in result.FailedTests)
-            {
-                var resolved = ResolveJUnitSpecPath(failure.SpecFilePath);
-                if (resolved is null) continue;
-                var sk = SpecFileKey(resolved);
-                failedByKey[sk] = failure.ErrorMessage ?? "Test failed";
-            }
-
-            var now = DateTime.UtcNow;
-            foreach (var draft in runnable)
-            {
-                var sk = SpecFileKey(draft.SpecFilePath!);
-                var fileName = Path.GetFileName(draft.SpecFilePath!);
-                if (failedByKey.TryGetValue(sk, out var err))
+                var spec = new PlaywrightRunSpec
                 {
-                    draft.ErrorMessage = err;
-                    draft.UpdatedAt = now;
-                    Pub(key, EventKinds.Result, EventPhases.RunUi,
-                        $"Spec {fileName}: failed", EventLevels.Warn);
-                }
-                else
+                    RunId = runId,
+                    SpecFilePaths = pending.Select(d => d.SpecFilePath!).ToList(),
+                    EnableCapture = true,
+                    Headed = false,
+                    Workers = null,
+                    Module = session.FrsSlug ?? session.Module,
+                    ActivityEnabled = session.ActivityEnabled,
+                    IsUiRun = true,
+                };
+
+                Pub(key, EventKinds.Phase, EventPhases.RunUi,
+                    attempt == 1
+                        ? $"UI Playwright attempt {attempt}/{maxAttempts} · {pending.Count} spec(s)"
+                        : $"UI Playwright re-run attempt {attempt}/{maxAttempts} · {pending.Count} failed spec(s)");
+
+                // PlaywrightRunner acquires PipelineConcurrency.Gate internally.
+                lastResult = await _playwrightRunner.RunAsync(spec, key, ct);
+
+                var failedByKey = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var failure in lastResult.FailedTests)
                 {
-                    draft.ErrorMessage = null;
-                    draft.UpdatedAt = now;
-                    Pub(key, EventKinds.Result, EventPhases.RunUi,
-                        $"Spec {fileName}: passed", EventLevels.Success);
+                    var resolved = ResolveJUnitSpecPath(failure.SpecFilePath);
+                    if (resolved is null) continue;
+                    failedByKey[SpecFileKey(resolved)] = failure.ErrorMessage ?? "Test failed";
                 }
+
+                var now = DateTime.UtcNow;
+                var stillFailing = new List<ApiTestDraft>();
+                foreach (var draft in pending)
+                {
+                    var sk = SpecFileKey(draft.SpecFilePath!);
+                    var fileName = Path.GetFileName(draft.SpecFilePath!);
+                    if (failedByKey.TryGetValue(sk, out var err))
+                    {
+                        draft.ErrorMessage = err;
+                        draft.UpdatedAt = now;
+                        Pub(key, EventKinds.Result, EventPhases.RunUi,
+                            $"Spec {fileName}: failed", EventLevels.Warn);
+                        stillFailing.Add(draft);
+                    }
+                    else
+                    {
+                        draft.ErrorMessage = null;
+                        draft.UpdatedAt = now;
+                        Pub(key, EventKinds.Result, EventPhases.RunUi,
+                            $"Spec {fileName}: passed", EventLevels.Success);
+                        cumulativePassed++;
+                    }
+                }
+
+                cumulativeFailed = stillFailing.Count;
+                cumulativeSkipped = lastResult.Skipped;
+
+                if (stillFailing.Count == 0 || attempt == maxAttempts)
+                {
+                    pending = stillFailing;
+                    break;
+                }
+
+                // Auto-heal failed specs in place; keep Approved so the next attempt can re-run.
+                Pub(key, EventKinds.Phase, "ui-heal",
+                    $"Auto-healing {stillFailing.Count} failed spec(s) before re-run");
+                foreach (var draft in stillFailing)
+                {
+                    try
+                    {
+                        var healMsg = $"{draft.Title}\n{draft.ErrorMessage}";
+                        await playwright.HealAsync(draft.SpecFilePath!, healMsg, progress: null, ct: ct);
+                        if (File.Exists(draft.SpecFilePath!))
+                        {
+                            draft.SpecCode = await File.ReadAllTextAsync(draft.SpecFilePath!, ct);
+                            // Keep Approved — do not reset to Draft (that would block re-run).
+                            draft.Status = ApiDraftStatus.Approved;
+                            draft.UpdatedAt = DateTime.UtcNow;
+                            Pub(key, EventKinds.Result, "ui-heal",
+                                $"Healed {Path.GetFileName(draft.SpecFilePath)}", EventLevels.Success);
+                        }
+                    }
+                    catch (Exception hex)
+                    {
+                        _log.LogWarning(hex, "Auto-heal failed for draft {DraftId}", draft.Id);
+                        Pub(key, EventKinds.Error, "ui-heal",
+                            $"Heal failed for {Path.GetFileName(draft.SpecFilePath)}: {hex.Message}",
+                            EventLevels.Warn);
+                    }
+                }
+                await db.SaveChangesAsync(ct);
+                pending = stillFailing;
             }
 
             session.UiStatus = ApiUiStatus.Drafted;
+            var passed = cumulativePassed;
+            var failed = cumulativeFailed;
+            var skipped = cumulativeSkipped;
             Pub(key, EventKinds.System, EventPhases.RunUi,
-                $"UI script run {runId} complete — {result.Passed} passed · {result.Failed} failed · {result.Skipped} skipped",
-                result.Failed > 0 ? EventLevels.Warn : EventLevels.Success, Terminal());
+                $"UI script run complete — {passed} passed · {failed} failed · {skipped} skipped",
+                failed > 0 ? EventLevels.Warn : EventLevels.Success, Terminal());
             PersistLog(session, key);
             session.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);

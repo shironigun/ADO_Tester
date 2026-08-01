@@ -14,7 +14,7 @@ trigger the UI Phase which:
 1. **Authors UI test cases** (LLM-generated, bucket-tagged manual test cases)
 2. **Generates Playwright scripts** (Claude CLI + Playwright MCP agentic run per case)
 3. **Routes to ADO bucket sub-suites** (Smoke / Regression / E2E under the Ui level suite)
-4. **Heals failing specs** (agentic rewrite of the spec given the failure message)
+4. **Auto-heals failing specs** on Run Scripts (up to 3 heal→re-run cycles; no separate Heal control)
 
 ---
 
@@ -59,9 +59,14 @@ POST sessions/{id}/push (or auto-push)
     → routes each UiScript draft to its bucket sub-suite
     → PlaywrightRunSpec.EnableCapture=true: injects screenshot/trace into playwright.config.ts
 
-POST sessions/{id}/heal-specs  { draftIds: int[] }
-    → per selected UiScript draft: IPlaywrightAgentService.HealAsync(specFilePath, draft.ErrorMessage)
-        → spawns claude CLI healer prompt; spec overwritten in place
+POST sessions/{id}/run-ui-scripts
+    → UiStatus: RunningUiScripts
+    → PlaywrightRunSpec.IsUiRun=true: app BASE_URL + globalSetup/storageState from scripts/fixtures
+    → on failure: HealAsync in place (keep Approved) → re-run failed only, max 3 attempts
+    → UiStatus: Drafted
+
+POST sessions/{id}/heal-specs  { draftIds: int[] }   (compat / unused by UI)
+    → per selected UiScript draft: IPlaywrightAgentService.HealAsync(...)
     → reads file back → updates SpecCode, clears ErrorMessage, resets Status=Draft
 ```
 
@@ -95,20 +100,27 @@ Created lazily on push by `EnsureUiBucketSuitesAsync`. Falls back to the Ui leve
 | `Infrastructure/QaLoop/PlaywrightAgentService.cs` | spawns Claude CLI; generate + heal |
 | `Infrastructure/Agents/UiCaseAuthorAgent.cs` | UI case authoring via LLM |
 | `Infrastructure/Agents/Prompts/ui_case_author_system.txt` | system prompt |
-| `Infrastructure/Orchestrators/QaLoopOrchestrator.cs` | AuthorUiCasesAsync, GenerateUiScriptsAsync, HealSpecsAsync, EnsureUiBucketSuitesAsync |
-| `Infrastructure/QaRuns/PlaywrightRunner.cs` | `EnableCapture` flag (screenshot/trace) |
-| `Infrastructure/QaRuns/RunExecutionService.cs` | sets `EnableCapture` for Ui-level runs |
-| `Api/Controllers/QaLoopController.cs` | author-ui-cases, generate-ui-scripts, heal-specs endpoints |
-| `client/src/api/qaLoop.ts` | `authorUiCases`, `generateUiScripts`, `healSpecs` API; new fields |
-| `client/src/session/configs/qaLoop.tsx` | `hasUiPhase` toggle; `UiPhasePanel`; UI Phase tab |
-| `scripts/fixtures/auth.setup.ts` | Playwright global-setup: login → storageState.json |
+| `Infrastructure/Orchestrators/QaLoopOrchestrator.cs` | AuthorUiCasesAsync, GenerateUiScriptsAsync, RunUiScripts (auto-heal), HealSpecsAsync, EnsureUiBucketSuitesAsync |
+| `Infrastructure/QaRuns/PlaywrightRunner.cs` | mint-only API auth; UI `IsUiRun` env + fixtures |
+| `Infrastructure/QaRuns/PlaywrightConfigWriter.cs` | UI globalSetup/storageState + 90s timeout |
+| `Api/Controllers/QaLoopController.cs` | author-ui-cases, generate-ui-scripts, run-ui-scripts, heal-specs endpoints |
+| `client/src/api/qaLoop.ts` | `authorUiCases`, `generateUiScripts`, `runUiScripts` API |
+| `client/src/session/configs/qaLoop.tsx` | UI Phase panel; Explain (heal is automatic on run) |
+| `scripts/fixtures/auth.setup.ts` | Playwright global-setup: login → Not Now → storageState.json (30m reuse) |
 
 ---
 
 ## Configuration
 
 ```env
-# App under test (for Playwright storageState generation)
+# Shared API host (all DMS) + mint credentials
+AUTOMATION_API_BASE_URL=https://your-qa-api-gateway-here
+WEB_API_BASE_URL=https://your-qa-web-api-here/api/v1
+AUTH_DEALER_ID=…
+AUTH_USERNAME=…
+AUTH_PASSWORD=…
+
+# App under test (for Playwright storageState)
 AUTOMATION_APP_URL=http://localhost:3000
 AUTOMATION_APP_USERNAME=qa@example.com
 AUTOMATION_APP_PASSWORD=secret
@@ -125,5 +137,6 @@ Or set via the Settings UI under QA Loop section.
 
 - `PlaywrightAgentService` requires the Claude CLI (`claude`) to be installed and on PATH or `CLAUDE_CLI_PATH`.
 - The Playwright root must have `.mcp.json` with the Playwright MCP server configured.
-- Script generation is one-shot per case; there is no incremental spec refinement (only heal-on-failure).
+- Script generation is one-shot per case; refinement is auto-heal on Run Scripts (max 3).
 - `EnableCapture` (screenshot/trace) is set for all Ui-level runs; it cannot be toggled per-run yet.
+- Per-DMS mint credentials (different dealer/user per profile) are not wired yet — default `AUTH_*` is used for all profiles; `AUTOMATION_PROFILE` remains a label.

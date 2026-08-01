@@ -452,15 +452,15 @@ Task HealAsync(
 `userContext` appended to failure message: `failureMessage + "\n\nUser context: " + userContext`.
 
 ## User choices
-- **Heal:** `HealAsync(..., userContext)`. Spec rewritten. `draft.ErrorMessage = null`. `draft.Status = Draft` (re-approve required before re-run).
+- **Heal:** Automatic inside Run Scripts (max 3 heal→re-run cycles; `Approved` kept). Compat `HealAsync(..., userContext)` via `heal-specs` still resets to `Draft` if called manually.
 - **Draft bug:** Only available when `draft.AdoTestCaseId != null` (i.e. after UI test cases have been pushed in step 12). Before push, the "Draft Bug" button is disabled — the user must heal first or push then file. After push: `BugDraftJson` linked to `draft.AdoTestCaseId`, routed to existing bug-draft review.
 
 **Why no pre-push bug draft:** `draft.AdoTestCaseId` is null before push. There is no ADO entity to link to yet. The user must either heal the failing script now, or push the test cases first and file the bug afterward.
 
-**Healer never fires automatically.** After healing: user re-approves the healed draft → clicks "Run Scripts" → step 10b re-runs all `Approved UiScript` drafts.
+**Healer fires automatically on Run Scripts.** Failed specs are healed in place (`Approved` kept) and re-run up to 3 times. Manual `heal-specs` remains for compat but is unused by the UI.
 
 ## Re-run behavior
-Step 10b always runs all `Approved UiScript` drafts. After healing, re-approve the draft, then run again. `LastUiRunId` is overwritten on each run (latest run screenshots are used). Multiple runs are supported.
+Step 10b runs all `Approved UiScript` drafts with `IsUiRun=true` (app `BASE_URL` + `storageState`). Auto-heal re-runs only still-failing specs. `LastUiRunId` is overwritten on each attempt.
 
 # Step 12 — Push UI Tests
 
@@ -565,7 +565,7 @@ No `using` Author Tests infrastructure namespaces. `QaAutomation.Core.Agents.Jso
 - **New `EventPhases` constants.** `EventPhases.RetrieveKb = "retrieve-kb"`, `EventPhases.Scan = "scan"`, `EventPhases.AnalyzeUi = "analyze-ui"`, `EventPhases.RunUi = "run-ui"` — new frozen string constants in `ConsoleEvent.cs` alongside existing constants. SSE streams use these for `PHASE_LABEL` mapping.
 - **`DatabaseInitializer` migrations auto-apply.** All new migrations apply on startup — no manual step required.
 - **`ApiDone` is not terminal.** UI phase tasks can launch. Polling continues.
-- **Healer never fires automatically.** Heal → re-approve → re-run is the user-driven flow.
+- **Healer fires automatically on Run Scripts** (max 3 heal→re-run; keep Approved).
 - **UI Phase suite-only.** `UiTestSuiteId ?? TestSuiteId`. `WorkItemId` null-guarded.
 - **No `TestRun`/`TestFailure` rows for step 10b.** Failures stored on `draft.ErrorMessage`.
 - **Graceful degradation.** Missing KB / scan failure = `Warn` + continue.

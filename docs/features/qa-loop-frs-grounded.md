@@ -20,8 +20,8 @@ The QA Loop is grounded in an uploaded TargetCRM **FRS Knowledge Base** (modules
 8. UI Analysis review → RerunUiAnalysis / Author Cases
 9. UI Case Author → QaLoopUiCaseAuthorAgent (fallback: deprecated UiCaseAuthorAgent)
 10. Generate scripts → SemaphoreSlim(2), 10-min timeout, atlas routes[0] as moduleRoute
-10b. Run scripts → PlaywrightRunner; draft.ErrorMessage from JUnit
-11. Explain / Heal → QaLoopFailureAnalystAgent; HealAsync(userContext?)
+10b. Run scripts → PlaywrightRunner (`IsUiRun`); auto-heal failed specs (max 3) then re-run
+11. Explain failure → QaLoopFailureAnalystAgent (heal is automatic on run; no separate Heal UI)
 12. Push UI      → suite UiTestSuiteId ?? TestSuiteId (no story link)
 ```
 

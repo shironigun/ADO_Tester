@@ -43,7 +43,9 @@ public sealed class AutomationAuthenticator : IAutomationAuthenticator
         _log = log;
     }
 
-    public string? ApiBaseUrl => _options.CurrentValue.LeadApiBaseUrl;
+    public string? ApiBaseUrl => _options.CurrentValue.ApiBaseUrl;
+
+    public bool IsConfigured => _options.CurrentValue.IsComplete;
 
     public async Task<string?> GetBearerTokenAsync(bool forceRefresh = false, CancellationToken ct = default)
     {

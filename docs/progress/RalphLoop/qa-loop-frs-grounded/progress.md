@@ -3,7 +3,7 @@
 ## Status
 
 - Started: 2026-08-01
-- Resume point: **KBG COMPLETE** + live UI run (session 36, run 360002 — 1 passed)
+- Resume point: **KBG COMPLETE** + API auth/UI auto-heal wiring (live session 36 pending in this cloud env — no TargetCRM/.env)
 - Design: `solution.md` (v6.0, fully audited) · Blueprint: `blueprint.md` · Backlog: `prd.md`
 
 ## Known blockers
@@ -193,3 +193,11 @@ Frontend:
 - Soft remaining: full agentic UI script gen (may need longer timeout / non-MCP fallback); explain/heal; UI ADO push; Draft Bug wiring.
 
 **KBG COMPLETE** + live API push + UI author + UI run exercised.
+
+### 2026-08-01 — API auth + UI run/auto-heal
+
+- Renamed `LEAD_API_BASE_URL` → `AUTOMATION_API_BASE_URL` (DI fallback to legacy key); documented `AUTOMATION_APP_*` in `.env.example`.
+- API runs: shared host only + minted bearer (no DMS profile BaseUrl/static token); set `BASE_URL`; fail when auth configured but mint fails.
+- UI runs: `PlaywrightRunSpec.IsUiRun` → app `baseURL` + `scripts/fixtures` globalSetup/`storageState` (Not Now + 30m reuse); 90s timeout.
+- `RunUiScripts`: auto-heal failed specs in place (keep `Approved`) → re-run failed only, max 3; removed Heal button from UI.
+- Unit: `PlaywrightRunnerTests` updated; `RunUiScripts` test expects 3 attempts on persistent failure. Live session 36 re-verify pending (no TargetCRM/.env in this cloud agent).

@@ -844,10 +844,13 @@ public sealed class QaLoopOrchestratorTests
         Assert.Null(passDraft.ErrorMessage);
         Assert.Equal(ApiUiStatus.Drafted, sessOut.UiStatus);
         Assert.NotNull(sessOut.LastUiRunId);
-        Assert.Equal(sid * 10_000 + 1, sessOut.LastUiRunId);
+        // Auto-heal re-runs failed specs up to 3 times when they keep failing.
+        Assert.Equal(sid * 10_000 + 3, sessOut.LastUiRunId);
+        Assert.Equal(3, runner.RunCount);
         Assert.NotNull(runner.LastSpec);
         Assert.Equal("deals", runner.LastSpec!.Module);
         Assert.True(runner.LastSpec.EnableCapture);
+        Assert.True(runner.LastSpec.IsUiRun);
         Assert.False(runner.LastSpec.Headed);
     }
 
@@ -1150,10 +1153,12 @@ public sealed class QaLoopOrchestratorTests
     {
         public PlaywrightRunResult Result { get; set; } = new() { ExitCode = 0, Passed = 1 };
         public PlaywrightRunSpec? LastSpec { get; private set; }
+        public int RunCount { get; private set; }
 
         public Task<PlaywrightRunResult> RunAsync(PlaywrightRunSpec spec, string eventKey, CancellationToken ct = default)
         {
             LastSpec = spec;
+            RunCount++;
             return Task.FromResult(Result);
         }
 

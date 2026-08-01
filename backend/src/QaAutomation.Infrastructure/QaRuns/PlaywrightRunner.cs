@@ -23,6 +23,7 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
     private readonly PipelineConcurrency _concurrency;
     private readonly IAutomationAuthenticator _authenticator;
     private readonly AllureEnricher _enricher;
+    private readonly IOptionsMonitor<QaLoopOptions> _qaLoop;
     private readonly string _scriptsDir;
     private readonly string _runsDir;
     private readonly string _runtimeDir;
@@ -30,6 +31,7 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
     private readonly string _reportProvider;
     private readonly string _adoBaseUrl;
     private readonly string _historyDir;
+    private readonly string? _fixturesDir;
 
     // Provisioned exactly once; guarded by _runtimeLock.
     private volatile bool _runtimeReady;
@@ -38,7 +40,7 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
     public PlaywrightRunner(
         IEventBus bus, PipelineConcurrency concurrency, IAutomationAuthenticator authenticator,
         AllureEnricher enricher,
-        IOptions<StorageOptions> storage, IOptions<QaLoopOptions> qaLoop,
+        IOptions<StorageOptions> storage, IOptionsMonitor<QaLoopOptions> qaLoop,
         IOptions<AzureDevOpsOptions> ado,
         ILogger<PlaywrightRunner> log)
     {
@@ -46,20 +48,33 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
         _concurrency = concurrency;
         _authenticator = authenticator;
         _enricher = enricher;
+        _qaLoop = qaLoop;
         var dataDir = storage.Value.DataDirectory;
-        _scriptsDir      = Path.GetFullPath(Path.Combine(dataDir, qaLoop.Value.ScriptsFolderName));
-        _runsDir         = Path.GetFullPath(Path.Combine(dataDir, qaLoop.Value.RunsFolderName));
+        var qa = qaLoop.CurrentValue;
+        _scriptsDir      = Path.GetFullPath(Path.Combine(dataDir, qa.ScriptsFolderName));
+        _runsDir         = Path.GetFullPath(Path.Combine(dataDir, qa.RunsFolderName));
         _runtimeDir      = Path.GetFullPath(Path.Combine(dataDir, "playwright-runtime"));
         _historyDir      = Path.GetFullPath(Path.Combine(dataDir, "allure-history"));
-        _reportProvider  = qaLoop.Value.ReportProvider;
+        _reportProvider  = qa.ReportProvider;
         _adoBaseUrl      = ado.Value.BaseUrl;
+        _fixturesDir     = ResolveFixturesDir(dataDir);
         _log = log;
     }
 
     public async Task<PlaywrightRunResult> RunAsync(
         PlaywrightRunSpec spec, string eventKey, CancellationToken ct = default)
     {
-        var (baseUrl, bearerToken) = await PrepareExternalRunAsync(spec, eventKey, ct);
+        string? baseUrl;
+        string? bearerToken;
+        try
+        {
+            (baseUrl, bearerToken) = await PrepareExternalRunAsync(spec, eventKey, ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Pub(eventKey, EventKinds.Error, "run", ex.Message, EventLevels.Error);
+            return new PlaywrightRunResult { ExitCode = 1, Failed = 0 };
+        }
 
         // Need either spec file paths OR numeric grep tags to select tests
         if (spec.SpecFilePaths.Count == 0 && spec.GrepTags.Count == 0)
@@ -104,7 +119,7 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
         await _concurrency.Gate.WaitAsync(ct);
         try
         {
-            exitCode = await SpawnAsync("npx", $"playwright {args}", runDir, spec.Profile, eventKey, ct,
+            exitCode = await SpawnAsync("npx", $"playwright {args}", runDir, spec, eventKey, ct,
                 suppressOutput: !spec.ActivityEnabled,
                 baseUrl: baseUrl, bearerToken: bearerToken);
         }
@@ -144,16 +159,42 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
         PlaywrightRunSpec spec, string eventKey, CancellationToken ct)
     {
         await EnsureRuntimeAsync(eventKey, ct);
-        var profileEntry = DmsProfileOptions.All.FirstOrDefault(p => p.Key == spec.Profile);
-        var baseUrl = _authenticator.ApiBaseUrl ?? profileEntry?.BaseUrl;
-        var bearerToken = await _authenticator.GetBearerTokenAsync(ct: ct) ?? profileEntry?.BearerToken;
+
+        if (spec.IsUiRun)
+        {
+            var qa = _qaLoop.CurrentValue;
+            if (string.IsNullOrWhiteSpace(qa.AppUrl)
+                || string.IsNullOrWhiteSpace(qa.AppUsername)
+                || string.IsNullOrWhiteSpace(qa.AppPassword))
+            {
+                throw new InvalidOperationException(
+                    "UI run requires AUTOMATION_APP_URL / AUTOMATION_APP_USERNAME / AUTOMATION_APP_PASSWORD (or qaloop.app_* settings).");
+            }
+            if (string.IsNullOrWhiteSpace(_fixturesDir))
+            {
+                throw new InvalidOperationException(
+                    "UI run could not locate scripts/fixtures (auth.setup.ts). Ensure the repo scripts/fixtures folder is present.");
+            }
+            Pub(eventKey, EventKinds.System, "run",
+                $"UI auth ready · app {qa.AppUrl} · storageState via {_fixturesDir}");
+            return (qa.AppUrl.TrimEnd('/'), null);
+        }
+
+        // Shared API host for all DMS — never fall back to profile BaseUrl / static bearer.
+        var baseUrl = _authenticator.ApiBaseUrl;
+        var bearerToken = await _authenticator.GetBearerTokenAsync(ct: ct);
         if (string.IsNullOrEmpty(baseUrl))
-            Pub(eventKey, EventKinds.System, "run",
-                "No API base URL configured (set LEAD_API_BASE_URL in .env) — tests will hit localhost.",
-                EventLevels.Warn);
-        else
-            Pub(eventKey, EventKinds.System, "run",
-                $"Auth ready · target {baseUrl}" + (bearerToken is null ? " · no bearer (unauthenticated)" : " · bearer minted"));
+        {
+            throw new InvalidOperationException(
+                "No API base URL configured — set AUTOMATION_API_BASE_URL in .env.");
+        }
+        if (_authenticator.IsConfigured && string.IsNullOrEmpty(bearerToken))
+        {
+            throw new InvalidOperationException(
+                "Automation auth is configured but bearer mint failed (WEB_API_BASE_URL + AUTH_*).");
+        }
+        Pub(eventKey, EventKinds.System, "run",
+            $"Auth ready · target {baseUrl}" + (bearerToken is null ? " · no bearer (unauthenticated)" : " · bearer minted"));
         return (baseUrl, bearerToken);
     }
 
@@ -161,7 +202,9 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
     internal string ScriptsDirectory => _scriptsDir;
     internal string RuntimeDirectory => _runtimeDir;
     internal string ReportProvider => _reportProvider;
+    internal string? FixturesDirectory => _fixturesDir;
     internal PipelineConcurrency Concurrency => _concurrency;
+    internal IOptionsMonitor<QaLoopOptions> QaLoopOptions => _qaLoop;
 
     /// <summary>Runs the existing Allure enrichment/report pipeline after an external process path exits.</summary>
     internal async Task<string?> FinalizeExternalRunAsync(
@@ -220,17 +263,17 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
             // `npm ci` requires a pre-existing package-lock.json (we only ever write a bare
             // package.json with "latest" ranges) and fails immediately without one; `npm install`
             // is the correct choice here since there's no lockfile to install exactly from.
-            var installExit = await SpawnAsync("npm", "install", _runtimeDir, profile: null, eventKey, ct);
+            var installExit = await SpawnAsync("npm", "install", _runtimeDir, new PlaywrightRunSpec(), eventKey, ct);
             if (installExit != 0)
                 throw new InvalidOperationException($"npm install exited {installExit} — Playwright runtime not provisioned.");
 
-            var pwExit = await SpawnAsync("npx", "playwright install --with-deps chromium", _runtimeDir, profile: null, eventKey, ct);
+            var pwExit = await SpawnAsync("npx", "playwright install --with-deps chromium", _runtimeDir, new PlaywrightRunSpec(), eventKey, ct);
             if (pwExit != 0)
                 throw new InvalidOperationException($"playwright install exited {pwExit} — browser binaries not provisioned.");
 
             // Allure capability check — log version; a non-zero exit here only warns (generate handled later)
             // ponytail: fallback if @allurereport/cli lacks --single-file: ship allure-commandline + bundled JRE
-            var allureExit = await SpawnAsync("npx", "allure --version", _runtimeDir, profile: null, eventKey, ct);
+            var allureExit = await SpawnAsync("npx", "allure --version", _runtimeDir, new PlaywrightRunSpec(), eventKey, ct);
             if (allureExit != 0)
                 Pub(eventKey, EventKinds.System, text: "WARNING: allure --version check failed; report generation may be unavailable.", level: EventLevels.Warn);
 
@@ -261,7 +304,8 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
     {
         PlaywrightConfigWriter.WriteRunConfig(
             runDir, spec, _scriptsDir, _runtimeDir, _reportProvider,
-            ex => _log.LogWarning(ex, "Could not link node_modules; Playwright may re-install"));
+            ex => _log.LogWarning(ex, "Could not link node_modules; Playwright may re-install"),
+            fixturesDir: spec.IsUiRun ? _fixturesDir : null);
     }
 
     // ── Allure generate + history (QAL-057) ─────────────────────────────────
@@ -308,7 +352,7 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
                 "npx",
                 $"allure awesome {EscPath(resultsDir)} -o {EscPath(reportDir)} " +
                 $"--history-path {EscPath(historyFile)} --report-name \"{reportName}\"",
-                runDir, profile: null, eventKey, ct);
+                runDir, spec, eventKey, ct);
 
             if (genExit != 0)
             {
@@ -449,7 +493,7 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
     // ── Process spawn ────────────────────────────────────────────────────────
 
     private async Task<int> SpawnAsync(
-        string exe, string args, string workDir, string? profile, string eventKey, CancellationToken ct,
+        string exe, string args, string workDir, PlaywrightRunSpec spec, string eventKey, CancellationToken ct,
         bool suppressOutput = false, string? baseUrl = null, string? bearerToken = null)
     {
         // npm/npx are .cmd shims on Windows — bare ProcessStartInfo (UseShellExecute=false) can't
@@ -464,7 +508,11 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
             UseShellExecute = false,
             CreateNoWindow = true,
         };
-        ApplyAutomationEnv(psi.Environment, profile, baseUrl, bearerToken);
+        var qa = _qaLoop.CurrentValue;
+        ApplyAutomationEnv(psi.Environment, spec.Profile, baseUrl, bearerToken,
+            appUrl: spec.IsUiRun ? qa.AppUrl : null,
+            appUsername: spec.IsUiRun ? qa.AppUsername : null,
+            appPassword: spec.IsUiRun ? qa.AppPassword : null);
 
         using var proc = new Process { StartInfo = psi };
 
@@ -539,18 +587,52 @@ public sealed class PlaywrightRunner : IPlaywrightRunner
         return exitCode;
     }
 
-    /// <summary>Sets AUTOMATION_PROFILE/AUTOMATION_BASE_URL/AUTOMATION_BEARER_TOKEN on the child
-    /// process environment (QAL-068). Extracted from <see cref="SpawnAsync"/> so the mapping is
-    /// unit-testable against a plain dictionary without spawning a real process.</summary>
+    /// <summary>Sets AUTOMATION_PROFILE/AUTOMATION_BASE_URL/AUTOMATION_BEARER_TOKEN/BASE_URL (and
+    /// optional AUTOMATION_APP_* for UI) on the child process environment (QAL-068). Extracted from
+    /// <see cref="SpawnAsync"/> so the mapping is unit-testable against a plain dictionary without
+    /// spawning a real process.</summary>
     internal static void ApplyAutomationEnv(
-        IDictionary<string, string?> env, string? profile, string? baseUrl, string? bearerToken)
+        IDictionary<string, string?> env, string? profile, string? baseUrl, string? bearerToken,
+        string? appUrl = null, string? appUsername = null, string? appPassword = null)
     {
         if (!string.IsNullOrEmpty(profile))
             env["AUTOMATION_PROFILE"] = profile;
         if (!string.IsNullOrEmpty(baseUrl))
+        {
             env["AUTOMATION_BASE_URL"] = baseUrl;
+            env["BASE_URL"] = baseUrl;
+        }
         if (!string.IsNullOrEmpty(bearerToken))
             env["AUTOMATION_BEARER_TOKEN"] = bearerToken;
+        if (!string.IsNullOrEmpty(appUrl))
+            env["AUTOMATION_APP_URL"] = appUrl;
+        if (!string.IsNullOrEmpty(appUsername))
+            env["AUTOMATION_APP_USERNAME"] = appUsername;
+        if (!string.IsNullOrEmpty(appPassword))
+            env["AUTOMATION_APP_PASSWORD"] = appPassword;
+    }
+
+    /// <summary>Walk up from known roots looking for scripts/fixtures/auth.setup.ts.</summary>
+    internal static string? ResolveFixturesDir(string? dataDirectory = null)
+    {
+        var starts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(dataDirectory))
+            starts.Add(Path.GetFullPath(dataDirectory));
+        try { starts.Add(Directory.GetCurrentDirectory()); } catch { /* ignore */ }
+        try { starts.Add(AppContext.BaseDirectory); } catch { /* ignore */ }
+
+        foreach (var start in starts.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var dir = start;
+            for (var i = 0; i < 8 && !string.IsNullOrEmpty(dir); i++)
+            {
+                var candidate = Path.Combine(dir, "scripts", "fixtures");
+                if (File.Exists(Path.Combine(candidate, "auth.setup.ts")))
+                    return Path.GetFullPath(candidate);
+                dir = Directory.GetParent(dir)?.FullName;
+            }
+        }
+        return null;
     }
 
     // ── Grep builder ────────────────────────────────────────────────────────

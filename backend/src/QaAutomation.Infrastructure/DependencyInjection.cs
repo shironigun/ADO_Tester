@@ -335,7 +335,10 @@ public static class DependencyInjection
             .Bind(config.GetSection(AutomationAuthOptions.SectionName))
             .PostConfigure(o =>
             {
-                o.LeadApiBaseUrl = Env("LEAD_API_BASE_URL") ?? o.LeadApiBaseUrl;
+                // AUTOMATION_API_BASE_URL is the shared target host; LEAD_API_BASE_URL kept as fallback.
+                o.ApiBaseUrl = Env("AUTOMATION_API_BASE_URL")
+                    ?? Env("LEAD_API_BASE_URL")
+                    ?? o.ApiBaseUrl;
                 o.WebApiBaseUrl  = Env("WEB_API_BASE_URL") ?? o.WebApiBaseUrl;
                 o.AuthDealerId   = Env("AUTH_DEALER_ID") ?? o.AuthDealerId;
                 o.AuthUsername   = Env("AUTH_USERNAME") ?? o.AuthUsername;

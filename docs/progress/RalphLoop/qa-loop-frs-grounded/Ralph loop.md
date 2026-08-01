@@ -28,7 +28,7 @@ This file is the ruleset for the `qa-loop-frs-grounded` Ralph loop. Read it ever
 
 - **Zero sharing with Author Tests.** No `using` reference to Author Tests infrastructure namespaces in any QA Loop file. New agents, new types, new services — even if the implementation looks similar.
 - **Frozen system prompts.** All existing system prompt bytes (`ModuleAnalyzerSystem`, generator system prompts) are untouched. All new content goes into user prompts only. New agents (`QaLoopUiAnalystAgent`, `QaLoopUiCaseAuthorAgent`) get their own new embedded resources.
-- **Healer never fires automatically.** Every healer invocation requires an explicit user action.
+- **Healer fires automatically on Run Scripts** for failed UI specs (max 3 heal→re-run cycles; keeps `Approved`). Manual `heal-specs` remains as a compat endpoint but is not exposed in the UI.
 - **UI Phase is suite-only.** No story / work-item link is ever presented for UI test cases in this loop.
 - **KB directory structure is preserved.** `FolderPath` is always stored and never flattened or inferred post-upload.
 - **`AdoGoldenTests` stays green.** `@qa-meta` structure is unchanged; only `module` and `tags` values change when FRS context is present.

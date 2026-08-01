@@ -4,23 +4,22 @@ using QaAutomation.Infrastructure.QaRuns;
 namespace QaAutomation.Tests;
 
 /// <summary>
-/// QAL-068: AUTOMATION_PROFILE alone is a profile KEY (e.g. "infinity"), not a URL — every generated
-/// spec that read it as a base URL silently fell back to a hardcoded/localhost guess. Verifies the
-/// child-process environment actually gets a real AUTOMATION_BASE_URL/AUTOMATION_BEARER_TOKEN, and
-/// that DmsProfileOptions.All picks those values up from the process environment (the .env bridge).
+/// Child-process env mapping: shared AUTOMATION_BASE_URL + BASE_URL + bearer (minted upstream),
+/// optional AUTOMATION_APP_* for UI runs. Profile is a label only — not a host/token source.
 /// </summary>
 public sealed class PlaywrightRunnerTests
 {
     [Fact]
-    public void ApplyAutomationEnv_sets_profile_baseUrl_and_bearerToken_when_all_present()
+    public void ApplyAutomationEnv_sets_profile_baseUrl_bearer_and_BASE_URL()
     {
         var env = new Dictionary<string, string?>();
 
         PlaywrightRunner.ApplyAutomationEnv(env, profile: "infinity",
-            baseUrl: "https://infinity.example.test", bearerToken: "tok-123");
+            baseUrl: "https://api.example.test", bearerToken: "tok-123");
 
         Assert.Equal("infinity", env["AUTOMATION_PROFILE"]);
-        Assert.Equal("https://infinity.example.test", env["AUTOMATION_BASE_URL"]);
+        Assert.Equal("https://api.example.test", env["AUTOMATION_BASE_URL"]);
+        Assert.Equal("https://api.example.test", env["BASE_URL"]);
         Assert.Equal("tok-123", env["AUTOMATION_BEARER_TOKEN"]);
     }
 
@@ -33,6 +32,7 @@ public sealed class PlaywrightRunnerTests
 
         Assert.Equal("ideal", env["AUTOMATION_PROFILE"]);
         Assert.False(env.ContainsKey("AUTOMATION_BASE_URL"));
+        Assert.False(env.ContainsKey("BASE_URL"));
         Assert.False(env.ContainsKey("AUTOMATION_BEARER_TOKEN"));
     }
 
@@ -45,22 +45,31 @@ public sealed class PlaywrightRunnerTests
 
         Assert.False(env.ContainsKey("AUTOMATION_PROFILE"));
         Assert.Equal("https://x.test", env["AUTOMATION_BASE_URL"]);
+        Assert.Equal("https://x.test", env["BASE_URL"]);
     }
 
     [Fact]
-    public void DmsProfileEntry_carries_BaseUrl_and_BearerToken_end_to_end_into_child_env()
+    public void ApplyAutomationEnv_sets_APP_vars_for_UI_runs()
     {
-        // Exercises the real seam PlaywrightRunner.RunAsync uses: look up the registry entry by
-        // profile key, then feed its BaseUrl/BearerToken into ApplyAutomationEnv — same as the fix.
-        var entry = new DmsProfileEntry("infinity", "infinity", "Infinity", Credentialed: true,
-            BaseUrl: "https://infinity.qa.example.test", BearerToken: "secret-token");
         var env = new Dictionary<string, string?>();
 
-        PlaywrightRunner.ApplyAutomationEnv(env, entry.Key, entry.BaseUrl, entry.BearerToken);
+        PlaywrightRunner.ApplyAutomationEnv(env, profile: "infinity",
+            baseUrl: "https://app.example.test", bearerToken: null,
+            appUrl: "https://app.example.test", appUsername: "qa", appPassword: "secret");
 
-        Assert.Equal("infinity", env["AUTOMATION_PROFILE"]);
-        Assert.Equal("https://infinity.qa.example.test", env["AUTOMATION_BASE_URL"]);
-        Assert.Equal("secret-token", env["AUTOMATION_BEARER_TOKEN"]);
+        Assert.Equal("https://app.example.test", env["BASE_URL"]);
+        Assert.Equal("https://app.example.test", env["AUTOMATION_APP_URL"]);
+        Assert.Equal("qa", env["AUTOMATION_APP_USERNAME"]);
+        Assert.Equal("secret", env["AUTOMATION_APP_PASSWORD"]);
+        Assert.False(env.ContainsKey("AUTOMATION_BEARER_TOKEN"));
+    }
+
+    [Fact]
+    public void ResolveFixturesDir_finds_repo_scripts_fixtures()
+    {
+        var dir = PlaywrightRunner.ResolveFixturesDir(Directory.GetCurrentDirectory());
+        Assert.NotNull(dir);
+        Assert.True(File.Exists(Path.Combine(dir!, "auth.setup.ts")));
     }
 
     [Fact]
@@ -74,10 +83,6 @@ public sealed class PlaywrightRunnerTests
     [Fact]
     public void DmsProfileOptions_All_has_no_hardcoded_BaseUrl_guess_when_env_unset()
     {
-        // Guards against ever baking a guessed hostname into the registry itself (QAL-068 requirement:
-        // don't propagate the old generated-file fallback hostname into the config layer as if verified).
-        // Only meaningful when the ambient process doesn't already have these set (CI/dev machines
-        // shouldn't), so this is a smoke check, not a hard environment guarantee.
         var entry = DmsProfileOptions.All.Single(p => p.Key == "infinity");
         if (Environment.GetEnvironmentVariable("INFINITY_BASE_URL") is null)
             Assert.Null(entry.BaseUrl);
