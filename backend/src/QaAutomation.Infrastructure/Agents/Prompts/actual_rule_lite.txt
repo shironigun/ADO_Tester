@@ -1,0 +1,1 @@
+For "actual", write a one-line, code-grounded note ONLY for steps you mark "fail" or "inconclusive"; use an empty string "" for "pass" steps.

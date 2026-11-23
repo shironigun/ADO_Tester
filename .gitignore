@@ -1,0 +1,40 @@
+# Secrets
+.env
+*.env
+!.env.example
+
+# .NET
+bin/
+obj/
+*.user
+
+# Node / Vite
+node_modules/
+client/dist/
+dist/
+
+# SQLite local data + uploaded files
+*.db
+*.db-shm
+*.db-wal
+# Runtime data dirs only (anchored) — must NOT match the C# source folder
+# dotnet/src/QaAutomation.Infrastructure/Data/ (Git is case-insensitive on Windows).
+/data/
+backend/data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# IDE
+.vs/
+.idea/
+
+# Local scratch/R&D notes (never publish)
+/Incorporate TARGET DOCS FRS into god-tier KB (god audit v3).md
+/KB + Code Atlas (prompt-first) + QA Loop reshape.md

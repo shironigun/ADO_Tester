@@ -1,0 +1,87 @@
+{
+  "type": "message",
+  "attachments": [
+    {
+      "contentType": "application/vnd.microsoft.card.adaptive",
+      "content": {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "body": [
+          {
+            "type": "TextBlock",
+            "text": "{{greeting}}",
+            "wrap": true,
+            "size": "Medium"
+          },
+          {
+            "type": "TextBlock",
+            "text": "**Module:** {{module}}  |  **DMS:** {{profile}}  |  **Trigger:** {{trigger}}",
+            "wrap": true,
+            "separator": true
+          },
+          {
+            "type": "ColumnSet",
+            "separator": true,
+            "columns": [
+              {
+                "type": "Column",
+                "width": "stretch",
+                "items": [
+                  { "type": "TextBlock", "text": "**Passed**", "weight": "Bolder" },
+                  { "type": "TextBlock", "text": "{{passed}}", "size": "ExtraLarge", "color": "Good" }
+                ]
+              },
+              {
+                "type": "Column",
+                "width": "stretch",
+                "items": [
+                  { "type": "TextBlock", "text": "**Failed**", "weight": "Bolder" },
+                  { "type": "TextBlock", "text": "{{failed}}", "size": "ExtraLarge", "color": "{{failed_color}}" }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "TextBlock",
+            "text": "**Results by Test Level**",
+            "weight": "Bolder",
+            "separator": true
+          },
+          {
+            "type": "ColumnSet",
+            "separator": true,
+            "columns": [
+              { "type": "Column", "width": "2", "items": [ { "type": "TextBlock", "text": "**Level**", "wrap": true } ] },
+              { "type": "Column", "width": "1", "items": [ { "type": "TextBlock", "text": "**Executed**", "wrap": true } ] },
+              { "type": "Column", "width": "1", "items": [ { "type": "TextBlock", "text": "**Passed**", "wrap": true } ] },
+              { "type": "Column", "width": "1", "items": [ { "type": "TextBlock", "text": "**Failed**", "wrap": true } ] }
+            ]
+          },
+          {{level_rows}},
+          {
+            "type": "TextBlock",
+            "text": "Duration: {{duration}}",
+            "wrap": true,
+            "separator": true,
+            "isSubtle": true
+          },
+          {
+            "type": "TextBlock",
+            "text": "If you have any concern related to this automation execution results please reply to Mahmood Ahmad.",
+            "wrap": true,
+            "separator": true,
+            "isSubtle": true
+          }
+        ],
+        "actions": [
+          {
+            "type": "Action.OpenUrl",
+            "title": "View Test Plan Run",
+            "url": "{{ado_run_url}}"
+          }
+        ]
+      }
+    }
+  ]
+}

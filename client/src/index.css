@@ -1,0 +1,16 @@
+/*
+ * Minimal reset only. All theming (colours, typography, surfaces, code styling)
+ * is owned by the MUI theme (src/theme/) + CssBaseline. The previous Vite
+ * template styles (fixed 1126px centred #root, global h1/h2/code) were removed —
+ * they fought the MUI flex app shell.
+ */
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+}
+
+#root {
+  min-height: 100vh;
+}

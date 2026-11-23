@@ -1,0 +1,331 @@
+import { api } from './client'
+import { apiUrl } from '../config/env'
+import type { SessionSummary, SessionDetail } from '../session/types'
+
+// ── QA Loop Track B API — /api/qaloop ────────────────────────────────────────
+// Re-export plan/suite/workitem pickers (module-agnostic, reuse author-tests endpoints).
+export { getPlans, getSuites, searchWorkItems } from './authorTests'
+export type { TestPlan, TestSuite } from './authorTests'
+
+// ── Request / response types matching backend QaLoopContracts.cs ─────────────
+
+export interface ContextAttachment {
+  relativePath: string
+  content: string
+}
+
+export interface ScanStartRequest {
+  module: string
+  repository?: string
+  branch?: string
+  frontendModule?: string
+  frontendPath?: string
+  sourceDirs?: string[]
+  extensions?: string[]
+  workItemId?: number
+  /** Required — complete ADO Test Plan id for Plan Intake. */
+  testPlanId: number
+  testSuiteId?: number
+  autoHandoff?: boolean
+  additionalContext?: string
+  contextAttachments?: ContextAttachment[]
+  hasUiPhase?: boolean
+}
+
+// A product frontend module discovered from the SPA route file (QaLoopController /frontend-modules).
+export interface FrontendModule {
+  moduleName: string
+  routePath: string
+  componentPath: string
+  url: string
+}
+
+/** First-class automation unit for New Scan (includes nested CPQ / Data Review / Feedback). */
+export interface AutomationUnitChoice {
+  slug: string
+  displayName: string
+  parentShell: string | null
+  label: string
+  routePath: string
+  frontendPath: string
+  sourceDirs: string[]
+}
+
+export interface ScanStartResponse {
+  sessionId: number
+  existingSessionId?: number | null
+}
+
+// Wire shape of a SurfaceRow EXACTLY as it appears inside the raw analysisJson string — that blob is
+// produced by QaLoopOrchestrator's own JsonSerializer.Serialize call (Infrastructure), not through the
+// API's camelCase MVC pipeline, so it keeps C#'s default PascalCase property names, and TestLevel
+// serializes as its ordinal (0=Contract, 1=Endpoint, 2=Workflow, 3=Ui) since no string enum converter
+// applies there either. Do not "fix" the casing here — match what's actually on the wire.
+export interface SurfaceRow {
+  Id: string
+  Level: number
+  Label: string
+  Status: 'gap' | 'covered'
+  LinkedTestCaseId: number | null
+  Selected: boolean
+}
+
+export const LEVEL_NAMES = ['Contract', 'Endpoint', 'Workflow', 'Ui'] as const
+
+/** Wire shape of a QA Loop session summary (GET /api/qaloop). */
+export interface ApiSessionSummary extends SessionSummary {
+  module: string | null
+  draftCount: number
+  activityEnabled: boolean
+}
+
+/** Wire shape of a QA Loop session detail (GET /api/qaloop/{id}). */
+export interface ApiSessionDetail extends SessionDetail {
+  module: string | null
+  testPlanId?: number | null
+  testSuiteId?: number | null
+  /** Serialized PlanSuiteUnitMap JSON (null until Plan Intake maps suites). */
+  suiteUnitMapJson?: string | null
+  /** Serialized PlanImportMeta JSON (null until a Plan import runs). */
+  planImportMetaJson?: string | null
+  inventoryJson?: string | null
+  discoveryJson?: string | null
+  activityEnabled: boolean
+  additionalContext?: string | null
+  generateContext?: string | null
+  lastFeedback?: string | null
+  hasUiPhase: boolean
+  uiStatus?: string | null
+  // KBG-108: KB-grounded fields
+  frsSlug?: string | null
+  uiAnalysisJson?: string | null
+  uiTestSuiteId?: number | null
+  lastUiRunId?: number | null
+}
+
+export interface ApiTestDraftDto {
+  id: number
+  sessionId: number
+  status: string
+  level: string
+  title: string
+  preconditions: string
+  stepsJson: string | null
+  specCode: string | null
+  specFilePath?: string | null
+  adoTestCaseId: number | null
+  errorMessage?: string | null
+  tags: string[]
+  sourceRoutes: string[]
+  draftKind?: string | null
+  bucket?: string | null
+}
+
+export interface UpdateApiDraftRequest {
+  status?: string
+  title?: string
+  preconditions?: string
+  stepsJson?: string
+  specCode?: string
+}
+
+// ── API methods (routes match QaLoopController.cs exactly) ────────────────────
+
+export async function startScan(projectId: number, req: ScanStartRequest): Promise<ScanStartResponse> {
+  const { data } = await api.post<ScanStartResponse>(`/api/qaloop/${projectId}/scan/start`, req)
+  return data
+}
+
+export async function listFrontendModules(repository?: string, branch?: string, refresh?: boolean): Promise<FrontendModule[]> {
+  const params: Record<string, string> = {}
+  if (repository) params.repository = repository
+  if (branch) params.branch = branch
+  if (refresh) params.refresh = 'true'
+  const { data } = await api.get<FrontendModule[]>('/api/qaloop/frontend-modules', { params })
+  return data
+}
+
+export async function listAutomationUnits(): Promise<AutomationUnitChoice[]> {
+  const { data } = await api.get<AutomationUnitChoice[]>('/api/qaloop/automation-units')
+  return data
+}
+
+export async function listSessionsPage(
+  projectId: number, take: number, skip: number,
+): Promise<{ total: number; items: ApiSessionSummary[] }> {
+  const { data } = await api.get<{ total: number; items: ApiSessionSummary[] }>(
+    `/api/qaloop/sessions/${projectId}`, { params: { take, skip } })
+  return data
+}
+
+export async function getSessionDetail(id: number): Promise<ApiSessionDetail> {
+  const { data } = await api.get<ApiSessionDetail>(`/api/qaloop/sessions/detail/${id}`)
+  return data
+}
+
+/** Full-replace PATCH: send EVERY row (not just the selected ones) — omitted rows are dropped
+ * from the matrix entirely, so deselecting a row must still resend it with Selected=false. */
+export async function saveAnalysis(id: number, module: string, rows: SurfaceRow[]): Promise<void> {
+  await api.patch(`/api/qaloop/sessions/${id}/analysis`, { module, rows })
+}
+
+export async function generateDrafts(id: number, generateContext?: string): Promise<void> {
+  await api.post(`/api/qaloop/sessions/${id}/generate-drafts`, generateContext ? { generateContext } : {})
+}
+
+export async function rerunAnalyze(id: number, feedback: string): Promise<void> {
+  await api.post(`/api/qaloop/sessions/${id}/rerun-analyze`, { feedback })
+}
+
+export interface ApiDraftFeedback {
+  draftId: number
+  feedback?: string
+  remove?: boolean
+}
+
+export async function refineDrafts(
+  id: number,
+  req: { overallFeedback?: string; perDraft: ApiDraftFeedback[] },
+): Promise<void> {
+  await api.post(`/api/qaloop/sessions/${id}/refine-drafts`, req)
+}
+
+/** Re-author UI cases with reviewer feedback (AwaitingReview). Independent of API refine-drafts. */
+export async function refineUiCases(
+  id: number,
+  req: { overallFeedback?: string; perDraft: ApiDraftFeedback[] },
+): Promise<void> {
+  await api.post(`/api/qaloop/sessions/${id}/refine-ui-cases`, req)
+}
+
+/** Skip-null PATCH — omit keys to leave them unchanged. No sessionId in the route: drafts are
+ * addressed by their own id. */
+export async function patchDraft(draftId: number, req: UpdateApiDraftRequest): Promise<ApiTestDraftDto> {
+  const { data } = await api.patch<ApiTestDraftDto>(`/api/qaloop/drafts/${draftId}`, req)
+  return data
+}
+
+export async function approveAllDrafts(id: number): Promise<void> {
+  await api.post(`/api/qaloop/sessions/${id}/approve-all`)
+}
+
+/** Skip-null PATCH — set testPlanId/testSuiteId/workItemId on a session that was started without them. */
+export async function updateSessionPlan(
+  id: number, req: { testPlanId?: number; testSuiteId?: number; workItemId?: number },
+): Promise<ApiSessionDetail> {
+  const { data } = await api.patch<ApiSessionDetail>(`/api/qaloop/sessions/${id}/plan`, req)
+  return data
+}
+
+/** INT-202 — fetch Plan suite tree, map → automation units, persist suiteUnitMapJson. */
+export async function mapPlanSuites(
+  id: number, useAi = true,
+): Promise<{ map: unknown; ambiguousCount: number; session: ApiSessionDetail }> {
+  const { data } = await api.post<{ map: unknown; ambiguousCount: number; session: ApiSessionDetail }>(
+    `/api/qaloop/sessions/${id}/plan-map`, null, { params: { useAi } })
+  return data
+}
+
+/** INT-203 — import Plan TCs for unit (thin/rich/gap); dedup by adoTestCaseId. */
+export async function importPlanCases(
+  id: number, unit?: string, remap = true,
+): Promise<{ meta: { thinImproved: number; richLinked: number; gapsCreated: number; selectedUnit?: string }; session: ApiSessionDetail }> {
+  const { data } = await api.post<{
+    meta: { thinImproved: number; richLinked: number; gapsCreated: number; selectedUnit?: string }
+    session: ApiSessionDetail
+  }>(`/api/qaloop/sessions/${id}/plan-import`, null, { params: { unit, remap } })
+  return data
+}
+
+/** Reads Plan/Suite/Story from the session itself — no body. */
+export async function pushSession(id: number, lane?: 'api' | 'ui'): Promise<void> {
+  await api.post(`/api/qaloop/sessions/${id}/push`, lane ? { lane } : {})
+}
+
+/** Product-repo dirtiness under automation/ after Push (L10 — Push ≠ CI). */
+export interface AutomationGitStatus {
+  productMode: boolean
+  automationRoot?: string | null
+  repoRoot?: string | null
+  changedUnderAutomation: string[]
+  hint: string
+  automationPipelineUrl?: string | null
+  currentBranch?: string | null
+  baseBranch?: string | null
+  commitsAheadOfBase?: string[] | null
+  prDraftReminder?: string | null
+}
+
+export interface AutomationGitSyncResult {
+  ok: boolean
+  message: string
+  status: AutomationGitStatus
+}
+
+export async function getAutomationGitStatus(): Promise<AutomationGitStatus> {
+  const { data } = await api.get<AutomationGitStatus>('/api/qaloop/automation-git-status')
+  return data
+}
+
+/** Merge origin/{baseBranch} into current branch — no push, no PR. */
+export async function syncAutomationGitFromBase(): Promise<AutomationGitSyncResult> {
+  const { data } = await api.post<AutomationGitSyncResult>('/api/qaloop/automation-git-sync')
+  return data
+}
+
+export async function pushDraft(draftId: number): Promise<ApiTestDraftDto> {
+  const { data } = await api.post<ApiTestDraftDto>(`/api/qaloop/drafts/${draftId}/push`)
+  return data
+}
+
+export async function cancelSession(id: number): Promise<void> {
+  await api.post(`/api/qaloop/sessions/${id}/cancel`)
+}
+
+export async function deleteSession(id: number): Promise<void> {
+  await api.delete(`/api/qaloop/sessions/${id}`)
+}
+
+export async function authorUiCases(id: number): Promise<void> {
+  await api.post(`/api/qaloop/sessions/${id}/author-ui-cases`, {})
+}
+
+export async function generateUiScripts(id: number): Promise<void> {
+  await api.post(`/api/qaloop/sessions/${id}/generate-ui-scripts`, {})
+}
+
+export async function healSpecs(id: number, draftIds: number[], userContext?: string): Promise<void> {
+  await api.post(`/api/qaloop/sessions/${id}/heal-specs`, { draftIds, userContext })
+}
+
+// ── KBG-108: new endpoints ─────────────────────────────────────────────────────
+
+export async function getFrsModules(projectId: number): Promise<string[]> {
+  const { data } = await api.get<string[]>(`/api/qaloop/${projectId}/frs-modules`)
+  return data
+}
+
+export async function patchUiSuite(id: number, suiteId: number | null): Promise<void> {
+  await api.patch(`/api/qaloop/sessions/${id}/ui-suite`, { suiteId })
+}
+
+export async function rerunUiAnalysis(id: number, feedback: string): Promise<void> {
+  await api.post(`/api/qaloop/sessions/${id}/rerun-ui-analysis`, { feedback })
+}
+
+/** Save reviewer edits to UiAnalysisJson (AwaitingUiAnalysisReview). */
+export async function saveUiAnalysis(id: number, analysis: Record<string, unknown>): Promise<void> {
+  await api.patch(`/api/qaloop/sessions/${id}/ui-analysis`, analysis)
+}
+
+export async function runUiScripts(id: number): Promise<void> {
+  await api.post(`/api/qaloop/sessions/${id}/run-ui-scripts`, {})
+}
+
+export async function explainFailure(id: number, draftId: number): Promise<{ draftId: number; explanation: string }> {
+  const { data } = await api.post<{ draftId: number; explanation: string }>(
+    `/api/qaloop/sessions/${id}/explain-failure`, { draftId })
+  return data
+}
+
+export const sessionStreamUrl = (id: number) => apiUrl(`/api/qaloop/sessions/${id}/stream`)

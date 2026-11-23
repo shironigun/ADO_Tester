@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    PostgreSQL-only EF Core migrations assembly.
+    Used at runtime and design-time via MigrationsAssembly("QaAutomation.Migrations.Npgsql").
+
+    To generate a migration locally, run from the backend/ folder:
+      dotnet ef migrations add DescribeTheChange
+        with -p src/QaAutomation.Migrations.Npgsql -s src/QaAutomation.Api
+    The Npgsql provider is available transitively via the Infrastructure reference.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\QaAutomation.Infrastructure\QaAutomation.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>
