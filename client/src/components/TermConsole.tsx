@@ -3,6 +3,7 @@ import { Box, Typography } from '@mui/material'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
+import { signOutIfSessionInvalid } from '../api/auth'
 
 /**
  * Live raw-ANSI terminal for Scripts Board runs (SB-307).
@@ -58,6 +59,7 @@ export default function TermConsole({
         }
       } catch { /* ignore */ }
     }
+    es.onerror = () => { void signOutIfSessionInvalid() } // expired token → back to login
     return () => { es.close() }
   }, [streamUrl])
 

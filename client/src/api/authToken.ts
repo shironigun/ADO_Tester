@@ -12,6 +12,18 @@ export function getToken(): string | null {
   }
 }
 
+/** Expiry (epoch ms) from the stored JWT's `exp` claim, or null if there's no readable token. */
+export function getTokenExpiryMs(): number | null {
+  const token = getToken()
+  if (!token) return null
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
+    return typeof payload.exp === 'number' ? payload.exp * 1000 : null
+  } catch {
+    return null
+  }
+}
+
 export function setToken(token: string | null): void {
   try {
     if (token) localStorage.setItem(TOKEN_KEY, token)

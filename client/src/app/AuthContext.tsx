@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import { getSession, login as apiLogin, logout as apiLogout, type AuthSession } from '../api/auth'
+import { getTokenExpiryMs, setToken } from '../api/authToken'
 
 // Auth state for the whole SPA. The login gate (App.tsx) reads `session` to decide whether to show
 // the login screen; the AppBar account menu calls `logout`. Login issues a JWT that the api layer
@@ -39,6 +40,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.addEventListener('auth:unauthorized', onUnauthorized)
     return () => window.removeEventListener('auth:unauthorized', onUnauthorized)
   }, [])
+
+  // Don't wait for a failing API call: sign out the moment the token's `exp` passes (an idle page or an
+  // SSE-only view never makes one). Hidden tabs throttle timers, so also re-check when the tab is shown.
+  useEffect(() => {
+    if (!session?.authRequired || !session.authenticated) return
+    const exp = getTokenExpiryMs()
+    if (exp === null) return
+    const expire = () => {
+      setToken(null)
+      setSession({ authRequired: true, authenticated: false, username: null })
+    }
+    if (exp <= Date.now()) { expire(); return }
+    // setTimeout overflows past ~24.8 days; a longer lifetime just re-arms on the next session change.
+    const timer = window.setTimeout(expire, Math.min(exp - Date.now(), 2 ** 31 - 1))
+    const onVisible = () => { if (document.visibilityState === 'visible' && Date.now() >= exp) expire() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { window.clearTimeout(timer); document.removeEventListener('visibilitychange', onVisible) }
+  }, [session])
 
   const login = useCallback(async (username: string, password: string) => {
     setSession(await apiLogin(username, password))

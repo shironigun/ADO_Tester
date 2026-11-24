@@ -16,6 +16,21 @@ export async function getSession(): Promise<AuthSession> {
   return data
 }
 
+/**
+ * For callers outside the axios client (EventSource streams): a 401 there never reaches the response
+ * interceptor, so ask the server whether we're still signed in and, if not, send the app to login.
+ * /api/auth/session is anonymous, so an expired token answers 200 {authenticated:false}, not 401.
+ */
+export async function signOutIfSessionInvalid(): Promise<void> {
+  try {
+    const s = await getSession()
+    if (s.authRequired && !s.authenticated) {
+      setToken(null)
+      window.dispatchEvent(new Event('auth:unauthorized'))
+    }
+  } catch { /* server unreachable: not a sign-out signal */ }
+}
+
 export async function login(username: string, password: string): Promise<AuthSession> {
   const { data } = await api.post<AuthSession>('/api/auth/login', { username, password })
   if (data.token) setToken(data.token)

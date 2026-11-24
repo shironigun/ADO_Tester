@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { signOutIfSessionInvalid } from '../api/auth'
 
 export interface ConsoleEvent {
   seq: number
@@ -50,7 +51,10 @@ export function useEventStream(
         }
       } catch { /* ignore malformed frame */ }
     }
-    es.onerror = () => setConnected(false) // browser auto-reconnects with Last-Event-ID
+    es.onerror = () => {
+      setConnected(false) // browser auto-reconnects with Last-Event-ID
+      void signOutIfSessionInvalid() // a 401 here (expired token) would otherwise retry forever
+    }
     return () => { es.close(); setConnected(false) }
   }, [streamUrl])
 
