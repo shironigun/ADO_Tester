@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using QaAutomation.Core;
 using QaAutomation.Core.Abstractions;
 using QaAutomation.Core.Agents;
@@ -93,8 +94,17 @@ public sealed class CodeContextService : ICodeContextService
                 if (!Have(sp)) changed.Add(new ChangedFile(sp, "seed"));
         }
 
+        // Most relevant first, so the cut below (and every later byte budget) drops the least useful files.
+        // A 28-file PR used to keep the first 20 in API order, which put config before the service it changed.
+        changed = RankChanged(changed, StoryTerms(wi.Title, analysis?.Feature, analysis?.Module));
         if (changed.Count > MaxFiles)
+        {
+            var skipped = changed.Skip(MaxFiles).Select(c => c.Path[(c.Path.LastIndexOf('/') + 1)..]).ToList();
+            Pub(key, EventKinds.System, EventPhases.Discover,
+                $"{changed.Count} files changed; reading the {MaxFiles} most relevant. Skipped: " +
+                $"{string.Join(", ", skipped.Take(8))}{(skipped.Count > 8 ? ", …" : "")}");
             changed = changed.Take(MaxFiles).ToList();
+        }
         if (changed.Count == 0)
         {
             Pub(key, EventKinds.System, EventPhases.Discover, "No code anchor found — verifying against expected behavior only", EventLevels.Warn);
@@ -106,17 +116,28 @@ public sealed class CodeContextService : ICodeContextService
         // 3. Read changed files; collect dependency candidates from their imports.
         var contents = new Dictionary<string, string>();
         var importCands = new List<string>();
+        var fromRef = new List<string>();
+        var unreadable = new List<(string Name, string Why)>();
         foreach (var c in changed)
         {
             if (c.ChangeType == "delete") continue;
-            string txt;
-            try { txt = await _ado.GetFileContentAsync(c.Path, ct: ct); } catch (Exception) when (!ct.IsCancellationRequested) { continue; }
-            if (string.IsNullOrEmpty(txt)) continue;
+            var (txt, usedRef, why) = await ReadChangedFileAsync(c, ct);
+            if (txt is null) { unreadable.Add((c.Path[(c.Path.LastIndexOf('/') + 1)..], why)); continue; }
+            if (usedRef) fromRef.Add(c.Path[(c.Path.LastIndexOf('/') + 1)..]);
             contents[c.Path] = Slice(txt, MaxBytesPerFile);
             foreach (var spec in BugHelpers.ExtractRelativeImports(txt))
                 foreach (var cand in BugHelpers.ResolveImport(spec, c.Path))
                     if (!importCands.Contains(cand)) importCands.Add(cand);
         }
+        // Say it out loud: these files are listed as changed, so a silent drop looks like "code verified, nothing found".
+        if (fromRef.Count > 0)
+            Pub(key, EventKinds.System, EventPhases.Discover,
+                $"{fromRef.Count} file(s) are not on the branch under test; read from the PR/commit instead: {Names(fromRef)}");
+        if (unreadable.Count > 0)
+            Pub(key, EventKinds.System, EventPhases.Discover,
+                $"Could not read {unreadable.Count} changed file(s): {Names(unreadable.Select(u => u.Name))}. " +
+                $"Verdicts that depend on them will be inconclusive. First reason: {Slice(unreadable[0].Why, 160)}",
+                EventLevels.Warn);
 
         // 4. Callers (regression surface): symbol search on each changed file's base name.
         var callerCands = new List<string>();
@@ -193,6 +214,97 @@ public sealed class CodeContextService : ICodeContextService
             Pub(key, EventKinds.System, EventPhases.Triage, $"Triage skipped ({e.Message}) — using deterministic picks", EventLevels.Warn);
         }
         return candidateLines.Select(ln => ln.Split("] ", 2)[^1]).Take(8).ToList();
+    }
+
+    // ── ranking ──────────────────────────────────────────────────────────────
+
+    // Never the logic under test: generated code, lockfiles, binaries, snapshots, EF migrations.
+    private static readonly Regex NoiseRx = new(
+        @"(^|/)(bin|obj|node_modules|dist)/|/migrations/|\.designer\.cs$|\.g\.cs$|\.generated\.|modelsnapshot\.cs$|\.min\.(js|css)$|" +
+        @"\.lock$|package-lock\.json$|\.(png|jpe?g|gif|svg|ico|woff2?|ttf|pdf|dll|exe|zip|snap)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    // Startup, DI and config wiring: rarely the behaviour a test case asserts, and it used to crowd out the real change.
+    private static readonly Regex WiringRx = new(
+        @"(^|/)(program|startup)\.cs$|configurationextensions|/configurations?/|appsettings[^/]*\.json$|package\.json$|\.csproj$|\.sln$|\.props$|\.targets$|" +
+        @"\.ya?ml$|dockerfile|\.md$|\.resx$|\.config$|(^|/)(vite|webpack|tsconfig|eslint|jest)[^/]*$|\.gitignore$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex TestRx = new(
+        @"(^|/)(tests?|__tests__|specs?|e2e|mocks?|fixtures?)/|\.tests?/|\.(spec|test)\.[a-z]+$|tests?\.cs$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    // Behaviour-bearing code (matched on the file name), UI behaviour, and the contracts they exchange.
+    private static readonly Regex LogicRx = new(
+        @"service|handler|repository|controller|processor|manager|validator|command|query|usecase|workflow|saga|resolver|mapper|rule|provider|facade|orchestrator|worker|function|job",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex UiRx = new(@"modal|dialog|form|slice|hook|page|view", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex ContractRx = new(@"request|response|dto|model|contract|schema|entity|enum|interface", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly HashSet<string> StopWords = new(StringComparer.Ordinal)
+        { "with", "from", "into", "that", "this", "when", "then", "have", "will", "should", "able", "user", "users", "feature", "story", "support" };
+
+    /// <summary>Words from the story (title, analysed feature/module) that, found in a file path, mark it as on-topic.
+    /// Plurals are folded ("customers" → "customer") so they match typical class/file names.</summary>
+    internal static IReadOnlyList<string> StoryTerms(params string?[] texts) =>
+        texts.Where(t => !string.IsNullOrWhiteSpace(t))
+            .SelectMany(t => Regex.Split(t!.ToLowerInvariant(), "[^a-z0-9]+"))
+            .Select(w => w.Length > 4 && w.EndsWith('s') ? w[..^1] : w)
+            .Where(w => w.Length >= 4 && !StopWords.Contains(w))
+            .Distinct().ToList();
+
+    /// <summary>Higher = read first. Logic and contracts beat wiring, tests and generated files; paths that
+    /// contain the story's own words get a boost (capped at three words so one broad term can't dominate).</summary>
+    internal static int RelevanceScore(ChangedFile f, IReadOnlyList<string> terms)
+    {
+        var p = f.Path.Replace('\\', '/').ToLowerInvariant();
+        if (NoiseRx.IsMatch(p)) return -100;
+        if (f.ChangeType.Contains("delete", StringComparison.Ordinal)) return -50;
+        var name = p[(p.LastIndexOf('/') + 1)..];
+        var score = 0;
+        if (WiringRx.IsMatch(p)) score -= 20;
+        if (TestRx.IsMatch(p))
+            score -= 10;   // below the code it covers; a name like "FooServiceTests" must not earn the "service" bonus
+        else
+        {
+            if (LogicRx.IsMatch(name)) score += 10;
+            if (UiRx.IsMatch(name)) score += 6;
+            if (name.EndsWith(".sql", StringComparison.Ordinal)) score += 8;
+            if (ContractRx.IsMatch(name)) score += 4;
+        }
+        score += 6 * Math.Min(3, terms.Count(t => p.Contains(t, StringComparison.Ordinal)));
+        return score;
+    }
+
+    /// <summary>Most relevant first; ties keep the order the API returned (stable).</summary>
+    internal static List<ChangedFile> RankChanged(IReadOnlyList<ChangedFile> files, IReadOnlyList<string> terms) =>
+        files.Select((f, i) => (f, i, s: RelevanceScore(f, terms)))
+            .OrderByDescending(x => x.s).ThenBy(x => x.i).Select(x => x.f).ToList();
+
+    /// <summary>Reads a changed file on the branch under test; if that fails (e.g. the PR adds it and it isn't
+    /// merged there yet) falls back to the PR/commit it came from. Returns the reason when neither works.</summary>
+    private async Task<(string? Text, bool UsedRef, string Why)> ReadChangedFileAsync(ChangedFile c, CancellationToken ct)
+    {
+        var why = "";
+        try
+        {
+            var t = await _ado.GetFileContentAsync(c.Path, ct: ct);
+            if (!string.IsNullOrEmpty(t)) return (t, false, "");
+            why = "empty on the branch under test";
+        }
+        catch (Exception e) when (!ct.IsCancellationRequested) { why = e.Message; }
+
+        if (c.Ref is not null)
+        {
+            try
+            {
+                var t = await _ado.GetFileContentAsync(c.Path, c.Ref, versionType: "commit", ct: ct);
+                if (!string.IsNullOrEmpty(t)) return (t, true, "");
+                why += $"; empty at {Short(c.Ref)}";
+            }
+            catch (Exception e) when (!ct.IsCancellationRequested) { why += $"; at {Short(c.Ref)}: {e.Message}"; }
+        }
+        return (null, false, why);
+    }
+
+    private static string Names(IEnumerable<string> names)
+    {
+        var all = names.ToList();
+        return string.Join(", ", all.Take(8)) + (all.Count > 8 ? ", …" : "");
     }
 
     private void Pub(string key, string kind, string? phase = null, string text = "",

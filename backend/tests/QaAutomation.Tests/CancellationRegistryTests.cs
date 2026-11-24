@@ -49,6 +49,30 @@ public sealed class CancellationRegistryTests
     }
 
     [Fact]
+    public void TryRegister_claims_a_free_session_and_refuses_a_busy_one_without_cancelling_it()
+    {
+        var reg = new CancellationRegistry();
+
+        Assert.True(reg.TryRegister(1, out var first));
+        Assert.False(reg.TryRegister(1, out var second));   // busy: refused…
+        Assert.Null(second);
+        Assert.False(first!.Token.IsCancellationRequested); // …and the run in flight is left alone (Register would cancel it)
+        Assert.True(reg.TryRegister(2, out _));              // other sessions are independent
+    }
+
+    [Fact]
+    public void TryRegister_succeeds_again_once_the_session_is_released()
+    {
+        var reg = new CancellationRegistry();
+        Assert.True(reg.TryRegister(1, out _));
+
+        reg.Remove(1);
+
+        Assert.True(reg.TryRegister(1, out var again));
+        Assert.False(again!.Token.IsCancellationRequested);
+    }
+
+    [Fact]
     public void Remove_clears_running_state()
     {
         var reg = new CancellationRegistry();

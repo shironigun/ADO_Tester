@@ -28,6 +28,22 @@ public class CancellationRegistry
         return cts;
     }
 
+    /// <summary>Atomically claim a session for a new job. Unlike <see cref="Register"/> it never cancels
+    /// or replaces a job already in flight: it returns false (and no source) when one is registered, so
+    /// a duplicate request can be refused instead of killing the run it collided with.</summary>
+    public bool TryRegister(int sessionId, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out CancellationTokenSource? cts)
+    {
+        var fresh = new CancellationTokenSource();
+        if (_registry.TryAdd(sessionId, fresh))
+        {
+            cts = fresh;
+            return true;
+        }
+        fresh.Dispose();
+        cts = null;
+        return false;
+    }
+
     /// <summary>Signal cancellation for a session. Returns true if a live (not-yet-cancelled) token existed.</summary>
     public bool Cancel(int sessionId)
     {

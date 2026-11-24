@@ -73,9 +73,16 @@ public sealed class FindBugsController : ControllerBase
     public async Task<IActionResult> Run(int sessionId, [FromBody] BugRunRequest request, CancellationToken cancellationToken)
     {
         // verifyCode is forced true (the code-analysis phase is always on — matches the Python router).
-        await _bugs.RunBugWriterAsync(
-            sessionId, request.ActualBehavior ?? "", request.CodeContext, verifyCode: true,
-            request.CommitIds, request.PrIds, request.SelectedTestCases, cancellationToken);
+        try
+        {
+            await _bugs.RunBugWriterAsync(
+                sessionId, request.ActualBehavior ?? "", request.CodeContext, verifyCode: true,
+                request.CommitIds, request.PrIds, request.SelectedTestCases, cancellationToken);
+        }
+        catch (SessionBusyException e)
+        {
+            return StatusCode(409, new { detail = e.Message });
+        }
         return StatusCode(202, new AcceptedResponse { Started = true });
     }
 
@@ -169,7 +176,14 @@ public sealed class FindBugsController : ControllerBase
     [HttpPost("sessions/{sessionId:int}/push")]
     public async Task<IActionResult> Push(int sessionId, CancellationToken cancellationToken)
     {
-        await _bugs.PushToAdoAsync(sessionId, cancellationToken);
+        try
+        {
+            await _bugs.PushToAdoAsync(sessionId, cancellationToken);
+        }
+        catch (SessionBusyException e)
+        {
+            return StatusCode(409, new { detail = e.Message });
+        }
         return StatusCode(202, new AcceptedResponse { Started = true });
     }
 

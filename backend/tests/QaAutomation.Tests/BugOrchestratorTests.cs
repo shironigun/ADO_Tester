@@ -67,6 +67,30 @@ public sealed class BugOrchestratorTests
     }
 
     [Fact]
+    public async Task Second_run_while_one_is_in_flight_is_refused_and_leaves_the_first_alone()
+    {
+        var gate = new GatedCodeContextService();
+        using var h = Harness.Create(new StubLlmClient(AnalystJson, EmptyVerdicts, BugsJson), gate);
+        var sid = await h.Bugs.StartAsync(1, 160728, auto: false);
+        await h.WaitForTerminalAsync(sid);
+
+        await h.Bugs.RunBugWriterAsync(sid, "Observed: stale", null, verifyCode: true);
+        await gate.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));   // the first run is now parked in discovery
+
+        // The status flipped before the call returned, so a client refetch can't still show "AwaitingActual".
+        Assert.Equal(BugSessionStatus.Verifying, (await h.WaitForTerminalAsync(sid, BugSessionStatus.Verifying)).Status);
+
+        // A duplicate (double-click / retry) is refused, not allowed to cancel the run in flight.
+        await Assert.ThrowsAsync<SessionBusyException>(
+            () => h.Bugs.RunBugWriterAsync(sid, "Observed: again", null, verifyCode: true));
+
+        gate.Release.SetResult();
+        var session = await h.WaitForTerminalAsync(sid, BugSessionStatus.Drafted);
+        Assert.Equal(BugSessionStatus.Drafted, session.Status);   // the first run finished; it was never cancelled
+        Assert.DoesNotContain("Cancelled", session.CurrentActivity);
+    }
+
+    [Fact]
     public async Task Push_creates_bugs_and_links_to_story()
     {
         using var h = Harness.Create(new StubLlmClient(AnalystJson, EmptyVerdicts, BugsJson));
@@ -145,7 +169,7 @@ public sealed class BugOrchestratorTests
         private PostgresTestDatabase Pg { get; init; } = null!;
         private string DataDir { get; init; } = "";
 
-        public static Harness Create(StubLlmClient llm)
+        public static Harness Create(StubLlmClient llm, ICodeContextService? codeContext = null)
         {
             var pg = PostgresTestDatabase.Create("bug_orchestrator");
             var dataDir = Path.Combine(Path.GetTempPath(), $"qa_bug_data_{Guid.NewGuid():N}");
@@ -166,7 +190,7 @@ public sealed class BugOrchestratorTests
             var bugs = new BugOrchestrator(
                 provider.GetRequiredService<IServiceScopeFactory>(),
                 new EventBus(), new PipelineConcurrency(), new CancellationRegistry(),
-                ado, new StubLlmClientFactory(llm), new NullCodeContextService(),
+                ado, new StubLlmClientFactory(llm), codeContext ?? new NullCodeContextService(),
                 NullLogger<BugOrchestrator>.Instance);
 
             return new Harness { Provider = provider, Bugs = bugs, Ado = ado, Pg = pg, DataDir = dataDir };
@@ -204,6 +228,24 @@ public sealed class BugOrchestratorTests
             string? extraHintText, bool alwaysSearch,
             ILlmClient llm, string key, CancellationToken ct)
             => Task.FromResult(("", ""));
+    }
+
+    /// <summary>Holds a run inside code discovery until released, so a second request can collide with it.</summary>
+    private sealed class GatedCodeContextService : ICodeContextService
+    {
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<(string DiffSummary, string Code)> DiscoverAsync(
+            int workItemId, Core.Models.AdoWorkItem wi, Core.Models.AnalystOutput? analysis,
+            IReadOnlyList<string> commitIds, IReadOnlyList<string> prIds,
+            string? extraHintText, bool alwaysSearch,
+            ILlmClient llm, string key, CancellationToken ct)
+        {
+            Entered.TrySetResult();
+            await Release.Task.WaitAsync(ct);
+            return ("", "");
+        }
     }
 
     private sealed class StubLlmClientFactory(ILlmClient client) : ILlmClientFactory

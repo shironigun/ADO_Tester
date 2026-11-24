@@ -554,6 +554,7 @@ function BugDetailBody({ session, refetch, onError }: DetailBodyProps) {
   const [commitIdsText, setCommitIdsText] = useState('')
   const [linkedRefs, setLinkedRefs] = useState<{ pullRequestIds: string[]; commitShas: string[]; changes: LinkedChange[] }>({ pullRequestIds: [], commitShas: [], changes: [] })
   const [pushing, setPushing] = useState(false)
+  const [starting, setStarting] = useState(false)   // between the click and the session leaving AwaitingActual
   const [showOverride, setShowOverride] = useState(false)
   const [bugsOpen, setBugsOpen] = useState(false)
   const [sevFilter, setSevFilter] = useState<Severity | 'all'>('all')
@@ -604,13 +605,15 @@ function BugDetailBody({ session, refetch, onError }: DetailBodyProps) {
 
   const splitIds = (t: string) => t.split(/[\s,]+/).map(x => x.trim()).filter(Boolean)
   const runBugWriter = async () => {
+    if (starting) return   // a second click used to start a duplicate run that cancelled the first
+    setStarting(true)
     try {
       // Persist the chosen branch first so code-verification reads from it (live-applies to the ADO client).
       if (branch) await saveConfig({ 'ado.default_branch': branch })
       // Code verification is always on (anchored on the ticket's change). actualBehavior is optional.
       await apiRunBugWriter(session.id, { actualBehavior: actualText, verifyCode: true, prIds: splitIds(prIdsText), commitIds: splitIds(commitIdsText), selectedTestCases: selectedCaseKeys })
       refetch()
-    } catch (e) { onError(e, 'Run Bug Writer failed') }
+    } catch (e) { onError(e, 'Run Bug Writer failed') } finally { setStarting(false) }
   }
   const cancel = async () => { try { await cancelSession(session.id); refetch() } catch (e) { onError(e, 'Cancel failed') } }
   const approveDraft = async (id: number) => { try { await patchDraft(id, { status: 'Approved' }); refetch() } catch (e) { onError(e, 'Approve failed') } }
@@ -803,8 +806,9 @@ function BugDetailBody({ session, refetch, onError }: DetailBodyProps) {
                     </Typography>
                   )}
                   <Button variant="contained" startIcon={<BugReportIcon />} onClick={runBugWriter}
-                    disabled={caseTotal > 0 && selectedCaseKeys.length === 0}>
-                    {caseTotal === 0
+                    disabled={starting || (caseTotal > 0 && selectedCaseKeys.length === 0)}>
+                    {starting ? 'Starting…'
+                      : caseTotal === 0
                       ? (drafts.length > 0 ? 'Re-run verification + Bug Writer' : 'Verify against code + draft bugs')
                       : selectedCaseKeys.length === 0 ? 'Select test cases to verify'
                       : selectedCaseKeys.length === caseTotal ? `Verify all ${caseTotal} + draft bugs`

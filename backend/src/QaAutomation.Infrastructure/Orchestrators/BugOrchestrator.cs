@@ -88,14 +88,26 @@ public sealed class BugOrchestrator : IBugOrchestrator
         return sessionId;
     }
 
-    public Task RunBugWriterAsync(
+    public async Task RunBugWriterAsync(
         int sessionId, string actualBehavior, string? codeContext, bool verifyCode = false,
         IReadOnlyList<string>? commitIds = null, IReadOnlyList<string>? prIds = null,
         IReadOnlyList<string>? selectedTestCases = null, CancellationToken cancellationToken = default)
     {
-        Launch(sessionId, token => RunBugWriterInnerAsync(
+        // Claim first: a second request (double-click, retry) is refused instead of cancelling the run in flight.
+        var claim = Claim(sessionId);
+        try
+        {
+            // Flip the status before returning so the client's refetch sees "Verifying" at once; the
+            // pipeline used to set it a few steps in, leaving the UI on "AwaitingActual" and inviting a second click.
+            await MarkStartedAsync(sessionId, BugSessionStatus.Verifying, "Starting verification…", cancellationToken);
+        }
+        catch
+        {
+            _cancellations.Remove(sessionId);
+            throw;
+        }
+        Run(sessionId, claim.Token, token => RunBugWriterInnerAsync(
             sessionId, actualBehavior, codeContext, commitIds ?? [], prIds ?? [], selectedTestCases ?? [], token));
-        return Task.CompletedTask;
     }
 
     public Task PushToAdoAsync(int sessionId, CancellationToken cancellationToken = default)
@@ -104,14 +116,31 @@ public sealed class BugOrchestrator : IBugOrchestrator
         return Task.CompletedTask;
     }
 
-    private void Launch(int sessionId, Func<CancellationToken, Task> body)
-    {
-        var token = _cancellations.Register(sessionId).Token;
-        _ = Task.Run(async () =>
+    /// <summary>Atomically claims the session for one run; throws <see cref="SessionBusyException"/> if it already has one.</summary>
+    private CancellationTokenSource Claim(int sessionId)
+        => _cancellations.TryRegister(sessionId, out var cts) ? cts : throw new SessionBusyException(sessionId);
+
+    private void Run(int sessionId, CancellationToken token, Func<CancellationToken, Task> body)
+        => _ = Task.Run(async () =>
         {
             try { await body(token); }
             finally { _cancellations.Remove(sessionId); }
         });
+
+    private void Launch(int sessionId, Func<CancellationToken, Task> body)
+        => Run(sessionId, Claim(sessionId).Token, body);
+
+    private async Task MarkStartedAsync(int sessionId, BugSessionStatus status, string activity, CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<QaDbContext>();
+        var session = await db.BugSessions.FindAsync([sessionId], ct);
+        if (session is null)
+            return;   // the pipeline body already treats a missing session as a no-op
+        session.Status = status;
+        session.CurrentActivity = activity;
+        session.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
     }
 
     // ── analyst ─────────────────────────────────────────────────────────────

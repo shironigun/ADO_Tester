@@ -980,18 +980,19 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
     {
         var rid = await ResolveRepoOrDefaultAsync(repoId, ct);
         var changes = await PrLatestIterationChangesAsync(rid, prId, ct);
-        return changes is null ? [] : ChangePaths(changes.Value);
+        return changes is null ? [] : ChangePaths(changes.Value.Changes);
     }
 
     public async Task<IReadOnlyList<ChangedFile>> GetPullRequestDiffAsync(string prId, string? repoId = null, CancellationToken ct = default)
     {
         var rid = await ResolveRepoOrDefaultAsync(repoId, ct);
         var changes = await PrLatestIterationChangesAsync(rid, prId, ct);
-        return changes is null ? [] : ChangeEntries(changes.Value);
+        return changes is null ? [] : ChangeEntries(changes.Value.Changes, changes.Value.SourceCommit);
     }
 
-    /// <summary>PR latest-iteration "changeEntries" array (or null if no iterations).</summary>
-    private async Task<JsonElement?> PrLatestIterationChangesAsync(string rid, string prId, CancellationToken ct)
+    /// <summary>PR latest-iteration "changeEntries" array plus that iteration's source-branch tip commit
+    /// (null if no iterations). The commit lets callers read a file the PR adds before it is merged anywhere.</summary>
+    private async Task<(JsonElement Changes, string? SourceCommit)?> PrLatestIterationChangesAsync(string rid, string prId, CancellationToken ct)
     {
         var baseUrl = $"{Opts.BaseUrl}/_apis/git/repositories/{rid}/pullRequests/{prId}";
         using var itDoc = await GetDocAsync($"{baseUrl}/iterations?api-version={Opts.ApiVersion}", $"PR {prId} iterations", ct);
@@ -999,10 +1000,14 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
         if (iters.Count == 0)
             return null;
         var last = iters.Max(i => i.GetProperty("id").GetInt32());
+        var lastIter = iters.First(i => i.GetProperty("id").GetInt32() == last);
+        var sourceCommit = lastIter.TryGetProperty("sourceRefCommit", out var src) && src.ValueKind == JsonValueKind.Object
+            ? GetStr(src, "commitId") : null;
         using var chDoc = await GetDocAsync($"{baseUrl}/iterations/{last}/changes?api-version={Opts.ApiVersion}", $"PR {prId} changes", ct);
         // PR changes live under "changeEntries" (distinct from commit "changes").
-        return chDoc.RootElement.TryGetProperty("changeEntries", out var ce) && ce.ValueKind == JsonValueKind.Array
-            ? ce.Clone() : (JsonElement?)JsonDocument.Parse("[]").RootElement.Clone();
+        var entries = chDoc.RootElement.TryGetProperty("changeEntries", out var ce) && ce.ValueKind == JsonValueKind.Array
+            ? ce.Clone() : JsonDocument.Parse("[]").RootElement.Clone();
+        return (entries, sourceCommit);
     }
 
     public async Task<IReadOnlyList<string>> GetCommitChangedFilesAsync(string sha, string? repoId = null, CancellationToken ct = default)
@@ -1022,7 +1027,7 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
             $"{Opts.BaseUrl}/_apis/git/repositories/{rid}/commits/{sha}/changes?api-version={Opts.ApiVersion}",
             $"Commit {sha} diff", ct);
         return doc.RootElement.TryGetProperty("changes", out var ch) && ch.ValueKind == JsonValueKind.Array
-            ? ChangeEntries(ch) : [];
+            ? ChangeEntries(ch, sha) : [];
     }
 
     public async Task<IReadOnlyList<string>> GetCommitsForPathAsync(string path, int top = 5, string? repoId = null, CancellationToken ct = default)
@@ -1349,7 +1354,7 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
     }
 
     /// <summary>Like ChangePaths but keeps change type and deletes, de-duped by path (Python _change_entries).</summary>
-    private static List<ChangedFile> ChangeEntries(JsonElement changes)
+    private static List<ChangedFile> ChangeEntries(JsonElement changes, string? @ref = null)
     {
         var outList = new List<ChangedFile>();
         var seen = new HashSet<string>();
@@ -1360,7 +1365,7 @@ public sealed partial class AzureDevOpsClient : IAzureDevOpsClient
                 continue;
             var p = item.ValueKind == JsonValueKind.Object ? GetStr(item, "path") : null;
             if (!string.IsNullOrEmpty(p) && seen.Add(p))
-                outList.Add(new ChangedFile(p, (GetStr(c, "changeType") ?? "").ToLowerInvariant()));
+                outList.Add(new ChangedFile(p, (GetStr(c, "changeType") ?? "").ToLowerInvariant(), @ref));
         }
         return outList;
     }

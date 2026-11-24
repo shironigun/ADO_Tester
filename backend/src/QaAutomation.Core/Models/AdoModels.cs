@@ -8,7 +8,9 @@ public sealed record LinkedTestCase(int Id, string Title, string Preconditions, 
 
 /// <summary>One file touched by a PR or commit (the diff anchor).</summary>
 /// <param name="ChangeType">add | edit | delete | rename | "edit, rename" | seed (lowercase).</param>
-public sealed record ChangedFile(string Path, string ChangeType);
+/// <param name="Ref">Commit the change is from (PR source tip / the commit itself), used as a fallback to
+/// read the file when it can't be read on the branch under test (e.g. added by an unmerged PR). Null = unknown.</param>
+public sealed record ChangedFile(string Path, string ChangeType, string? Ref = null);
 
 /// <summary>A PR or commit linked to a work item, enriched with a human title + browser URL.</summary>
 /// <param name="Kind">"pr" | "commit" (lowercase).</param>
