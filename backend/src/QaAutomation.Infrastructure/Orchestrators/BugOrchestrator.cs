@@ -390,7 +390,7 @@ public sealed class BugOrchestrator : IBugOrchestrator
                 : "";
             if (repoCode.Length > 0)
             {
-                codeContext = Slice((codeContext ?? "") + "\n\n" + repoCode, 120_000);
+                codeContext = Slice((codeContext ?? "") + "\n\n" + repoCode, 280_000);
                 session.CodeContext = codeContext;
             }
 

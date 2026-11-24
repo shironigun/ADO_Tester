@@ -22,8 +22,12 @@ namespace QaAutomation.Infrastructure.CodeContext;
 public sealed class CodeContextService : ICodeContextService
 {
     private const int MaxFiles = 20;
-    private const int MaxBytesPerFile = 30_000;
+    // A 30k cap cut large files (e.g. stored procedures) mid-body, so the verifier saw only the top and
+    // returned false "fail" verdicts for logic further down. Files now get what is left of the total budget,
+    // capped per file; ranking already puts the most relevant files first.
+    private const int MaxBytesPerFile = 100_000;
     private const int MaxTotalBytes = 250_000;
+    private const int MinBytesPerFile = 8_000;
 
     private readonly IAzureDevOpsClient _ado;
     private readonly IEventBus _bus;
@@ -118,13 +122,20 @@ public sealed class CodeContextService : ICodeContextService
         var importCands = new List<string>();
         var fromRef = new List<string>();
         var unreadable = new List<(string Name, string Why)>();
+        var cut = new List<string>();
         foreach (var c in changed)
         {
             if (c.ChangeType == "delete") continue;
             var (txt, usedRef, why) = await ReadChangedFileAsync(c, ct);
             if (txt is null) { unreadable.Add((c.Path[(c.Path.LastIndexOf('/') + 1)..], why)); continue; }
             if (usedRef) fromRef.Add(c.Path[(c.Path.LastIndexOf('/') + 1)..]);
-            contents[c.Path] = Slice(txt, MaxBytesPerFile);
+            var budget = Math.Clamp(MaxTotalBytes - contents.Values.Sum(t => t.Length), MinBytesPerFile, MaxBytesPerFile);
+            if (txt.Length > budget)
+            {
+                cut.Add($"{c.Path[(c.Path.LastIndexOf('/') + 1)..]} ({budget:N0} of {txt.Length:N0} chars)");
+                contents[c.Path] = txt[..budget] + $"\n\n/* … TRUNCATED: {txt.Length - budget:N0} more chars not shown. Do not conclude behavior is missing from the unseen part. */";
+            }
+            else contents[c.Path] = txt;
             foreach (var spec in BugHelpers.ExtractRelativeImports(txt))
                 foreach (var cand in BugHelpers.ResolveImport(spec, c.Path))
                     if (!importCands.Contains(cand)) importCands.Add(cand);
@@ -133,6 +144,9 @@ public sealed class CodeContextService : ICodeContextService
         if (fromRef.Count > 0)
             Pub(key, EventKinds.System, EventPhases.Discover,
                 $"{fromRef.Count} file(s) are not on the branch under test; read from the PR/commit instead: {Names(fromRef)}");
+        if (cut.Count > 0)
+            Pub(key, EventKinds.System, EventPhases.Discover,
+                $"{cut.Count} file(s) exceeded the size budget and were truncated: {string.Join(", ", cut.Take(5))}", EventLevels.Warn);
         if (unreadable.Count > 0)
             Pub(key, EventKinds.System, EventPhases.Discover,
                 $"Could not read {unreadable.Count} changed file(s): {Names(unreadable.Select(u => u.Name))}. " +
@@ -171,7 +185,7 @@ public sealed class CodeContextService : ICodeContextService
             string txt;
             try { txt = await _ado.GetFileContentAsync(path, ct: ct); } catch (Exception) when (!ct.IsCancellationRequested) { continue; }
             if (string.IsNullOrEmpty(txt)) continue;
-            var snippet = Slice(txt, MaxBytesPerFile);
+            var snippet = Slice(txt, Math.Clamp(MaxTotalBytes - total, MinBytesPerFile, 30_000));
             blocks.Add($"=== [{(roleOf.TryGetValue(path, out var r) ? r : "related").ToUpperInvariant()}] {path} ===\n{snippet}");
             total += snippet.Length;
             fetched.Add(path);
